@@ -17,13 +17,46 @@ export const feel = {
     followLerp: 0.12,
   },
   pocket: {
-    /** Time from snap until the QB is sacked if he hasn't thrown. */
-    sackTime: 3.0,
-    /** When the "pressure is coming" warning appears. */
-    pressureCueTime: 2.0,
+    /**
+     * Pass rush (replaces the old fixed 3s sack timer; defaults give a sack at ~3s).
+     * Later scaled by pass rush vs offensive line ratings.
+     */
+    /** Average time our blockers hold a rusher before he breaks free. */
+    shedTime: 2.2,
+    /** Random +/- spread on that time, per rusher, per play. */
+    shedTimeVariance: 0.3,
+    /** Rusher speed while blocked / once free, yards per second. */
+    rushBlockedSpeed: 1,
+    rushFreeSpeed: 6,
+    /** A rusher this close to the QB = sack. */
+    sackReachYards: 1.2,
+    /** A rusher this close shows the red pressure warning. */
+    pressureYards: 3.5,
     /** How far the QB drops back after the snap, and how long it takes. */
     dropbackYards: 3,
     dropbackTime: 0.6,
+  },
+  defense: {
+    /** Cornerback lines up this far downfield of the receiver... */
+    cbCushionYards: 5,
+    /** ...and closes that cushion over this many seconds after the snap. */
+    cbCushionCloseTime: 1.5,
+    /** How late he reacts to the receiver's moves (bigger = more open after cuts). */
+    cbReactionTime: 0.25,
+    /** His top speed as a fraction of the receiver's. */
+    cbSpeedRatio: 0.95,
+    /** How long after the throw before he breaks on the ball. */
+    cbBallReactionTime: 0.2,
+    /** Fraction of his speed when breaking on the ball (lower = harder for him to contest). */
+    cbBallSpeedRatio: 0.6,
+    /** A defender within this distance of the landing spot can contest the catch. */
+    contestRadiusYards: 2.5,
+    /** Breakup chance when he's right on the ball (less when further away). */
+    breakupChance: 0.6,
+    /** Interception chance when he's closer to the ball than the receiver. */
+    interceptChance: 0.35,
+    /** Interception chance when the ball lands on him and the receiver isn't there. */
+    overthrowInterceptChance: 0.5,
   },
   routes: {
     /** Receiver top speed, yards per second (later scaled by his speed rating). */

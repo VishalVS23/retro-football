@@ -29,6 +29,15 @@ export function getRng(): Rng {
   return rng;
 }
 
+/**
+ * The save's RNG, or (only in the first instant before the save has loaded) a fixed-seed
+ * fallback so gameplay never crashes. Still seeded, so still reproducible.
+ */
+const fallbackRng = createRng(20261114);
+export function getRngOrFallback(): Rng {
+  return rng ?? fallbackRng;
+}
+
 export function isPersisted() {
   return persisted;
 }
