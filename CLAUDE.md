@@ -375,10 +375,10 @@ Flow decisions:
 | 2–13 | Not started | |
 
 Stage 1 steps:
-- [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop, phone test pending until hosting)
-- [x] 2. PWA install to home screen (2026-11-14; done together with hosting, phone install test pending)
+- [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop and phone)
+- [x] 2. PWA install to home screen (2026-11-14; done together with hosting, works on phone)
 - [x] 3. Feel tuning panel (2026-11-14): `src/debug/feelPanel.ts` + tested helpers in `src/config/feelTools.ts`. Sliders auto-built from `feel.ts`; tweaks saved in localStorage; scenes listen for the `feelchange` window event to react live.
-- [x] 4. Save export/import skeleton + seeded RNG (2026-11-14): `src/sim/rng.ts` (mulberry32, saveable state), `src/save/saveFormat.ts` (version + migrations + 3 rolling backups, tested), `saveStore.ts` (IndexedDB via `idb`), `saveSession.ts` (`getRng()` / `commitSave()`). Export/Import buttons in the ⚙ panel; phones use the share sheet, desktops download.
+- [x] 4. Save export/import skeleton + seeded RNG (2026-11-14): `src/sim/rng.ts` (mulberry32, saveable state), `src/save/saveFormat.ts` (version + migrations + 3 rolling backups, tested), `saveStore.ts` (IndexedDB via `idb`), `saveSession.ts` (`getRng()` / `commitSave()`). Export/Import buttons in the ⚙ panel; phones use the share sheet, desktops download. Tested on PC and phone.
 - [ ] 5. QB throws to one receiver (aim arc, ball shadow, catch)
 - [ ] 6. Routes
 - [ ] 7. Basic defense
@@ -391,3 +391,4 @@ Stage 1 steps:
 - **2026-11-13: Orientation switched to LANDSCAPE** (user's choice, before stage 1). Field runs left-to-right, two-thumb controls, "Rotate your phone" screen in portrait because iPhone can't lock orientation for home-screen web apps.
 - **2026-11-14: Hosting moved up** to right after step 1 (phone wasn't on the same Wi-Fi; PWA install needs HTTPS). Public repo `VishalVS23/retro-football`, GitHub Pages via Actions: every push to `main` runs tests, builds and deploys to https://vishalvs23.github.io/retro-football/. CI uses `npm install` (not `npm ci`) because the Windows lock file lacks Linux-only optional deps. Run tests from PowerShell (Git Bash's lowercase `c:` path crashes Vitest).
 - **2026-11-14: Feel notes added** from a timing study of a reference game (see "Feel notes"). Stage 1 plan approved.
+- **2026-11-14: No code, art or files from Retro Bowl (or any copy of it) are used.** User shared GitHub copies; declined because the game is commercial and the project must be original. One linked "launcher" README showed malware signs (Telegram download, "disable antivirus"). Feel comes only from timing notes plus tuning with the sliders.
