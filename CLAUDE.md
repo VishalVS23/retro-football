@@ -1,0 +1,350 @@
+# Project: Retro arcade football with deep franchise management
+
+> Project brief and living plan. Claude Code: read this whole file at the start of every session.
+> Tick the checkboxes in "Progress tracker" as things are finished, and add dated notes under
+> "Decisions & refinements" whenever the plan changes. Working name: "retro-football" (rename later).
+
+---
+
+## 0. How to work with me (instructions for Claude Code)
+
+- I'm a UVA student with **zero coding experience**. Explain what you're doing in plain English, briefly.
+- **One small step at a time.** Build it, help me test it (on my phone too), then commit to git before the next step.
+- **Before writing code for a new stage, show me a short plan and wait for my approval.**
+- When something breaks, check the browser console and dev server output yourself, then explain the fix simply.
+- If a step needs me to do something outside the code (create an account, click something in a website), give me numbered steps. I can use **Claude in Chrome** for browser tasks.
+- Flag anything that could cost money before doing it.
+- This is a separate project from HooMaps (`C:\Users\vsvis\hoos-riding`). Don't touch that folder from here.
+
+---
+
+A mobile-first browser game. On-field play is simple, snappy, retro arcade football.
+Off the field it is a deep, Football Manager-style management sim adapted to
+American football: a living league, real trades, real stats, meaningful morale,
+season-long storylines, realistic scouting and drafting.
+
+It is installed on the phone's home screen as a PWA (no app store, no APK).
+
+---
+
+## Ground rules (always follow)
+
+- **Everything is original.** Original art, team names, player names, logos, UI and
+  text. Reference footage of other games may be used ONLY to study timing and motion.
+  Never trace, recreate or approximate another game's sprites, logos, fonts or screens.
+- **Fictional league only.** No real league names, team names, logos or real players.
+- **Feel numbers live in one place.** Every feel-related value (speeds, accelerations,
+  arc heights, durations, easing, catch radius, camera follow, screen shake, hit-pause)
+  lives in `src/config/feel.ts`. Never hard-code these elsewhere.
+- **Sim logic is separate from rendering.** `src/sim/`, `src/league/`, `src/players/`,
+  `src/staff/`, `src/finance/`, `src/story/` contain pure TypeScript with no Phaser
+  imports, so they can be unit-tested and run headless (e.g. simulate 10 seasons in
+  a test to check balance).
+- **Seeded randomness.** All randomness goes through a seeded RNG so bugs and
+  balance issues can be reproduced.
+- **Save data is versioned.** Every save has a `version` field and a migration
+  function, so old saves keep working after updates.
+- **Build in small, playable steps.** After each step the game must run. Prefer
+  depth that the player can see and that changes outcomes over hidden complexity.
+- **Mobile performance matters.** Keep the main thread smooth at 60fps. Heavy
+  simulation (week sims, offseason processing) runs in a Web Worker.
+
+---
+
+## Stack
+
+- Phaser 3 + TypeScript + Vite
+- Storage: IndexedDB (via a small wrapper such as `idb`) for saves
+- PWA: web app manifest + service worker (e.g. `vite-plugin-pwa`)
+- Tests: Vitest for sim/league logic
+- Hosting: GitHub Pages, Netlify or Vercel (HTTPS required for PWA install)
+
+## Platform decisions
+
+- **Orientation: LANDSCAPE** (locked; changed from portrait 2026-11-13, before stage 1).
+  - The field runs **left-to-right** across the screen (offense drives toward the right
+    edge), camera scrolls horizontally with the play.
+  - Touch layout uses **two thumbs**: left side of the screen for moving/juking the
+    ball carrier, right side for aiming/throwing and buttons (play call, timeout,
+    throw away). Keep buttons in the bottom corners, clear of the notch side.
+  - Menus and management screens are designed for a wide, short screen: side
+    navigation rail on the left, content on the right; tables can be wide but must
+    scroll vertically, never horizontally.
+  - Manifest `"orientation": "landscape"`. **iPhone ignores this**, and Android only
+    honors it when launched from the home screen, so the game also shows a friendly
+    **"Rotate your phone"** screen whenever it's held in portrait (and pauses play).
+- Touch controls first; mouse works too.
+- Respect safe areas (notches, home indicator) with `env(safe-area-inset-*)`. In
+  landscape the notch is on the LEFT or RIGHT side, depending on which way the phone is turned.
+- Fullscreen standalone display mode when launched from the home screen.
+
+---
+
+## Set up early (do these in stage 1, not later)
+
+1. **Feel tuning panel.** A toggleable debug overlay with sliders for every value in
+   `feel.ts`. Changes apply live. A "copy values" button outputs the current values
+   so they can be saved as new defaults.
+2. **Phone testing.** Dev server runs on the local network (`vite --host`) so the game
+   can be opened on the phone over Wi-Fi.
+3. **Save export / import.** A button that downloads the full save as a `.json` file
+   and a button that loads one back. Browsers (especially iOS Safari) can clear site
+   data, so this protects long dynasties. Also keep an automatic rolling backup of
+   the last 3 saves in IndexedDB.
+4. **Game-feel details from the start:** anticipation squash before the throw, a ball
+   shadow on the ground showing height, ease-in/ease-out on all movement, short
+   hit-pause and light screen shake on big hits, a camera that slightly leads the
+   ball, a catch animation, and a clear throw-arc preview while aiming.
+5. **Deployment.** Set up free hosting early so the game can be played on the phone
+   away from home.
+
+---
+
+## On-field gameplay (arcade layer)
+
+- The player controls their team's **offense** in arcade mode: snap, dropback,
+  drag-to-aim passing with a visible arc, receivers running routes, scrambling,
+  swipe/drag to juke when running, sliding, throwing the ball away.
+- **Defense and kicking are mostly simulated**, with optional light interaction
+  (e.g. timing tap for kicks).
+- **Ratings drive the arcade layer**: QB arm strength and accuracy affect ball speed
+  and spread; receiver speed, route running and hands affect separation and catch
+  chance; offensive line affects pocket time; defenders' ratings affect coverage,
+  pass rush and tackling.
+- **Morale, fatigue and form affect play** (e.g. a low-morale receiver drops more
+  passes, a fatigued line breaks down sooner).
+- **Game situations:** downs, distance, clock, timeouts, two-minute drill, red zone,
+  overtime, weather (rain/snow/wind affecting passing and fumbles).
+- **Play calling:** choose from the team's playbook before each snap; available plays
+  depend on the offensive scheme and coordinator.
+
+---
+
+## Management depth (Football Manager-style systems, adapted to American football)
+
+### Players
+- **Attributes on a 1–20 scale**, grouped as:
+  - Technical / positional (throwing power, short/medium/deep accuracy, release,
+    route running, hands, ball security, blocking, pass rush moves, tackling,
+    coverage, kicking power/accuracy, etc.)
+  - Mental (vision, decisions, composure, anticipation, work rate, leadership,
+    football IQ, aggression, bravery, concentration)
+  - Physical (speed, acceleration, agility, strength, stamina, jumping, natural fitness)
+- **Hidden attributes** the player never sees directly, only infers through reports
+  and behaviour: consistency, injury proneness, big-game performance, professionalism,
+  ambition, loyalty, pressure handling, temperament, adaptability, versatility.
+- **Personality labels** derived from hidden attributes (e.g. "Model Professional",
+  "Volatile", "Ambitious", "Loyal", "Low Determination") shown on the profile.
+- **Current ability and potential ability.** Potential is hidden and only estimated
+  by staff ("could become a solid starter", "elite potential").
+- **Position familiarity**: natural, accomplished, competent, unconvincing, awkward.
+  Players can be retrained to new positions over time.
+- **Player traits / tendencies** (e.g. "throws into tight windows", "gambles on
+  interceptions", "fights for extra yards", "plays through injuries").
+- **Form, condition (fatigue), match sharpness, morale** tracked separately.
+- **Full player profile screen:** attributes, ratings history graph, career stats,
+  contract, injury history, personality, relationships, agent, staff reports.
+
+### Development & training
+- **Age curves by position** (RBs peak and decline early, QBs and kickers late).
+- **Weekly training schedule** with intensity (risk of injury vs development).
+- **Unit and individual training focus** (e.g. a QB focusing on deep accuracy, a
+  DE on pass-rush moves).
+- **Development depends on**: potential, age, training, coaching quality, facilities,
+  playing time, professionalism and determination.
+- **Mentoring**: veterans with strong personalities can be paired with young players
+  to pass on traits and personality (good or bad).
+- **Breakouts and busts**: occasional sudden jumps or stalls in development.
+- **Training camp and preseason** with position battles.
+
+### Staff
+- **Roles**: offensive coordinator, defensive coordinator, special teams coordinator,
+  position coaches, scouts, athletic trainers/medical staff, data analyst, general
+  manager assistant.
+- **Staff attributes** (teaching, tactical knowledge, motivating, judging ability,
+  judging potential, injury prevention, physiotherapy, discipline, man management).
+- **Coordinators have schemes** and playbooks; changing coordinators changes playbook
+  options and how well players fit.
+- **Staff advice**: assistants give recommendations (depth chart suggestions, trade
+  targets, training changes, players who are unhappy).
+- **Staff contracts, hiring, firing, and staff poaching** by other teams.
+
+### Scouting
+- **Knowledge level**: the more a player is scouted, the more accurate the shown
+  attributes. Unscouted players show attribute **ranges** (e.g. "speed 12–17").
+- **Scouting assignments** by region / college conference / position; scouting budget.
+- **Scout accuracy depends on the scout's** judging ability and judging potential.
+- **Scout reports**: pros/cons, comparable player, projected role, recommendation grade.
+- **Pre-draft events**: combine (measurables), pro days, interviews (reveal personality
+  hints), injury/medical red flags, character concerns.
+
+### Draft
+- **7 rounds**, generated draft classes with varying strength by year and position.
+- **Hidden true ratings** vs scouted estimates, so busts and steals happen.
+- **Draft board**: the player ranks prospects; staff offer their own board.
+- **Mock drafts** in the news feed before the draft.
+- **AI teams draft by need, best available and their own (imperfect) scouting.**
+- **Trading picks** before and during the draft, including future picks.
+- **Undrafted free agents** after the draft.
+- **Rookie contracts** on a scale by pick position.
+
+### Contracts, salary cap and free agency
+- **Salary cap** that rises each year, minimum spend floor.
+- **Contracts**: years, base salary, signing bonus (prorated cap hit), guaranteed money,
+  incentives, option years.
+- **Cap hits and dead cap** from cuts and trades.
+- **Agents with personalities** who negotiate for players; some are tough, some are
+  loyal to certain teams.
+- **Negotiation flow**: offer, counter-offer, walk-away, deadline pressure; a player's
+  priorities (money, winning, playing time, location, loyalty) affect what they accept.
+- **Extensions, franchise tag, restructures, holdouts, contract demands after big seasons.**
+- **Free agency period** with competing AI offers; players choose based on priorities.
+- **Roster limits**: offseason roster max, final cuts to a game-day roster, practice squad.
+
+### Trades
+- **AI team valuation** considers: player age, ratings, potential, contract and cap hit,
+  positional need, team strategy (contending / retooling / rebuilding), depth, and
+  draft pick value.
+- **AI teams trade with each other**, not just with the player.
+- **Trade block**: the player lists players; AI teams make offers.
+- **AI-initiated offers and counter-offers**, with staff advice on fairness.
+- **Trade deadline** mid-season; rumours in the news feed beforehand.
+- **Player reactions to trades**: unhappiness if a friend or leader is traded, upset
+  when a player is traded away after a promise.
+
+### Tactics & game plans
+- **Offensive and defensive schemes** (e.g. air raid, west coast, power run, spread;
+  4-3, 3-4, nickel-heavy, blitz-heavy) with player fit ratings.
+- **Depth chart** for every position.
+- **Weekly game plan**: opponent scouting report (their tendencies and weaknesses),
+  emphasis choices (e.g. focus on run defense, attack their weak cornerback).
+- **Simulated portions follow the team's scheme and game plan**, so tactics matter
+  even when not playing the snap.
+
+### Match simulation & stats
+- **Full play-by-play simulation** for every league game, driven by ratings, schemes,
+  game plans, form, morale, fatigue, weather and home advantage.
+- **Box scores and per-player stats** for every game in the league.
+- **Per-game player ratings** (e.g. 4.0–10.0) used by morale, awards and media.
+- **League-wide stat leaders, team stats, records** (single game, season, career),
+  advanced stats (completion % over expected, yards after catch, pressure rate,
+  missed tackles, etc.).
+- **In-game injuries** with severity.
+
+### Morale, team dynamics & player interaction
+- **Morale factors** listed on each player (playing time, contract, team results,
+  promises kept/broken, relationships, how the coach treated them, media comments).
+- **Team hierarchy**: team leaders, highly influential players, other players.
+  Leaders' moods spread to the locker room.
+- **Social groups / cliques** (e.g. by position group, veterans vs rookies); conflicts
+  between groups.
+- **Player relationships**: friendships, mentorships, rivalries, feuds.
+- **Promises**: playing time, contract extension, signing a quality player, improving
+  the team. Broken promises hurt morale and trust.
+- **Player conversations** with tone options (calm, assertive, aggressive, supportive):
+  praise, criticise form, discuss playing time, discuss contract, warn about conduct.
+- **Team talks** before the game and at halftime, with tone options that affect
+  performance depending on personalities.
+- **Discipline**: fines, benching, suspensions for conduct issues.
+- **Chemistry** score that slightly affects on-field performance.
+
+### Media, news feed & storylines
+- **Inbox / news feed** as the central hub: league news, game recaps, injuries,
+  transactions, rumours, staff messages, player requests, owner messages.
+- **Game recaps written from actual sim events** (key plays, standout players).
+- **Press conferences** before and after games with response options that affect
+  player morale, owner confidence, fan sentiment and rival coaches.
+- **Journalists** with different styles and reliability for rumours.
+- **Fan sentiment** tracker reacting to results, trades and signings.
+- **Storyline engine**: multi-week story arcs with stages, choices and consequences
+  that change ratings/morale/contracts. Examples:
+  - star player unhappy with contract → holdout risk → trade request
+  - rookie bursts onto the scene → hype → pressure → slump or breakout
+  - locker-room feud between two leaders
+  - veteran's final season and retirement tour
+  - revenge game against a former team
+  - playoff drought pressure on the coach
+  - rivalry escalating through media comments
+  - comeback from serious injury
+  - quarterback controversy
+- **Rival coaches** who respond in the media; mind games.
+
+### Owner / board & coaching career
+- **Owner expectations** each season (e.g. make playoffs, develop young players,
+  stay under budget) and **job security / owner confidence**.
+- **Owner meetings**: request facility upgrades, budget increases, contract extension.
+- **Getting fired** is possible; the career continues with job offers from other teams.
+- **Coach reputation** grows with success and affects which players and staff want
+  to join.
+- **Interest from other teams** in hiring the coach.
+
+### Finances & facilities
+- **Revenue**: tickets, merchandise, TV/media deals, sponsorships, playoff revenue.
+- **Expenses**: player salaries, staff wages, scouting, medical, facilities.
+- **Budgets** for scouting, medical and training, set by the owner.
+- **Facilities**: training, medical, youth/scouting network, stadium; upgrades take
+  seasons to build and affect development, injuries and revenue.
+
+### Medical & fitness
+- **Injury types with realistic durations**, re-injury risk, and long-term effects.
+- **Injury risk** shown by medical staff; rushing players back raises it.
+- **Fatigue and load management** across the season; bye weeks matter.
+- **Medical reports** in the news feed.
+
+### League world & history
+- **Fictional league** with divisions and conferences, schedule generation, bye weeks,
+  playoffs and a championship game.
+- **Season calendar**: offseason → combine → free agency → draft → minicamp →
+  training camp → preseason → final cuts → regular season → trade deadline → playoffs
+  → awards → retirements.
+- **Awards**: MVP, offensive/defensive player of the year, rookie of the year, coach of
+  the year, all-league teams.
+- **Hall of Fame**, retired numbers, franchise records, season-by-season history pages.
+- **Retirements and newly generated players** each year so the league lives forever.
+- **Coaching carousel**: AI head coaches get fired and hired.
+- **AI team strategies** change over time (contend, retool, rebuild).
+
+---
+
+## Build stages
+
+1. **Feel prototype**: project setup, PWA basics, local-network testing, feel tuning
+   panel, save export/import skeleton. One QB throwing to one receiver, then routes,
+   a basic defense, catch/incompletion/tackle. Iterate until throwing feels great.
+2. **Full games**: downs, clock, scoring, play calling, simulated defense and kicking,
+   end-of-game screen.
+3. **Players and teams**: attribute system, hidden attributes, personalities, rosters
+   for a full fictional league, ratings affecting the arcade layer.
+4. **Season and league sim**: schedule, play-by-play sim for other games (Web Worker),
+   standings, box scores, league stats, playoffs.
+5. **News feed / inbox** and game recaps from sim events.
+6. **Contracts, salary cap, free agency, trades** (including AI–AI trades).
+7. **Scouting and draft** with knowledge levels and hidden true ratings.
+8. **Development, training and staff.**
+9. **Morale, team dynamics, conversations, promises, team talks, press conferences.**
+10. **Storyline engine.**
+11. **Owner, finances, facilities, coaching career.**
+12. **History, awards, Hall of Fame, multi-season balance testing** (simulate 20+
+    seasons headless and check for stat inflation, dynasty dominance, cap problems).
+13. **Polish**: art pass, sound, transitions, tutorials/tooltips, offline caching,
+    performance on low-end phones.
+
+## Definition of done for each stage
+- The game runs on the phone from the home screen.
+- Saves from the previous stage still load (migration written if the format changed).
+- Sim logic for the stage has unit tests.
+- No feel-related values hard-coded outside `feel.ts`.
+
+---
+
+## Progress tracker
+
+| Stage | Status | Notes |
+|---|---|---|
+| 1 Feel prototype | Planning (2026-11-13) | Plan shown, waiting for approval |
+| 2–13 | Not started | |
+
+## Decisions & refinements
+
+- **2026-11-13: Project created** in its own folder `C:\Users\vsvis\retro-football`, separate from HooMaps.
+- **2026-11-13: Orientation switched to LANDSCAPE** (user's choice, before stage 1). Field runs left-to-right, two-thumb controls, "Rotate your phone" screen in portrait because iPhone can't lock orientation for home-screen web apps.
