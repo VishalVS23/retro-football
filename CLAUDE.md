@@ -306,6 +306,36 @@ It is installed on the phone's home screen as a PWA (no app store, no APK).
 
 ---
 
+## Feel notes (starting values for `feel.ts`)
+
+Taken from timing study of a reference arcade football game (timing/flow only, no art
+or layout copied). These are **starting points**, tuned later with the feel panel.
+
+| Value | Start | Notes |
+|---|---|---|
+| Pocket time before sack | ~3.0s | Later scaled by O-line vs pass-rush ratings. Visual pressure cue at ~2s. |
+| Earliest throw after snap | ~0.3s | Aim arc appears instantly on drag; QB auto-drops back while aiming. |
+| Ball flight time | ~0.5s (5 yd), ~1.0s (12 yd), ~1.6s (25 yd) | Flight time grows slower than distance. Scaled by arm strength. |
+| Max throw distance | >15 yd, set by arm strength | Deep shots must be possible. |
+| Catch radius | More forgiving than reference | Receivers turn and adjust 1–2 yd toward the landing marker. |
+| Result banner | ~0.8–1.0s | Tap to skip. |
+| Dead ball → next play ready | ~1.0–1.5s | No long walk-back; tap to skip. |
+
+Flow decisions:
+- Pre-snap: route lines shown, hidden on snap. Drag-to-aim on the right side with a live
+  dotted arc; on release a landing marker appears on the ground. Test pull-back
+  (slingshot) vs push-toward-target and keep the one that feels better.
+- Control transfers to the receiver instantly on the catch (then swipe to juke).
+- "Open receiver" hint shortly after snap; later its timing depends on QB vision/decisions.
+- Success feedback stacks: catch pop → yards-gained popup → shake on big gains.
+- Quick taps register everywhere (no press-and-hold-only inputs).
+- Our offense always drives left-to-right (no field flip between quarters).
+- Opponent drives: a few-second skippable summary, not a long text scroll.
+- 4th-down choice only appears when it matters. Kick returns: not in stage 1 (maybe optional later).
+- Art (stage 13) must use a different camera, palette and layout from the reference game.
+
+---
+
 ## Build stages
 
 1. **Feel prototype**: project setup, PWA basics, local-network testing, feel tuning
@@ -341,10 +371,22 @@ It is installed on the phone's home screen as a PWA (no app store, no APK).
 
 | Stage | Status | Notes |
 |---|---|---|
-| 1 Feel prototype | Planning (2026-11-13) | Plan shown, waiting for approval |
+| 1 Feel prototype | In progress (2026-11-14) | Plan approved |
 | 2–13 | Not started | |
+
+Stage 1 steps:
+- [ ] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest
+- [ ] 2. PWA install to home screen
+- [ ] 3. Feel tuning panel
+- [ ] 4. Save export/import skeleton + seeded RNG
+- [ ] 5. QB throws to one receiver (aim arc, ball shadow, catch)
+- [ ] 6. Routes
+- [ ] 7. Basic defense
+- [ ] 8. Catch / incompletion / tackle
+- [ ] 9. Free hosting
 
 ## Decisions & refinements
 
 - **2026-11-13: Project created** in its own folder `C:\Users\vsvis\retro-football`, separate from HooMaps.
 - **2026-11-13: Orientation switched to LANDSCAPE** (user's choice, before stage 1). Field runs left-to-right, two-thumb controls, "Rotate your phone" screen in portrait because iPhone can't lock orientation for home-screen web apps.
+- **2026-11-14: Feel notes added** from a timing study of a reference game (see "Feel notes"). Stage 1 plan approved.
