@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
 import { FieldScene } from './scenes/FieldScene';
+import { setupFeelPanel } from './debug/feelPanel';
+
+// Load any saved feel tweaks before the game starts, and add the ⚙ panel.
+setupFeelPanel();
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,

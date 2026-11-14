@@ -54,3 +54,97 @@ body {
     display: flex;
   }
 }
+
+/* ---------- Feel tuning panel (debug) ---------- */
+#feel-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 8px);
+  right: calc(env(safe-area-inset-right) + 8px);
+  z-index: 5;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid #f4efe155;
+  background: #14202bcc;
+  color: #f4efe1;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#feel-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 6;
+  width: min(340px, 80vw);
+  padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px)
+    calc(env(safe-area-inset-bottom) + 10px) 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #14202bf2;
+  border-left: 1px solid #f4efe133;
+  font-size: 13px;
+  transform: translateX(105%);
+  transition: transform 0.2s ease-out;
+}
+#feel-panel.open {
+  transform: translateX(0);
+}
+.fp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.fp-msg {
+  color: #ffd166;
+  font-size: 12px;
+}
+.fp-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+.fp-buttons button {
+  flex: 1;
+  padding: 8px 4px;
+  border-radius: 6px;
+  border: 1px solid #f4efe155;
+  background: #1f4d63;
+  color: #f4efe1;
+  font-size: 13px;
+}
+.fp-body {
+  flex: 1;
+  overflow-y: auto;
+  touch-action: pan-y; /* let the list scroll even though the game blocks scrolling */
+  -webkit-overflow-scrolling: touch;
+}
+.fp-body h3 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd166;
+}
+.fp-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin-bottom: 8px;
+}
+.fp-row input {
+  grid-column: 1 / -1;
+  width: 100%;
+  touch-action: pan-x;
+}
+.fp-val {
+  font-family: monospace;
+}
+.fp-changed .fp-name::after {
+  content: ' •';
+  color: #ffd166;
+}

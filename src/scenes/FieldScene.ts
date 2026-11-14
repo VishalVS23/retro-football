@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
+import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
 // Placeholder colours only. The real art comes in stage 13.
 const COLORS = {
@@ -23,7 +24,7 @@ export class FieldScene extends Phaser.Scene {
     this.drawField();
 
     this.label = this.add
-      .text(0, 0, 'Step 1 OK: tap anywhere, drag to scroll', {
+      .text(0, 0, 'Tap anywhere, drag to scroll, ⚙ = feel panel', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#f4efe1',
@@ -35,6 +36,11 @@ export class FieldScene extends Phaser.Scene {
 
     this.fitCamera();
     this.scale.on('resize', () => this.fitCamera());
+
+    // Re-fit when a feel value changes in the tuning panel.
+    const onFeelChange = () => this.fitCamera();
+    window.addEventListener(FEEL_CHANGE_EVENT, onFeelChange);
+    this.events.once('shutdown', () => window.removeEventListener(FEEL_CHANGE_EVENT, onFeelChange));
 
     // Start looking at our own 25-yard line, like a drive start.
     this.cameras.main.centerOn(END_ZONE_DEPTH + 25, FIELD_WIDTH / 2);

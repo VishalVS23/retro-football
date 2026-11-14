@@ -377,7 +377,7 @@ Flow decisions:
 Stage 1 steps:
 - [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop, phone test pending until hosting)
 - [x] 2. PWA install to home screen (2026-11-14; done together with hosting, phone install test pending)
-- [ ] 3. Feel tuning panel
+- [x] 3. Feel tuning panel (2026-11-14): `src/debug/feelPanel.ts` + tested helpers in `src/config/feelTools.ts`. Sliders auto-built from `feel.ts`; tweaks saved in localStorage; scenes listen for the `feelchange` window event to react live.
 - [ ] 4. Save export/import skeleton + seeded RNG
 - [ ] 5. QB throws to one receiver (aim arc, ball shadow, catch)
 - [ ] 6. Routes
