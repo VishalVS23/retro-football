@@ -10,13 +10,14 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
-import { ROUTES, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type Runner } from '../sim/routes';
+import { PLAYS, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type Runner } from '../sim/routes';
 import {
   blockerSpot,
   closestRusher,
   isFree,
   reachedQb,
-  resolvePass,
+  closestIndex,
+  resolveTargetedPass,
   startCoverage,
   stepCoverage,
   stepRusher,
@@ -59,24 +60,44 @@ const COLORS = {
 };
 
 // Formation (football layout, not feel), lined up on the current line of scrimmage.
-const WR_TOWARD_MIDDLE = 1; // he lines up above the middle, so "inside" is +y
 const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
 const PRESSURE_COLOR = 0xff3b3b;
 const RUSHER_COUNT = 2;
+const RECEIVER_COUNT = 3;
+// Camera height before the throw: a bit above the middle, toward the two-receiver side, which also
+// leaves room under the scoreboard. (Layout, not feel: it follows the formation.)
+const FORMATION_VIEW_Y = FIELD_WIDTH / 2 - 3;
 
-/** Where everyone lines up for a snap at losX: QB under centre, one WR, two rushers with a blocker each. */
+/**
+ * Where everyone lines up for a snap at losX: QB under centre, three receivers (two up top,
+ * one at the bottom), two rushers with a blocker each. `towardMiddle` = which way is "inside".
+ */
 function formation(losX: number) {
+  const mid = FIELD_WIDTH / 2;
   const rush: Vec[] = [
-    { x: losX + 1, y: FIELD_WIDTH / 2 - 3 },
-    { x: losX + 1, y: FIELD_WIDTH / 2 + 3 },
+    { x: losX + 1, y: mid - 3 },
+    { x: losX + 1, y: mid + 3 },
+  ];
+  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = [
+    { pos: { x: losX - 0.5, y: mid - 13 }, towardMiddle: 1 }, // wide, top
+    { pos: { x: losX - 1, y: mid - 6.5 }, towardMiddle: 1 }, // slot, top
+    { pos: { x: losX - 0.5, y: mid + 13 }, towardMiddle: -1 }, // wide, bottom
   ];
   return {
-    qb: { x: losX - 2, y: FIELD_WIDTH / 2 },
-    wr: { x: losX - 0.5, y: FIELD_WIDTH / 2 - 12 },
+    qb: { x: losX - 2, y: mid },
+    wrs,
     rush,
     block: rush.map((r) => ({ x: losX - 1, y: r.y })),
   };
+}
+
+/** One receiver on this play: his route, where he is on it, and the cornerback covering him. */
+interface Receiver {
+  path: Vec[];
+  runner: Runner;
+  atLanding: Vec; // where his route takes him when the ball lands
+  coverage: Coverage;
 }
 
 type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'result';
@@ -86,8 +107,9 @@ const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juk
 export class FieldScene extends Phaser.Scene {
   private label!: Phaser.GameObjects.Text;
   private qb!: Phaser.GameObjects.Arc;
-  private wr!: Phaser.GameObjects.Arc;
-  private cb!: Phaser.GameObjects.Arc;
+  private wrDots: Phaser.GameObjects.Arc[] = [];
+  private cbDots: Phaser.GameObjects.Arc[] = [];
+  private carrierDot: Phaser.GameObjects.Arc | null = null; // whoever has the ball after a catch
   private safety!: Phaser.GameObjects.Arc;
   private safetyPos: Vec = { x: 0, y: 0 };
   // After the catch:
@@ -102,7 +124,8 @@ export class FieldScene extends Phaser.Scene {
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
-  private coverage!: Coverage;
+  private receivers: Receiver[] = [];
+  private targetIndex = 0; // the receiver the ball in the air is meant for
   private rushers: Rusher[] = [];
   private ball!: Phaser.GameObjects.Ellipse;
   private shadow!: Phaser.GameObjects.Ellipse;
@@ -117,9 +140,7 @@ export class FieldScene extends Phaser.Scene {
 
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
-  private routeIndex = 0;
-  private path: Vec[] = [];
-  private runner: Runner = startRunner([this.form.wr]);
+  private playIndex = -1; // which play in PLAYS (rotates each snap until play calling exists)
   private qbPos: Vec = { ...this.form.qb };
   private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
@@ -128,7 +149,6 @@ export class FieldScene extends Phaser.Scene {
   private queuedTarget: Vec | null = null; // released before the earliest throw time
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
-  private wrAtLanding: Vec = { ...this.form.wr }; // where his route takes him when the ball lands
   private underPressure = false;
   private resetTimer: Phaser.Time.TimerEvent | null = null;
   private cameraFocus: Vec = { ...this.form.qb };
@@ -145,9 +165,9 @@ export class FieldScene extends Phaser.Scene {
     this.aimG = this.add.graphics().setDepth(4);
     this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
     this.qb = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
-    this.wr = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     const dot = (color: number) => this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
-    this.cb = dot(COLORS.defense);
+    this.wrDots = Array.from({ length: RECEIVER_COUNT }, () => dot(COLORS.team));
+    this.cbDots = Array.from({ length: RECEIVER_COUNT }, () => dot(COLORS.defense));
     this.safety = dot(COLORS.defense);
     this.rusherDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.defense));
     this.blockerDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.team));
@@ -208,7 +228,7 @@ export class FieldScene extends Phaser.Scene {
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
       this.playTime += dt;
-      this.runner = stepRunner(this.runner, this.path, dt, feel.routes);
+      this.stepRoutes(dt);
       this.updateQbDropback();
       this.stepDefense(dt);
     }
@@ -226,24 +246,18 @@ export class FieldScene extends Phaser.Scene {
       if (this.state === 'live' && reachedQb(this.rushers, this.qbPos, this.rushParams())) this.sack();
     }
 
-    let wrPos = this.runner.pos;
+    if (playing) this.drawReceivers();
     if (this.state === 'flight' && this.currentThrow) {
       this.flightElapsed += dt;
       const b = ballAt(this.currentThrow, this.flightElapsed);
       this.drawBall(b.x, b.y, b.h);
-      wrPos = this.receiverPosition();
       this.cameraFocus = { x: b.x + feel.camera.leadYards, y: b.y };
-      if (b.done) {
-        this.wr.setPosition(wrPos.x, wrPos.y);
-        this.resolveThrow();
-      }
+      if (b.done) this.resolveThrow();
     } else if (playing) {
-      this.cameraFocus = {
-        x: (this.qbPos.x + wrPos.x) / 2 + feel.camera.leadYards,
-        y: (this.qbPos.y + wrPos.y) / 2,
-      };
+      // Frame the QB and the receivers' average depth.
+      const avgX = this.receivers.reduce((s, r) => s + r.runner.pos.x, 0) / this.receivers.length;
+      this.cameraFocus = { x: (this.qbPos.x + avgX) / 2 + feel.camera.leadYards, y: FORMATION_VIEW_Y };
     }
-    if (playing) this.wr.setPosition(wrPos.x, wrPos.y);
 
     // Camera eases toward its focus point (frame-rate independent).
     const cam = this.cameras.main;
@@ -364,7 +378,10 @@ export class FieldScene extends Phaser.Scene {
   private releaseBall(target: Vec) {
     this.currentThrow = makeThrow({ ...this.qbPos }, target, feel.throw, feel.throw.arcHeightRatio);
     this.flightElapsed = 0;
-    this.wrAtLanding = runnerAfter(this.runner, this.path, this.currentThrow.duration, feel.routes).pos;
+    const duration = this.currentThrow.duration;
+    for (const r of this.receivers) r.atLanding = runnerAfter(r.runner, r.path, duration, feel.routes).pos;
+    // The ball is meant for whoever's route takes him closest to the landing spot.
+    this.targetIndex = closestIndex(this.receivers.map((r) => r.atLanding), target);
     this.state = 'flight';
     this.ball.setVisible(true);
     this.shadow.setVisible(true);
@@ -373,12 +390,16 @@ export class FieldScene extends Phaser.Scene {
     this.drawLandingMarker(target, 0.8);
   }
 
-  /** Receiver keeps running his route, drifting toward the ball while it's in the air. */
-  private receiverPosition(): Vec {
-    if (!this.currentThrow) return this.runner.pos;
+  /**
+   * Where receiver i is now. Everyone runs his route; while the ball is in the air the
+   * intended receiver also drifts toward it.
+   */
+  private receiverPosition(i: number): Vec {
+    const r = this.receivers[i];
+    if (this.state !== 'flight' || !this.currentThrow || i !== this.targetIndex) return r.runner.pos;
     return receiverInFlight(
-      this.runner.pos,
-      this.wrAtLanding,
+      r.runner.pos,
+      r.atLanding,
       this.currentThrow.to,
       this.flightElapsed,
       feel.catching.receiverAdjustYards,
@@ -386,13 +407,25 @@ export class FieldScene extends Phaser.Scene {
     );
   }
 
+  private stepRoutes(dt: number) {
+    for (const r of this.receivers) r.runner = stepRunner(r.runner, r.path, dt, feel.routes);
+  }
+
+  private drawReceivers() {
+    this.receivers.forEach((_, i) => {
+      const p = this.receiverPosition(i);
+      this.wrDots[i].setPosition(p.x, p.y);
+    });
+  }
+
   private resolveThrow() {
     const th = this.currentThrow!;
-    const wrPos = this.receiverPosition();
+    const wrSpots = this.receivers.map((_, i) => this.receiverPosition(i));
+    const cbSpots = this.receivers.map((r) => r.coverage.pos);
     this.aimG.clear();
     this.state = 'result';
 
-    let result = resolvePass(wrPos, this.coverage.pos, th.to, getRngOrFallback().next(), {
+    const pass = resolveTargetedPass(wrSpots, cbSpots, th.to, getRngOrFallback().next(), {
       catchRadiusYards: feel.catching.catchRadiusYards,
       contestRadiusYards: feel.defense.contestRadiusYards,
       breakupChance: feel.defense.breakupChance,
@@ -401,8 +434,13 @@ export class FieldScene extends Phaser.Scene {
       defenderCatchChance: feel.defense.defenderCatchChance,
     });
 
+    let result = pass.result;
+    const wrPos = wrSpots[pass.receiver];
+    const cbPos = cbSpots[pass.defender];
+    const cbDot = this.cbDots[pass.defender];
+
     // A catch only counts with the catcher's feet (centre of his circle) in bounds.
-    const catcher = result === 'catch' ? wrPos : result === 'interception' ? this.coverage.pos : null;
+    const catcher = result === 'catch' ? wrPos : result === 'interception' ? cbPos : null;
     if (catcher && !isInBounds(catcher)) {
       result = 'incomplete';
       this.floatText(catcher.x, catcher.y - 2, 'OUT OF BOUNDS', '#f4efe1');
@@ -411,27 +449,26 @@ export class FieldScene extends Phaser.Scene {
     if (result === 'interception') {
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
-      this.popPlayer(this.cb);
+      this.popPlayer(cbDot);
       this.shakeScreen();
       this.showBanner('INTERCEPTED');
     } else if (result === 'droppedInt' || result === 'drop') {
       // Ball clanks off the player's hands and bounces away.
-      const who = result === 'drop' ? wrPos : this.coverage.pos;
+      const who = result === 'drop' ? wrPos : cbPos;
       this.skidBall(th.to, { x: th.to.x - th.from.x + (th.to.y - who.y), y: th.to.y - th.from.y });
       this.showBanner(result === 'drop' ? 'DROPPED' : 'LUCKY!');
     } else if (result === 'breakup') {
       // Swatted away: the ball pops off sideways from the defender.
-      const cb = this.coverage.pos;
-      const away = { x: th.to.x - cb.x, y: th.to.y - cb.y };
-      this.popPlayer(this.cb);
+      const away = { x: th.to.x - cbPos.x, y: th.to.y - cbPos.y };
+      this.popPlayer(cbDot);
       this.skidBall(th.to, away.x === 0 && away.y === 0 ? { x: 0, y: 1 } : away);
       this.showBanner('BROKEN UP');
     } else if (result === 'catch') {
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
       // Catch pop, then control passes to the receiver straight away.
-      this.popPlayer(this.wr);
-      this.startRun(wrPos);
+      this.popPlayer(this.wrDots[pass.receiver]);
+      this.startRun(wrPos, pass.receiver);
       return;
     } else {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
@@ -497,33 +534,30 @@ export class FieldScene extends Phaser.Scene {
     };
   }
 
-  /** Moves the cornerback, the rushers and our blockers for one frame. */
+  /** Moves the cornerbacks, the safety, the rushers and our blockers for one frame. */
   private stepDefense(dt: number) {
     const ball =
       this.state === 'flight' && this.currentThrow
         ? { landing: this.currentThrow.to, sinceThrow: this.flightElapsed }
         : undefined;
-    this.coverage = stepCoverage(
-      this.coverage,
-      this.runner.pos,
-      dt,
-      {
-        topSpeed: feel.routes.topSpeed * feel.defense.cbSpeedRatio,
-        acceleration: feel.routes.acceleration,
-        reactionTime: feel.defense.cbReactionTime,
-        cushionYards: feel.defense.cbCushionYards,
-        cushionCloseTime: feel.defense.cbCushionCloseTime,
-        ballReactionTime: feel.defense.cbBallReactionTime,
-        ballSpeedRatio: feel.defense.cbBallSpeedRatio,
-      },
-      ball,
-    );
-    this.cb.setPosition(this.coverage.pos.x, this.coverage.pos.y);
+    const cover = {
+      topSpeed: feel.routes.topSpeed * feel.defense.cbSpeedRatio,
+      acceleration: feel.routes.acceleration,
+      reactionTime: feel.defense.cbReactionTime,
+      cushionYards: feel.defense.cbCushionYards,
+      cushionCloseTime: feel.defense.cbCushionCloseTime,
+      ballReactionTime: feel.defense.cbBallReactionTime,
+      ballSpeedRatio: feel.defense.cbBallSpeedRatio,
+    };
+    // Man coverage: each cornerback follows his own receiver, and all of them break on a thrown ball.
+    this.receivers.forEach((r, i) => {
+      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, cover, ball);
+      this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
+    });
 
-    // Safety: sits deep, shading toward the receiver; breaks on the ball once it's thrown.
-    const deep = ball
-      ? ball.landing
-      : { x: this.safetyDepthX(), y: (FIELD_WIDTH / 2 + this.runner.pos.y) / 2 };
+    // Safety: sits deep, shading toward the side with more receivers; breaks on the ball once it's thrown.
+    const avgY = this.receivers.reduce((s, r) => s + r.runner.pos.y, 0) / this.receivers.length;
+    const deep = ball ? ball.landing : { x: this.safetyDepthX(), y: (FIELD_WIDTH / 2 + avgY) / 2 };
     const sSpeed = feel.tackling.dbPursuitSpeed * (ball ? feel.defense.cbBallSpeedRatio : feel.defense.safetyDriftRatio);
     const gap = Math.hypot(deep.x - this.safetyPos.x, deep.y - this.safetyPos.y);
     if (gap > 0) {
@@ -559,26 +593,33 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** After the catch: the receiver becomes the ball carrier and every defender chases him. */
-  private startRun(at: Vec) {
+  private startRun(at: Vec, receiver: number) {
     this.state = 'run';
     this.runTime = 0;
     this.carrier = startCarrier(at);
+    this.carrierDot = this.wrDots[receiver];
+    this.targetIndex = receiver;
     this.sightings = remember([], 0, this.carrier, 1);
     const db = feel.tackling.dbPursuitSpeed;
     const dl = feel.tackling.dlPursuitSpeed;
     this.pursuers = [
-      { pos: { ...this.coverage.pos }, speed: db, stunned: 0 },
+      ...this.receivers.map((r) => ({ pos: { ...r.coverage.pos }, speed: db, stunned: 0 })),
       { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
       ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0 })),
     ];
-    this.pursuerDots = [this.cb, this.safety, ...this.rusherDots];
+    this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
     this.updateLabel();
   }
 
   private stepRun(dt: number) {
     this.runTime += dt;
     this.carrier = stepCarrier(this.carrier, this.steer, dt, this.carryParams());
-    this.wr.setPosition(this.carrier.pos.x, this.carrier.pos.y);
+    this.carrierDot?.setPosition(this.carrier.pos.x, this.carrier.pos.y);
+    // The other receivers just keep running their routes for now (downfield blocking comes later).
+    this.stepRoutes(dt);
+    this.receivers.forEach((r, i) => {
+      if (i !== this.targetIndex) this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y);
+    });
     this.sightings = remember(this.sightings, this.runTime, this.carrier, 1);
     this.pursuers = stepPursuers(this.pursuers, this.sightings, this.runTime, dt, {
       reactionTime: feel.tackling.pursuitReactionTime,
@@ -621,7 +662,7 @@ export class FieldScene extends Phaser.Scene {
     const shake = (mult: number) => this.shakeScreen(mult);
     if (how === 'touchdown') {
       shake(feel.juice.touchdownShakeScale);
-      this.popPlayer(this.wr);
+      if (this.carrierDot) this.popPlayer(this.carrierDot);
       this.showBanner('TOUCHDOWN!');
     } else if (how === 'tackled') {
       this.hitPauseLeft = feel.juice.hitPauseTime; // tiny freeze-frame, then shake
@@ -673,10 +714,16 @@ export class FieldScene extends Phaser.Scene {
     this.resetTimer?.remove();
     this.resetTimer = null;
     this.form = formation(this.match.ballX); // line up wherever the last play left the ball
-    const { qb: qbStart, wr: wrStart } = this.form;
-    if (this.path.length) this.routeIndex = (this.routeIndex + 1) % ROUTES.length; // try each route in turn
-    this.path = routePath(wrStart, ROUTES[this.routeIndex], WR_TOWARD_MIDDLE);
-    this.runner = startRunner(this.path);
+    const qbStart = this.form.qb;
+    this.playIndex = (this.playIndex + 1) % PLAYS.length; // try each play in turn until play calling exists
+    const play = PLAYS[this.playIndex];
+    this.receivers = this.form.wrs.map((wr, i) => {
+      const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
+      const cbStart = { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
+      return { path, runner: startRunner(path), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos) };
+    });
+    this.targetIndex = 0;
+    this.carrierDot = null;
     this.state = 'presnap';
     this.playTime = 0;
     this.currentThrow = null;
@@ -686,17 +733,18 @@ export class FieldScene extends Phaser.Scene {
     this.aimDrag = null;
     this.underPressure = false;
     this.aimG.clear();
-    this.tweens.killTweensOf([this.qb, this.wr, this.cb, this.safety, this.ball, this.shadow]);
+    this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.ball, this.shadow]);
     this.safetyPos = { x: this.safetyDepthX(), y: FIELD_WIDTH / 2 };
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
-    [this.cb, ...this.rusherDots].forEach((d) => d.setAlpha(1));
+    [...this.cbDots, ...this.rusherDots].forEach((d) => d.setAlpha(1));
     this.steerTouch = null;
     this.steer = 0;
     this.hitPauseLeft = 0;
     this.clearBanner(); // tapping to skip clears the old banner straight away
-    const cbStart = { x: wrStart.x + feel.defense.cbCushionYards, y: wrStart.y };
-    this.coverage = startCoverage(cbStart, wrStart);
-    this.cb.setPosition(cbStart.x, cbStart.y).setScale(1);
+    this.receivers.forEach((r, i) => {
+      this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y).setScale(1);
+      this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y).setScale(1);
+    });
     const rng = getRngOrFallback();
     this.rushers = this.form.rush.map((pos) => ({
       pos: { ...pos },
@@ -706,13 +754,13 @@ export class FieldScene extends Phaser.Scene {
     this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
     this.qbPos = { ...qbStart };
     this.qb.setPosition(qbStart.x, qbStart.y).setScale(1).setStrokeStyle(0.2, COLORS.outline);
-    this.wr.setPosition(wrStart.x, wrStart.y).setScale(1);
     this.ball.setVisible(false).setAlpha(1);
     this.shadow.setVisible(false).setAlpha(1);
     this.sizeBall();
     this.drawMarkers();
-    this.drawRoute();
-    this.cameraFocus = { x: qbStart.x + 12, y: (qbStart.y + wrStart.y) / 2 };
+    this.routeG.clear();
+    for (const r of this.receivers) this.drawRoute(r.path);
+    this.cameraFocus = { x: qbStart.x + 12, y: FORMATION_VIEW_Y };
     this.updateLabel();
     this.updateScoreboard();
   }
@@ -745,10 +793,8 @@ export class FieldScene extends Phaser.Scene {
    * Pre-snap route art (placeholder style until the stage-13 art pass): a thick bright line with
    * a dark pixel-style outline and a chunky arrowhead. Static (user didn't like animated chevrons).
    */
-  private drawRoute() {
+  private drawRoute(path: Vec[]) {
     const g = this.routeG;
-    g.clear();
-    const path = this.path;
     if (path.length < 2) return;
     const OUTLINE = 0.75;
     const LINE = 0.42;
@@ -788,7 +834,7 @@ export class FieldScene extends Phaser.Scene {
 
   private updateLabel() {
     if (this.state === 'presnap') {
-      this.label.setText(`${ROUTES[this.routeIndex].name} route · TAP to snap · ⚙ = feel`);
+      this.label.setText(`${PLAYS[this.playIndex].name} · TAP to snap · ⚙ = feel`);
       return;
     }
     if (this.state === 'run') {

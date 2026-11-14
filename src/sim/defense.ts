@@ -144,6 +144,37 @@ export interface ContestParams {
  * Decides the outcome. `roll` is a random number in [0, 1) from the seeded RNG,
  * passed in so the result can be tested and replayed.
  */
+/** Index of the point closest to `to` (-1 for an empty list). */
+export function closestIndex(points: Vec[], to: Vec): number {
+  let best = -1;
+  let bestD = Infinity;
+  points.forEach((p, i) => {
+    const d = dist(p, to);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/**
+ * Several receivers and defenders: the pass is meant for the receiver nearest the landing spot,
+ * and the defender nearest the landing spot is the one who can interfere (or pick it off).
+ */
+export function resolveTargetedPass(
+  receivers: Vec[],
+  defenders: Vec[],
+  landing: Vec,
+  roll: number,
+  p: ContestParams,
+): { result: PassResult; receiver: number; defender: number } {
+  const receiver = closestIndex(receivers, landing);
+  const defender = closestIndex(defenders, landing);
+  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p);
+  return { result, receiver, defender };
+}
+
 export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: ContestParams): PassResult {
   const wrD = dist(wr, landing);
   const cbD = dist(cb, landing);

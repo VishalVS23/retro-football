@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   blockerSpot,
+  closestIndex,
   reachedQb,
   resolvePass,
+  resolveTargetedPass,
   startCoverage,
   stepCoverage,
   stepRusher,
   type Coverage,
   type Rusher,
 } from './defense';
-import { ROUTES, routePath, runnerAfter, startRunner, stepRunner } from './routes';
+import { PLAYS, ROUTES, routePath, runnerAfter, startRunner, stepRunner } from './routes';
 
 const cover = {
   topSpeed: 7.6,
@@ -157,5 +159,46 @@ describe('resolving the pass', () => {
     const cb = { x: 51.5, y: 20 };
     for (const roll of [0, 0.1, 0.2]) expect(resolvePass(wr, cb, landing, roll, contest)).not.toBe('interception');
     expect(resolvePass(wr, cb, landing, 0.05, contest)).toBe('breakup');
+  });
+});
+
+describe('passing with three receivers', () => {
+  const landing = { x: 60, y: 30 };
+  // Three receivers spread out, each with his own man nearby.
+  const receivers = [
+    { x: 70, y: 12 },
+    { x: 60.4, y: 30 }, // the one the ball is thrown to
+    { x: 62, y: 44 },
+  ];
+
+  it('finds the closest point', () => {
+    expect(closestIndex(receivers, landing)).toBe(1);
+    expect(closestIndex([], landing)).toBe(-1);
+  });
+
+  it('the pass goes to the receiver it was thrown to, not another one', () => {
+    const defenders = [
+      { x: 72, y: 12 },
+      { x: 66, y: 30 }, // his man is beaten (well behind)
+      { x: 64, y: 44 },
+    ];
+    const r = resolveTargetedPass(receivers, defenders, landing, 0.0, contest);
+    expect(r).toEqual({ result: 'catch', receiver: 1, defender: 1 });
+  });
+
+  it("another receiver's defender can jump the route and pick it off", () => {
+    const defenders = [
+      { x: 60.1, y: 30.1 }, // the top receiver's man has drifted onto this throw
+      { x: 66, y: 30 },
+      { x: 64, y: 44 },
+    ];
+    const r = resolveTargetedPass(receivers, defenders, landing, 0.05, contest);
+    expect(r.receiver).toBe(1);
+    expect(r.defender).toBe(0);
+    expect(r.result).toBe('interception');
+  });
+
+  it('every play has one route per receiver', () => {
+    for (const play of PLAYS) expect(play.routes).toHaveLength(3);
   });
 });

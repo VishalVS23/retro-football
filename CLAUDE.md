@@ -388,8 +388,8 @@ Stage 1 steps:
 
 Stage 2 steps (approved 2026-11-14; still show a short plan for each step before coding):
 - [x] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar. **Done 2026-11-14, phone tested.** Rules in `src/sim/drive.ts` (tested): ball spotted to the nearest yard, never on a goal line; sacks/tackles behind our goal line = safety; touchdown = 6 (no PAT yet). Until steps 5–6, every drive-ending event restarts at our 25. Scene field is `match` (not `game`: that name belongs to Phaser). Hint text moved to bottom-left; scoreboard top-centre.
-- [ ] 2. Play calling screen based on the user's mockup (playbook cards with mini route diagrams, field preview, EXECUTE / AUDIBLE / CANCEL); ~6 pass plays to start
-- [ ] 3. Three receivers per play, each with his own cornerback (read the open man)
+- [ ] 2. Three receivers per play, each with his own cornerback (read the open man). **Built 2026-11-14, waiting for the user's phone test.** (Swapped with play calling on 2026-11-14, user approved: plays need 3 receivers to mean anything.) Formation: two receivers top (wide + slot), one bottom. `PLAYS` in `routes.ts` (Slants, Verticals, Post Corner, Crossers) rotate each snap. Pass goes to the receiver nearest the landing spot, and the nearest defender (any cornerback) contests: `resolveTargetedPass` in `defense.ts` (tested). All cornerbacks break on a thrown ball; the safety does not contest catches yet. Non-carriers keep running routes after a catch. Sideways routes shortened so route art fits the 1.5x camera; pre-throw camera sits 3 yd above the middle (`FORMATION_VIEW_Y`).
+- [ ] 3. Play calling screen based on the user's mockup (playbook cards with mini route diagrams, field preview, EXECUTE / AUDIBLE / CANCEL); ~6 pass plays to start
 - [ ] 4. Game clock and quarters, timeouts, two-minute warning
 - [ ] 5. Scoring and kicking: TD, extra point, field goal, punt (timing tap), 4th-down choice only when it matters
 - [ ] 6. Simulated opponent drives: short skippable summary (simple sim; real league sim is stage 4)
@@ -397,7 +397,7 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session)
-1. Step 1 done. Show the plan for the next step and wait for approval (suggested swapping steps 2 and 3: three receivers before the play-call screen). Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
+1. If the user's phone test of Stage 2 step 2 (three receivers) went well, tick it; then show the plan for **step 3 (play calling screen)** and wait for approval. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
 - Unit tests: `npm test` from **PowerShell** (not Git Bash). Typecheck: `npm run typecheck`. Build: `npm run build`.
@@ -423,7 +423,7 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - **2026-11-14: Problem fixed: cornerback contested almost every pass** (he sprinted to the landing spot at full speed). He now breaks on the ball at `cbBallSpeedRatio` 0.6; balance test checks an on-time slant is caught 60%+.
 - **2026-11-14: Catch rules.** Ball thrown straight to a defender: INTERCEPTED (75%) or LUCKY! (he drops it), never "incomplete". Open receivers drop 5% (DROPPED). Catches/picks with the catcher's centre point out of bounds are INCOMPLETE. All chances are sliders until hands ratings exist (stage 3).
 - **2026-11-14: Placeholder rules to replace with ratings in stage 3:** receiver and defender catch chances, rusher shed time (pass rush vs O-line), receiver/runner speed, QB ball speed (arm strength), broken-tackle chance (strength / "fights for extra yards").
-- **2026-11-14: Parked ideas:** throwing-zone glow hint with an off switch; interception returns (an interception currently just ends the play); QB scrambling; kick returns (maybe later, per the feel notes).
+- **2026-11-14: Parked ideas:** safety contesting deep balls; downfield blocking by receivers after a catch; throwing-zone glow hint with an off switch; interception returns (an interception currently just ends the play); QB scrambling; kick returns (maybe later, per the feel notes).
 - **2026-11-14: Dev workflow notes.** Git Bash heredocs break on Python code with nested quotes, so write multi-line edit scripts to the scratchpad and run them from there. A dev-only `window.__game` hook in `main.ts` lets browser test scripts read game state (excluded from production builds).
 - **2026-11-14: Design images contain real NFL material** (Bills/Giants logos, AFC, BUF/NYG, "Retro Bowl Championship"). Use their layouts and style only; replace all names/logos with our fictional league. Images kept in git-ignored `design-refs/`.
 - **2026-11-14: Auto-update stays as is** (reloads straight away, even mid-game). User is the only player and prefers it simple.

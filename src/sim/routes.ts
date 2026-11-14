@@ -15,10 +15,30 @@ export interface RouteDef {
   points: Vec[];
 }
 
-export const ROUTES: RouteDef[] = [
-  { name: 'Slant', points: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 15, y: 12 }] },
-  { name: 'Out', points: [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: -12 }] },
-  { name: 'Go', points: [{ x: 0, y: 0 }, { x: 40, y: 0 }] },
+// Sideways routes end a few yards short of the sideline so the pre-snap route art stays on screen at
+// the zoomed-in camera (receivers keep running in the same direction after the route ends anyway).
+const SLANT: RouteDef = { name: 'Slant', points: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 15, y: 12 }] };
+const OUT: RouteDef = { name: 'Out', points: [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: -8 }] };
+const GO: RouteDef = { name: 'Go', points: [{ x: 0, y: 0 }, { x: 40, y: 0 }] };
+const POST: RouteDef = { name: 'Post', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 30, y: 10 }] };
+const CORNER: RouteDef = { name: 'Corner', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: -7 }] };
+const DIG: RouteDef = { name: 'Dig', points: [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 18 }] };
+const DRAG: RouteDef = { name: 'Drag', points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 5, y: 20 }] };
+
+export const ROUTES: RouteDef[] = [SLANT, OUT, GO, POST, CORNER, DIG, DRAG];
+
+/** A pass play: one route per receiver, in formation order (see FieldScene `formation`). */
+export interface PlayDef {
+  name: string;
+  routes: RouteDef[];
+}
+
+/** Starter playbook. Receivers: [wide top, slot top, wide bottom]. Play calling (stage 2) picks from these. */
+export const PLAYS: PlayDef[] = [
+  { name: 'Slants', routes: [SLANT, OUT, SLANT] },
+  { name: 'Verticals', routes: [GO, GO, GO] },
+  { name: 'Post Corner', routes: [POST, CORNER, DIG] },
+  { name: 'Crossers', routes: [DIG, DRAG, POST] },
 ];
 
 /**
