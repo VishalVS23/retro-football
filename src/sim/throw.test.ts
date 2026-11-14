@@ -6,6 +6,7 @@ import {
   aimTarget,
   arcPoints,
   ballAt,
+  clampDistance,
   flightTime,
   isCatch,
   makeThrow,
@@ -104,5 +105,23 @@ describe('catching', () => {
   it('catches inside the radius, not outside', () => {
     expect(isCatch(wr, { x: 41.4, y: 20 }, 1.5)).toBe(true);
     expect(isCatch(wr, { x: 41.6, y: 20 }, 1.5)).toBe(false);
+  });
+});
+
+describe('bullet pass', () => {
+  const from = { x: 30, y: 20 };
+  const to = { x: 42, y: 20 };
+
+  it('gets there faster and flatter than a normal pass', () => {
+    const lob = makeThrow(from, to, flight, 0.25);
+    const bullet = makeThrow(from, to, flight, 0.06, 0.55);
+    expect(bullet.duration).toBeCloseTo(lob.duration * 0.55);
+    expect(bullet.peak).toBeLessThan(lob.peak / 3);
+  });
+
+  it('cuts a too-long target down to the max distance, same direction', () => {
+    const t = clampDistance(from, { x: 30, y: 60 }, 25);
+    expect(t).toEqual({ x: 30, y: 45 });
+    expect(clampDistance(from, to, 25)).toEqual(to); // short enough: unchanged
   });
 });

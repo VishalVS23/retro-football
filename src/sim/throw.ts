@@ -73,9 +73,20 @@ export interface Throw {
   peak: number;
 }
 
-export function makeThrow(from: Vec, to: Vec, flight: FlightParams, arcHeightRatio: number): Throw {
+/**
+ * A throw from `from` to `to`. `flightTimeRatio` scales the normal flight time
+ * (1 = normal pass; a bullet uses less, so it gets there faster).
+ */
+export function makeThrow(from: Vec, to: Vec, flight: FlightParams, arcHeightRatio: number, flightTimeRatio = 1): Throw {
   const d = dist(from, to);
-  return { from, to, duration: flightTime(d, flight), peak: d * arcHeightRatio };
+  return { from, to, duration: Math.max(0.1, flightTime(d, flight) * flightTimeRatio), peak: d * arcHeightRatio };
+}
+
+/** Pulls `to` back toward `from` so it's at most `maxYards` away (same direction). */
+export function clampDistance(from: Vec, to: Vec, maxYards: number): Vec {
+  const d = dist(from, to);
+  if (d <= maxYards || d === 0) return { ...to };
+  return { x: from.x + ((to.x - from.x) / d) * maxYards, y: from.y + ((to.y - from.y) / d) * maxYards };
 }
 
 /** Where the ball is `t` seconds after release. Height is a smooth up-and-down arc. */

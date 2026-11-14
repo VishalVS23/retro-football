@@ -6,6 +6,7 @@ import {
   aimTarget,
   arcPoints,
   ballAt,
+  clampDistance,
   makeThrow,
   type Throw,
   type Vec,
@@ -53,6 +54,7 @@ const COLORS = {
   ball: 0x8a5a2b,
   shadow: 0x000000,
   aim: 0xffd166,
+  bullet: 0x9be7ff, // bullet-pass aim preview
   scrimmage: 0x7ec8e3,
   firstDown: 0xffd23f,
   route: 0xffd166,
@@ -147,6 +149,8 @@ export class FieldScene extends Phaser.Scene {
   private aimDrag: { x: number; y: number } | null = null;
   private target: Vec | null = null;
   private queuedTarget: Vec | null = null; // released before the earliest throw time
+  private bulletAim = false; // aiming a bullet (other thumb tapped while aiming)
+  private bulletThrow = false; // the throw being made / in the air is a bullet
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
   private underPressure = false;
@@ -278,6 +282,13 @@ export class FieldScene extends Phaser.Scene {
       this.resetPlay(); // tap to skip
       return;
     }
+    if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
+      // Other thumb taps while aiming: switch between a normal pass and a bullet.
+      this.bulletAim = !this.bulletAim;
+      this.updateAim();
+      this.updateLabel();
+      return;
+    }
     if (this.state === 'presnap') this.snap(); // tap anywhere to snap
     // Aim with the right thumb (the same touch that snapped can start aiming straight away).
     if (this.state === 'live' && this.aimPointerId === null && p.x >= this.scale.width / 2) {
@@ -285,6 +296,8 @@ export class FieldScene extends Phaser.Scene {
       this.aimStart = { x: p.x, y: p.y };
       this.aimDrag = null;
       this.target = null;
+      this.bulletAim = false;
+      this.updateLabel();
     }
   }
 
@@ -315,7 +328,9 @@ export class FieldScene extends Phaser.Scene {
     this.aimPointerId = null;
     this.aimDrag = null;
     this.aimG.clear();
+    this.updateLabel();
     if (this.state !== 'live' || !this.target) return; // just a tap: nothing thrown
+    this.bulletThrow = this.bulletAim;
     if (this.playTime < feel.throw.earliestRelease) this.queuedTarget = this.target;
     else this.startWindup(this.target);
   }
@@ -333,7 +348,9 @@ export class FieldScene extends Phaser.Scene {
       dragForMaxRatio: feel.throw.aimDragForMaxRatio,
       maxDistanceYards: feel.throw.maxDistanceYards,
     });
-    this.drawAimPreview(this.target);
+    // A bullet can't go as far: same direction, cut down to its max distance.
+    if (this.bulletAim) this.target = clampDistance(this.qbPos, this.target, feel.bullet.maxDistanceYards);
+    this.drawAimPreview(this.target, this.bulletAim);
   }
 
   // ---------- Play flow ----------
@@ -376,7 +393,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private releaseBall(target: Vec) {
-    this.currentThrow = makeThrow({ ...this.qbPos }, target, feel.throw, feel.throw.arcHeightRatio);
+    this.currentThrow = this.buildThrow(this.qbPos, target, this.bulletThrow);
     this.flightElapsed = 0;
     const duration = this.currentThrow.duration;
     for (const r of this.receivers) r.atLanding = runnerAfter(r.runner, r.path, duration, feel.routes).pos;
@@ -387,7 +404,7 @@ export class FieldScene extends Phaser.Scene {
     this.shadow.setVisible(true);
     // Landing marker stays on the turf while the ball is in the air.
     this.aimG.clear();
-    this.drawLandingMarker(target, 0.8);
+    this.drawLandingMarker(target, 0.8, this.bulletThrow);
   }
 
   /**
@@ -426,11 +443,11 @@ export class FieldScene extends Phaser.Scene {
     this.state = 'result';
 
     const pass = resolveTargetedPass(wrSpots, cbSpots, th.to, getRngOrFallback().next(), {
-      catchRadiusYards: feel.catching.catchRadiusYards,
+      catchRadiusYards: this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards,
       contestRadiusYards: feel.defense.contestRadiusYards,
       breakupChance: feel.defense.breakupChance,
       interceptChance: feel.defense.interceptChance,
-      receiverCatchChance: feel.catching.receiverCatchChance,
+      receiverCatchChance: this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance,
       defenderCatchChance: feel.defense.defenderCatchChance,
     });
 
@@ -729,6 +746,8 @@ export class FieldScene extends Phaser.Scene {
     this.currentThrow = null;
     this.target = null;
     this.queuedTarget = null;
+    this.bulletAim = false;
+    this.bulletThrow = false;
     this.aimPointerId = null;
     this.aimDrag = null;
     this.underPressure = false;
@@ -841,6 +860,10 @@ export class FieldScene extends Phaser.Scene {
       this.label.setText('RUN! Drag up/down to steer · quick flick = juke');
       return;
     }
+    if (this.aimPointerId !== null) {
+      this.label.setText(this.bulletAim ? 'BULLET · tap other thumb for normal pass' : 'Tap other thumb = BULLET pass');
+      return;
+    }
     const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';
     this.label.setText(`Right side: ${how}, release to throw`);
   }
@@ -861,20 +884,28 @@ export class FieldScene extends Phaser.Scene {
     this.shadow.setPosition(x, y).setAlpha(Math.max(0.12, 0.35 - h * 0.02));
   }
 
-  private drawAimPreview(target: Vec) {
-    const th = makeThrow(this.qbPos, target, feel.throw, feel.throw.arcHeightRatio);
-    const g = this.aimG;
-    g.clear();
-    g.fillStyle(COLORS.aim, 0.9);
-    const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - this.qbPos.x, target.y - this.qbPos.y) / 1.5)));
-    for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
-    this.drawLandingMarker(target, 1);
+  /** A normal pass or a bullet (flatter and faster, see feel.bullet). */
+  private buildThrow(from: Vec, to: Vec, bullet: boolean) {
+    return bullet
+      ? makeThrow({ ...from }, to, feel.throw, feel.bullet.arcHeightRatio, feel.bullet.flightTimeRatio)
+      : makeThrow({ ...from }, to, feel.throw, feel.throw.arcHeightRatio);
   }
 
-  private drawLandingMarker(target: Vec, alpha: number) {
+  private drawAimPreview(target: Vec, bullet: boolean) {
+    const th = this.buildThrow(this.qbPos, target, bullet);
     const g = this.aimG;
-    g.lineStyle(0.18, COLORS.aim, alpha);
-    g.strokeCircle(target.x, target.y, feel.catching.catchRadiusYards);
+    g.clear();
+    g.fillStyle(bullet ? COLORS.bullet : COLORS.aim, 0.9);
+    const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - this.qbPos.x, target.y - this.qbPos.y) / 1.5)));
+    for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
+    this.drawLandingMarker(target, 1, bullet);
+  }
+
+  /** Landing marker; its circle is the catch zone (smaller for a bullet). */
+  private drawLandingMarker(target: Vec, alpha: number, bullet: boolean) {
+    const g = this.aimG;
+    g.lineStyle(0.18, bullet ? COLORS.bullet : COLORS.aim, alpha);
+    g.strokeCircle(target.x, target.y, bullet ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards);
     g.lineBetween(target.x - 0.5, target.y, target.x + 0.5, target.y);
     g.lineBetween(target.x, target.y - 0.5, target.x, target.y + 0.5);
   }

@@ -128,6 +128,22 @@ export const feel = {
     /** How much the QB squashes during the wind-up. */
     windupSquashRatio: 0.3,
   },
+  /**
+   * Bullet pass (tap with the other thumb while aiming): flat and fast, but shorter and harder
+   * to catch. Later: arm strength speeds it up, receiver hands affect the drop chance.
+   */
+  bullet: {
+    /** Flight time as a fraction of a normal pass over the same distance (lower = faster). */
+    flightTimeRatio: 0.55,
+    /** Peak height as a fraction of distance (normal pass: throw.arcHeightRatio). */
+    arcHeightRatio: 0.06,
+    /** Longest bullet; aiming further gets cut down to this. */
+    maxDistanceYards: 25,
+    /** Catch zone (normal pass: catching.catchRadiusYards). */
+    catchRadiusYards: 1.1,
+    /** Chance an open receiver holds on (normal pass: catching.receiverCatchChance). */
+    catchChance: 0.88,
+  },
   ball: {
     /** How far up the screen the ball is drawn per yard of height (shows the arc). */
     heightDrawRatio: 1,
