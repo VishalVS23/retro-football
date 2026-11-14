@@ -96,8 +96,6 @@ export const feel = {
     yardsPopupTime: 0.9,
     /** How far the "+12 YDS" popup rises, in yards. */
     yardsPopupRise: 3,
-    /** How fast the chevrons march along the pre-snap route line, yards per second. */
-    routeArrowSpeed: 3,
   },
 };
 

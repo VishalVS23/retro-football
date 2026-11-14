@@ -117,7 +117,6 @@ export class FieldScene extends Phaser.Scene {
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
 
-    if (this.state === 'presnap') this.drawRoute(); // animate the route chevrons
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
       this.playTime += dt;
@@ -372,8 +371,7 @@ export class FieldScene extends Phaser.Scene {
 
   /**
    * Pre-snap route art (placeholder style until the stage-13 art pass): a thick bright line with
-   * a dark pixel-style outline, a chunky arrowhead, and chevrons marching toward the end.
-   * Called every frame before the snap so the chevrons move.
+   * a dark pixel-style outline and a chunky arrowhead. Static (user didn't like animated chevrons).
    */
   private drawRoute() {
     const g = this.routeG;
@@ -414,37 +412,6 @@ export class FieldScene extends Phaser.Scene {
     stroke(LINE, COLORS.route);
     g.fillStyle(COLORS.route, 1);
     g.fillTriangle(...tri(HEAD, 0.95, HEAD * 0.6));
-
-    // Marching chevrons along the line, pointing the way he'll run.
-    const segs: Array<{ a: Vec; b: Vec; len: number; start: number }> = [];
-    let total = 0;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-      segs.push({ a: pts[i], b: pts[i + 1], len, start: total });
-      total += len;
-    }
-    const SPACING = 2.5;
-    const offset = (this.time.now / 1000) * feel.juice.routeArrowSpeed % SPACING;
-    g.lineStyle(0.18, COLORS.routeOutline, 0.9);
-    for (let d = offset + 1; d < total - 0.5; d += SPACING) {
-      const seg = segs.find((sg) => d >= sg.start && d <= sg.start + sg.len) ?? segs[segs.length - 1];
-      const u = (d - seg.start) / (seg.len || 1);
-      const x = seg.a.x + (seg.b.x - seg.a.x) * u;
-      const y = seg.a.y + (seg.b.y - seg.a.y) * u;
-      const sa = Math.atan2(seg.b.y - seg.a.y, seg.b.x - seg.a.x);
-      const back = 0.32;
-      const wing = 0.28;
-      const tx = x + Math.cos(sa) * 0.16;
-      const ty = y + Math.sin(sa) * 0.16;
-      for (const side of [1, -1]) {
-        g.lineBetween(
-          tx,
-          ty,
-          x - Math.cos(sa) * back - Math.sin(sa) * wing * side,
-          y - Math.sin(sa) * back + Math.cos(sa) * wing * side,
-        );
-      }
-    }
   }
 
   private updateLabel() {
