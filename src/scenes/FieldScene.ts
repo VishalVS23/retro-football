@@ -12,6 +12,7 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
+import { ROUTES, routePath, startRunner, stepRunner, type Runner } from '../sim/routes';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -26,16 +27,19 @@ const COLORS = {
   shadow: 0x000000,
   aim: 0xffd166,
   scrimmage: 0x7ec8e3,
+  route: 0xf4efe1,
 };
 
 // Formation for this test (football layout, not feel): line of scrimmage at our 25.
 const LOS_X = END_ZONE_DEPTH + 25;
-const QB_START: Vec = { x: LOS_X - 5, y: FIELD_WIDTH / 2 };
-const WR_START: Vec = { x: LOS_X + 10, y: FIELD_WIDTH / 2 - 10 };
+const QB_START: Vec = { x: LOS_X - 2, y: FIELD_WIDTH / 2 };
+const WR_START: Vec = { x: LOS_X - 0.5, y: FIELD_WIDTH / 2 - 12 };
+const WR_TOWARD_MIDDLE = 1; // he lines up above the middle, so "inside" is +y
 const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
+const PRESSURE_COLOR = 0xff3b3b;
 
-type State = 'ready' | 'aiming' | 'windup' | 'flight' | 'result';
+type State = 'presnap' | 'live' | 'windup' | 'flight' | 'result';
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
 export class FieldScene extends Phaser.Scene {
@@ -45,13 +49,22 @@ export class FieldScene extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Ellipse;
   private shadow!: Phaser.GameObjects.Ellipse;
   private aimG!: Phaser.GameObjects.Graphics;
+  private routeG!: Phaser.GameObjects.Graphics;
 
-  private state: State = 'ready';
-  private aimPointerId = -1;
+  private state: State = 'presnap';
+  private playTime = 0; // seconds since the snap
+  private routeIndex = 0;
+  private path: Vec[] = [];
+  private runner: Runner = startRunner([WR_START]);
+  private qbPos: Vec = { ...QB_START };
+  private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
+  private aimDrag: { x: number; y: number } | null = null;
   private target: Vec | null = null;
+  private queuedTarget: Vec | null = null; // released before the earliest throw time
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
+  private underPressure = false;
   private resetTimer: Phaser.Time.TimerEvent | null = null;
   private cameraFocus: Vec = { ...QB_START };
 
@@ -62,6 +75,7 @@ export class FieldScene extends Phaser.Scene {
   create() {
     this.drawField();
 
+    this.routeG = this.add.graphics().setDepth(1);
     this.aimG = this.add.graphics().setDepth(4);
     this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
     this.qb = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
@@ -100,17 +114,46 @@ export class FieldScene extends Phaser.Scene {
   }
 
   update(_time: number, deltaMs: number) {
-    const dt = deltaMs / 1000;
+    const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
 
+    const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
+    if (playing) {
+      this.playTime += dt;
+      this.runner = stepRunner(this.runner, this.path, dt, feel.routes);
+      this.updateQbDropback();
+    }
+
+    if (this.state === 'live') {
+      if (this.aimDrag) this.updateAim();
+      if (this.queuedTarget && this.playTime >= feel.throw.earliestRelease) {
+        const t = this.queuedTarget;
+        this.queuedTarget = null;
+        this.startWindup(t);
+      } else if (!this.underPressure && this.playTime >= feel.pocket.pressureCueTime) {
+        this.underPressure = true;
+        this.qb.setStrokeStyle(0.3, PRESSURE_COLOR);
+      }
+      if (this.state === 'live' && this.playTime >= feel.pocket.sackTime) this.sack();
+    }
+
+    let wrPos = this.runner.pos;
     if (this.state === 'flight' && this.currentThrow) {
       this.flightElapsed += dt;
       const b = ballAt(this.currentThrow, this.flightElapsed);
       this.drawBall(b.x, b.y, b.h);
-      const wrPos = this.receiverPosition();
-      this.wr.setPosition(wrPos.x, wrPos.y);
+      wrPos = this.receiverPosition();
       this.cameraFocus = { x: b.x + feel.camera.leadYards, y: b.y };
-      if (b.done) this.resolveThrow();
+      if (b.done) {
+        this.wr.setPosition(wrPos.x, wrPos.y);
+        this.resolveThrow();
+      }
+    } else if (playing) {
+      this.cameraFocus = {
+        x: (this.qbPos.x + wrPos.x) / 2 + feel.camera.leadYards,
+        y: (this.qbPos.y + wrPos.y) / 2,
+      };
     }
+    if (playing) this.wr.setPosition(wrPos.x, wrPos.y);
 
     // Camera eases toward its focus point (frame-rate independent).
     const cam = this.cameras.main;
@@ -126,23 +169,41 @@ export class FieldScene extends Phaser.Scene {
       this.resetPlay(); // tap to skip
       return;
     }
-    if (this.state !== 'ready' || p.x < this.scale.width / 2) return; // aim with the right thumb
-    this.state = 'aiming';
-    this.aimPointerId = p.id;
-    this.aimStart = { x: p.x, y: p.y };
-    this.target = null;
+    if (this.state === 'presnap') this.snap(); // tap anywhere to snap
+    // Aim with the right thumb (the same touch that snapped can start aiming straight away).
+    if (this.state === 'live' && this.aimPointerId === null && p.x >= this.scale.width / 2) {
+      this.aimPointerId = p.id;
+      this.aimStart = { x: p.x, y: p.y };
+      this.aimDrag = null;
+      this.target = null;
+    }
   }
 
   private onMove(p: Phaser.Input.Pointer) {
-    if (this.state !== 'aiming' || p.id !== this.aimPointerId) return;
-    const dx = p.x - this.aimStart.x;
-    const dy = p.y - this.aimStart.y;
-    if (Math.hypot(dx, dy) < MIN_DRAG_PX) {
+    if (this.state !== 'live' || p.id !== this.aimPointerId) return;
+    this.aimDrag = { x: p.x - this.aimStart.x, y: p.y - this.aimStart.y };
+    this.updateAim();
+  }
+
+  private onUp(p: Phaser.Input.Pointer) {
+    if (p.id !== this.aimPointerId) return;
+    this.aimPointerId = null;
+    this.aimDrag = null;
+    this.aimG.clear();
+    if (this.state !== 'live' || !this.target) return; // just a tap: nothing thrown
+    if (this.playTime < feel.throw.earliestRelease) this.queuedTarget = this.target;
+    else this.startWindup(this.target);
+  }
+
+  /** Recomputes the target from the current drag (the QB keeps moving while you aim). */
+  private updateAim() {
+    const d = this.aimDrag;
+    if (!d || Math.hypot(d.x, d.y) < MIN_DRAG_PX) {
       this.target = null;
       this.aimG.clear();
       return;
     }
-    this.target = aimTarget(QB_START, dx, dy, this.scale.height, {
+    this.target = aimTarget(this.qbPos, d.x, d.y, this.scale.height, {
       mode: feel.throw.aimMode,
       dragForMaxRatio: feel.throw.aimDragForMaxRatio,
       maxDistanceYards: feel.throw.maxDistanceYards,
@@ -150,17 +211,22 @@ export class FieldScene extends Phaser.Scene {
     this.drawAimPreview(this.target);
   }
 
-  private onUp(p: Phaser.Input.Pointer) {
-    if (this.state !== 'aiming' || p.id !== this.aimPointerId) return;
-    this.aimG.clear();
-    if (!this.target) {
-      this.state = 'ready'; // just a tap: nothing thrown
-      return;
-    }
-    this.startWindup(this.target);
+  // ---------- Play flow ----------
+
+  private snap() {
+    this.state = 'live';
+    this.playTime = 0;
+    this.routeG.clear(); // route lines hide on the snap
+    this.updateLabel();
   }
 
-  // ---------- Throw flow ----------
+  /** QB eases back into the pocket after the snap. */
+  private updateQbDropback() {
+    const u = Math.min(1, this.playTime / Math.max(0.01, feel.pocket.dropbackTime));
+    const eased = 0.5 - 0.5 * Math.cos(Math.PI * u);
+    this.qbPos = { x: QB_START.x - feel.pocket.dropbackYards * eased, y: QB_START.y };
+    this.qb.setPosition(this.qbPos.x, this.qbPos.y);
+  }
 
   private startWindup(target: Vec) {
     this.state = 'windup';
@@ -184,7 +250,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private releaseBall(target: Vec) {
-    this.currentThrow = makeThrow(QB_START, target, feel.throw, feel.throw.arcHeightRatio);
+    this.currentThrow = makeThrow({ ...this.qbPos }, target, feel.throw, feel.throw.arcHeightRatio);
     this.flightElapsed = 0;
     this.state = 'flight';
     this.ball.setVisible(true);
@@ -194,10 +260,11 @@ export class FieldScene extends Phaser.Scene {
     this.drawLandingMarker(target, 0.8);
   }
 
+  /** Receiver keeps running his route, drifting toward the ball while it's in the air. */
   private receiverPosition(): Vec {
-    if (!this.currentThrow) return WR_START;
+    if (!this.currentThrow) return this.runner.pos;
     return adjustReceiver(
-      WR_START,
+      this.runner.pos,
       this.currentThrow.to,
       feel.catching.receiverAdjustYards,
       feel.catching.receiverAdjustSpeed,
@@ -243,7 +310,29 @@ export class FieldScene extends Phaser.Scene {
       });
       this.showBanner('INCOMPLETE');
     }
+    this.scheduleReset();
+  }
 
+  /** Placeholder until the pass rush exists (step 7): held the ball too long. */
+  private sack() {
+    this.state = 'result';
+    this.aimPointerId = null;
+    this.aimDrag = null;
+    this.aimG.clear();
+    const sq = feel.throw.windupSquashRatio;
+    this.tweens.add({
+      targets: this.qb,
+      scaleY: 1 - sq * 1.5,
+      scaleX: 1 + sq,
+      duration: feel.juice.screenShakeTime * 1000,
+      yoyo: true,
+    });
+    this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
+    this.showBanner('SACKED');
+    this.scheduleReset();
+  }
+
+  private scheduleReset() {
     this.resetTimer = this.time.delayedCall(
       (feel.pacing.bannerTime + feel.pacing.betweenPlaysTime) * 1000,
       () => this.resetPlay(),
@@ -253,18 +342,59 @@ export class FieldScene extends Phaser.Scene {
   private resetPlay() {
     this.resetTimer?.remove();
     this.resetTimer = null;
-    this.state = 'ready';
+    if (this.path.length) this.routeIndex = (this.routeIndex + 1) % ROUTES.length; // try each route in turn
+    this.path = routePath(WR_START, ROUTES[this.routeIndex], WR_TOWARD_MIDDLE);
+    this.runner = startRunner(this.path);
+    this.state = 'presnap';
+    this.playTime = 0;
     this.currentThrow = null;
     this.target = null;
+    this.queuedTarget = null;
+    this.aimPointerId = null;
+    this.aimDrag = null;
+    this.underPressure = false;
     this.aimG.clear();
     this.tweens.killTweensOf([this.qb, this.wr, this.ball, this.shadow]);
-    this.qb.setPosition(QB_START.x, QB_START.y).setScale(1);
+    this.qbPos = { ...QB_START };
+    this.qb.setPosition(QB_START.x, QB_START.y).setScale(1).setStrokeStyle(0.2, COLORS.outline);
     this.wr.setPosition(WR_START.x, WR_START.y).setScale(1);
     this.ball.setVisible(false).setAlpha(1);
     this.shadow.setVisible(false).setAlpha(1);
     this.sizeBall();
-    this.cameraFocus = { x: (QB_START.x + WR_START.x) / 2, y: (QB_START.y + WR_START.y) / 2 };
+    this.drawRoute();
+    this.cameraFocus = { x: QB_START.x + 12, y: (QB_START.y + WR_START.y) / 2 };
     this.updateLabel();
+  }
+
+  /** Pre-snap route line: dots along the path with an arrowhead at the end. */
+  private drawRoute() {
+    const g = this.routeG;
+    g.clear();
+    g.fillStyle(COLORS.route, 0.75);
+    for (let i = 0; i < this.path.length - 1; i++) {
+      const a = this.path[i];
+      const b = this.path[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      for (let d = 1; d < len; d += 1) {
+        g.fillCircle(a.x + ((b.x - a.x) * d) / len, a.y + ((b.y - a.y) * d) / len, 0.16);
+      }
+    }
+    const end = this.path[this.path.length - 1];
+    const prev = this.path[this.path.length - 2];
+    const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
+    const tip = (off: number) => ({ x: end.x - Math.cos(ang + off) * 1.4, y: end.y - Math.sin(ang + off) * 1.4 });
+    const l = tip(0.5);
+    const r = tip(-0.5);
+    g.fillTriangle(end.x, end.y, l.x, l.y, r.x, r.y);
+  }
+
+  private updateLabel() {
+    if (this.state === 'presnap') {
+      this.label.setText(`${ROUTES[this.routeIndex].name} route · TAP to snap · ⚙ = feel`);
+      return;
+    }
+    const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';
+    this.label.setText(`Right side: ${how}, release to throw`);
   }
 
   // ---------- Drawing ----------
@@ -284,11 +414,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private drawAimPreview(target: Vec) {
-    const th = makeThrow(QB_START, target, feel.throw, feel.throw.arcHeightRatio);
+    const th = makeThrow(this.qbPos, target, feel.throw, feel.throw.arcHeightRatio);
     const g = this.aimG;
     g.clear();
     g.fillStyle(COLORS.aim, 0.9);
-    const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - QB_START.x, target.y - QB_START.y) / 1.5)));
+    const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - this.qbPos.x, target.y - this.qbPos.y) / 1.5)));
     for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
     this.drawLandingMarker(target, 1);
   }
@@ -337,11 +467,6 @@ export class FieldScene extends Phaser.Scene {
       duration: feel.pacing.bannerFadeTime * 1000,
       onComplete: () => b.destroy(),
     });
-  }
-
-  private updateLabel() {
-    const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';
-    this.label.setText(`Right side: ${how}, release to throw · ⚙ = feel`);
   }
 
   /**

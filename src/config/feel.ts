@@ -21,6 +21,17 @@ export const feel = {
     sackTime: 3.0,
     /** When the "pressure is coming" warning appears. */
     pressureCueTime: 2.0,
+    /** How far the QB drops back after the snap, and how long it takes. */
+    dropbackYards: 3,
+    dropbackTime: 0.6,
+  },
+  routes: {
+    /** Receiver top speed, yards per second (later scaled by his speed rating). */
+    topSpeed: 8,
+    /** How quickly he reaches top speed, yards per second per second. */
+    acceleration: 16,
+    /** Speed kept through a cut (1 = razor-sharp, lower = slower, rounder cuts). */
+    cutSpeedRatio: 0.55,
   },
   throw: {
     /** Earliest the QB can release after the snap. */

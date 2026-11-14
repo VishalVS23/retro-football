@@ -380,7 +380,7 @@ Stage 1 steps:
 - [x] 3. Feel tuning panel (2026-11-14): `src/debug/feelPanel.ts` + tested helpers in `src/config/feelTools.ts`. Sliders auto-built from `feel.ts`; tweaks saved in localStorage; scenes listen for the `feelchange` window event to react live.
 - [x] 4. Save export/import skeleton + seeded RNG (2026-11-14): `src/sim/rng.ts` (mulberry32, saveable state), `src/save/saveFormat.ts` (version + migrations + 3 rolling backups, tested), `saveStore.ts` (IndexedDB via `idb`), `saveSession.ts` (`getRng()` / `commitSave()`). Export/Import buttons in the ⚙ panel; phones use the share sheet, desktops download. Tested on PC and phone.
 - [x] 5. QB throws to one receiver (aim arc, ball shadow, catch) (2026-11-14): math in `src/sim/throw.ts` (tested); scene in `FieldScene.ts`. Aim style: **slingshot (aimMode 1) chosen** after phone test. Added `camera.zoomScale` (1.5) because the whole field fit on screen and players were tiny. Phone tested: feels good. Ball a bit slow (arm strength will speed it up in stage 3); arc reads like a straight line from the top-down view, so revisit height cues once defenders exist.
-- [ ] 6. Routes
+- [x] 6. Routes (2026-11-14): `src/sim/routes.ts` (Slant/Out/Go, acceleration, slowdown at cuts, tested). Tap anywhere to snap (user's idea, replaces a Snap button); route line shown pre-snap; QB drops back; earliest release 0.3s; pressure cue (red QB outline) and placeholder SACKED at `pocket.sackTime` until the pass rush exists. Routes rotate each play until play calling (stage 2).
 - [ ] 7. Basic defense
 - [ ] 8. Catch / incompletion / tackle
 - [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
@@ -393,3 +393,4 @@ Stage 1 steps:
 - **2026-11-14: Feel notes added** from a timing study of a reference game (see "Feel notes"). Stage 1 plan approved.
 - **2026-11-14: No code, art or files from Retro Bowl (or any copy of it) are used.** User shared GitHub copies; declined because the game is commercial and the project must be original. One linked "launcher" README showed malware signs (Telegram download, "disable antivirus"). Feel comes only from timing notes plus tuning with the sliders.
 - **2026-11-14: Slingshot aiming chosen** (pull back away from the target). Flight times stay as they are for now; better QBs will throw faster once ratings arrive in stage 3.
+- **2026-11-14: Tap anywhere to snap** (no Snap button). Optional throwing-zone glow hint (with an off switch) parked for later; the "TAP to snap" text covers it for now.
