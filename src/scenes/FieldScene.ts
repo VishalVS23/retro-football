@@ -329,7 +329,7 @@ export class FieldScene extends Phaser.Scene {
       // Ball clanks off the player's hands and bounces away.
       const who = result === 'drop' ? wrPos : this.coverage.pos;
       this.skidBall(th.to, { x: th.to.x - th.from.x + (th.to.y - who.y), y: th.to.y - th.from.y });
-      this.showBanner(result === 'drop' ? 'DROPPED' : 'ALMOST PICKED');
+      this.showBanner(result === 'drop' ? 'DROPPED' : 'LUCKY!');
     } else if (result === 'breakup') {
       // Swatted away: the ball pops off sideways from the defender.
       const cb = this.coverage.pos;
