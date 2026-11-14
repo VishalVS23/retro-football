@@ -3,7 +3,6 @@ import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
 import {
   AIM_SLINGSHOT,
-  adjustReceiver,
   aimTarget,
   arcPoints,
   ballAt,
@@ -12,7 +11,7 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
-import { ROUTES, routePath, startRunner, stepRunner, type Runner } from '../sim/routes';
+import { ROUTES, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type Runner } from '../sim/routes';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -27,7 +26,8 @@ const COLORS = {
   shadow: 0x000000,
   aim: 0xffd166,
   scrimmage: 0x7ec8e3,
-  route: 0xf4efe1,
+  route: 0xffd166,
+  routeOutline: 0x0d1b2a,
 };
 
 // Formation for this test (football layout, not feel): line of scrimmage at our 25.
@@ -64,6 +64,7 @@ export class FieldScene extends Phaser.Scene {
   private queuedTarget: Vec | null = null; // released before the earliest throw time
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
+  private wrAtLanding: Vec = { ...WR_START }; // where his route takes him when the ball lands
   private underPressure = false;
   private resetTimer: Phaser.Time.TimerEvent | null = null;
   private cameraFocus: Vec = { ...QB_START };
@@ -116,6 +117,7 @@ export class FieldScene extends Phaser.Scene {
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
 
+    if (this.state === 'presnap') this.drawRoute(); // animate the route chevrons
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
       this.playTime += dt;
@@ -252,6 +254,7 @@ export class FieldScene extends Phaser.Scene {
   private releaseBall(target: Vec) {
     this.currentThrow = makeThrow({ ...this.qbPos }, target, feel.throw, feel.throw.arcHeightRatio);
     this.flightElapsed = 0;
+    this.wrAtLanding = runnerAfter(this.runner, this.path, this.currentThrow.duration, feel.routes).pos;
     this.state = 'flight';
     this.ball.setVisible(true);
     this.shadow.setVisible(true);
@@ -263,12 +266,13 @@ export class FieldScene extends Phaser.Scene {
   /** Receiver keeps running his route, drifting toward the ball while it's in the air. */
   private receiverPosition(): Vec {
     if (!this.currentThrow) return this.runner.pos;
-    return adjustReceiver(
+    return receiverInFlight(
       this.runner.pos,
+      this.wrAtLanding,
       this.currentThrow.to,
+      this.flightElapsed,
       feel.catching.receiverAdjustYards,
       feel.catching.receiverAdjustSpeed,
-      this.flightElapsed,
     );
   }
 
@@ -366,26 +370,81 @@ export class FieldScene extends Phaser.Scene {
     this.updateLabel();
   }
 
-  /** Pre-snap route line: dots along the path with an arrowhead at the end. */
+  /**
+   * Pre-snap route art (placeholder style until the stage-13 art pass): a thick bright line with
+   * a dark pixel-style outline, a chunky arrowhead, and chevrons marching toward the end.
+   * Called every frame before the snap so the chevrons move.
+   */
   private drawRoute() {
     const g = this.routeG;
     g.clear();
-    g.fillStyle(COLORS.route, 0.75);
-    for (let i = 0; i < this.path.length - 1; i++) {
-      const a = this.path[i];
-      const b = this.path[i + 1];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      for (let d = 1; d < len; d += 1) {
-        g.fillCircle(a.x + ((b.x - a.x) * d) / len, a.y + ((b.y - a.y) * d) / len, 0.16);
+    const path = this.path;
+    if (path.length < 2) return;
+    const OUTLINE = 0.75;
+    const LINE = 0.42;
+
+    // Stop the line short of the tip so the arrowhead sits on the end.
+    const end = path[path.length - 1];
+    const prev = path[path.length - 2];
+    const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
+    const HEAD = 2.0;
+    const lineEnd = { x: end.x - Math.cos(ang) * HEAD * 0.6, y: end.y - Math.sin(ang) * HEAD * 0.6 };
+    const pts = [...path.slice(0, -1), lineEnd];
+
+    const stroke = (width: number, color: number) => {
+      g.lineStyle(width, color, 1);
+      for (let i = 0; i < pts.length - 1; i++) g.lineBetween(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+      g.fillStyle(color, 1);
+      for (const pt of pts) g.fillCircle(pt.x, pt.y, width / 2); // round the corners
+    };
+    stroke(OUTLINE, COLORS.routeOutline);
+
+    // Arrowhead: outline triangle, then the bright one inside it.
+    const tri = (len: number, half: number, back: number) => {
+      const bx = end.x - Math.cos(ang) * back;
+      const by = end.y - Math.sin(ang) * back;
+      const tipX = bx + Math.cos(ang) * len;
+      const tipY = by + Math.sin(ang) * len;
+      const nx = -Math.sin(ang) * half;
+      const ny = Math.cos(ang) * half;
+      return [tipX, tipY, bx + nx, by + ny, bx - nx, by - ny] as const;
+    };
+    g.fillStyle(COLORS.routeOutline, 1);
+    g.fillTriangle(...tri(HEAD + 0.5, 1.35, HEAD * 0.8));
+    stroke(LINE, COLORS.route);
+    g.fillStyle(COLORS.route, 1);
+    g.fillTriangle(...tri(HEAD, 0.95, HEAD * 0.6));
+
+    // Marching chevrons along the line, pointing the way he'll run.
+    const segs: Array<{ a: Vec; b: Vec; len: number; start: number }> = [];
+    let total = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+      segs.push({ a: pts[i], b: pts[i + 1], len, start: total });
+      total += len;
+    }
+    const SPACING = 2.5;
+    const offset = (this.time.now / 1000) * feel.juice.routeArrowSpeed % SPACING;
+    g.lineStyle(0.18, COLORS.routeOutline, 0.9);
+    for (let d = offset + 1; d < total - 0.5; d += SPACING) {
+      const seg = segs.find((sg) => d >= sg.start && d <= sg.start + sg.len) ?? segs[segs.length - 1];
+      const u = (d - seg.start) / (seg.len || 1);
+      const x = seg.a.x + (seg.b.x - seg.a.x) * u;
+      const y = seg.a.y + (seg.b.y - seg.a.y) * u;
+      const sa = Math.atan2(seg.b.y - seg.a.y, seg.b.x - seg.a.x);
+      const back = 0.32;
+      const wing = 0.28;
+      const tx = x + Math.cos(sa) * 0.16;
+      const ty = y + Math.sin(sa) * 0.16;
+      for (const side of [1, -1]) {
+        g.lineBetween(
+          tx,
+          ty,
+          x - Math.cos(sa) * back - Math.sin(sa) * wing * side,
+          y - Math.sin(sa) * back + Math.cos(sa) * wing * side,
+        );
       }
     }
-    const end = this.path[this.path.length - 1];
-    const prev = this.path[this.path.length - 2];
-    const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
-    const tip = (off: number) => ({ x: end.x - Math.cos(ang + off) * 1.4, y: end.y - Math.sin(ang + off) * 1.4 });
-    const l = tip(0.5);
-    const r = tip(-0.5);
-    g.fillTriangle(end.x, end.y, l.x, l.y, r.x, r.y);
   }
 
   private updateLabel() {

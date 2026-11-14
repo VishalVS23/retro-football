@@ -97,3 +97,30 @@ export function stepRunner(r: Runner, path: Vec[], dt: number, p: RunParams): Ru
   }
   return { pos, speed, seg, dir };
 }
+
+/** Where the runner will be after `seconds` more of his route (used to see where he'll be when the ball lands). */
+export function runnerAfter(r: Runner, path: Vec[], seconds: number, p: RunParams, dt = 1 / 60): Runner {
+  let out = r;
+  for (let t = 0; t < seconds - 1e-9; t += dt) out = stepRunner(out, path, Math.min(dt, seconds - t), p);
+  return out;
+}
+
+/**
+ * Receiver's position while the ball is in the air: his route position plus a drift toward
+ * the ball. The drift is aimed from where he WILL be when it lands, so it never flips direction
+ * (he never "dodges" the ball). It grows at `adjustSpeed` up to `maxAdjust` yards.
+ */
+export function receiverInFlight(
+  routePos: Vec,
+  predictedAtLanding: Vec,
+  landing: Vec,
+  elapsed: number,
+  maxAdjust: number,
+  adjustSpeed: number,
+): Vec {
+  const want = { x: landing.x - predictedAtLanding.x, y: landing.y - predictedAtLanding.y };
+  const len = Math.hypot(want.x, want.y);
+  if (len === 0) return { ...routePos };
+  const move = Math.min(len, maxAdjust, adjustSpeed * elapsed);
+  return { x: routePos.x + (want.x / len) * move, y: routePos.y + (want.y / len) * move };
+}
