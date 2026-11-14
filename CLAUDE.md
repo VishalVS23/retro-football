@@ -376,17 +376,18 @@ Flow decisions:
 
 Stage 1 steps:
 - [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop, phone test pending until hosting)
-- [ ] 2. PWA install to home screen
+- [x] 2. PWA install to home screen (2026-11-14; done together with hosting, phone install test pending)
 - [ ] 3. Feel tuning panel
 - [ ] 4. Save export/import skeleton + seeded RNG
 - [ ] 5. QB throws to one receiver (aim arc, ball shadow, catch)
 - [ ] 6. Routes
 - [ ] 7. Basic defense
 - [ ] 8. Catch / incompletion / tackle
-- [ ] 9. Free hosting
+- [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
 
 ## Decisions & refinements
 
 - **2026-11-13: Project created** in its own folder `C:\Users\vsvis\retro-football`, separate from HooMaps.
 - **2026-11-13: Orientation switched to LANDSCAPE** (user's choice, before stage 1). Field runs left-to-right, two-thumb controls, "Rotate your phone" screen in portrait because iPhone can't lock orientation for home-screen web apps.
+- **2026-11-14: Hosting moved up** to right after step 1 (phone wasn't on the same Wi-Fi; PWA install needs HTTPS). Public repo `VishalVS23/retro-football`, GitHub Pages via Actions: every push to `main` runs tests, builds and deploys to https://vishalvs23.github.io/retro-football/. CI uses `npm install` (not `npm ci`) because the Windows lock file lacks Linux-only optional deps. Run tests from PowerShell (Git Bash's lowercase `c:` path crashes Vitest).
 - **2026-11-14: Feel notes added** from a timing study of a reference game (see "Feel notes"). Stage 1 plan approved.
