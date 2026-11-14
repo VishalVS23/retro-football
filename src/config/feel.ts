@@ -9,6 +9,8 @@ export const feel = {
   camera: {
     /** Extra space shown above and below the field, in yards. */
     sidelineMarginYards: 3,
+    /** 1 = whole field width fits the screen height; higher = closer in (camera follows up/down). */
+    zoomScale: 1.5,
     /** How far the camera looks ahead of the ball, in yards. */
     leadYards: 4,
     /** 0..1, how quickly the camera catches up each frame (higher = snappier). */
@@ -34,25 +36,55 @@ export const feel = {
     maxDistanceYards: 40,
     /** Peak height of the arc, as a fraction of throw distance. */
     arcHeightRatio: 0.25,
+    /** 0 = push (drag toward the target), 1 = slingshot (pull back away from it). */
+    aimMode: 1,
+    /** Dragging this fraction of the screen height = a max-distance throw. */
+    aimDragForMaxRatio: 0.45,
+    /** Wind-up before the ball leaves the QB's hand (anticipation squash). */
+    windupTime: 0.08,
+    /** How much the QB squashes during the wind-up. */
+    windupSquashRatio: 0.3,
+  },
+  ball: {
+    /** How far up the screen the ball is drawn per yard of height (shows the arc). */
+    heightDrawRatio: 0.6,
+    /** How much bigger the ball looks per yard of height. */
+    growPerYard: 0.05,
+    /** Ball radius on the ground, in yards. */
+    radiusYards: 0.45,
+    /** How far an incomplete pass skids after landing. */
+    skidYards: 1.5,
   },
   catching: {
     /** How close the ball must land to a receiver to be catchable. */
     catchRadiusYards: 1.5,
     /** How far receivers will adjust toward a badly-placed ball. */
     receiverAdjustYards: 2,
+    /** How fast receivers drift toward the ball, yards per second. */
+    receiverAdjustSpeed: 6,
+    /** Size the receiver pops to on a catch. */
+    catchPopScale: 1.5,
+    catchPopTime: 0.18,
   },
   pacing: {
     /** How long result banners (INCOMPLETE, SACKED...) stay up. */
     bannerTime: 0.9,
     /** Dead ball to next play ready. */
     betweenPlaysTime: 1.2,
+    /** Banner pop-in and fade-out. */
+    bannerPopTime: 0.12,
+    bannerFadeTime: 0.15,
   },
   juice: {
     hitPauseTime: 0.06,
     screenShakeTime: 0.15,
     screenShakeIntensity: 0.006,
-    /** Debug: how long the touch-test ring stays visible. */
-    tapRingTime: 0.4,
+    /** Gains of at least this many yards shake the screen. */
+    bigGainYards: 15,
+    /** How long the "+12 YDS" popup floats. */
+    yardsPopupTime: 0.9,
+    /** How far the "+12 YDS" popup rises, in yards. */
+    yardsPopupRise: 3,
   },
 };
 

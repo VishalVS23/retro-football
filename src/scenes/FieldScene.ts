@@ -1,6 +1,17 @@
 import Phaser from 'phaser';
 import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
+import {
+  AIM_SLINGSHOT,
+  adjustReceiver,
+  aimTarget,
+  arcPoints,
+  ballAt,
+  isCatch,
+  makeThrow,
+  type Throw,
+  type Vec,
+} from '../sim/throw';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -9,12 +20,40 @@ const COLORS = {
   turfAlt: 0x2a6247,
   endZone: 0x1f4d63,
   line: 0xf4efe1,
-  tapRing: 0xffd166,
+  team: 0xe76f51,
+  outline: 0xf4efe1,
+  ball: 0x8a5a2b,
+  shadow: 0x000000,
+  aim: 0xffd166,
+  scrimmage: 0x7ec8e3,
 };
+
+// Formation for this test (football layout, not feel): line of scrimmage at our 25.
+const LOS_X = END_ZONE_DEPTH + 25;
+const QB_START: Vec = { x: LOS_X - 5, y: FIELD_WIDTH / 2 };
+const WR_START: Vec = { x: LOS_X + 10, y: FIELD_WIDTH / 2 - 10 };
+const PLAYER_RADIUS = 0.9; // placeholder art size, yards
+const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
+
+type State = 'ready' | 'aiming' | 'windup' | 'flight' | 'result';
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
 export class FieldScene extends Phaser.Scene {
   private label!: Phaser.GameObjects.Text;
+  private qb!: Phaser.GameObjects.Arc;
+  private wr!: Phaser.GameObjects.Arc;
+  private ball!: Phaser.GameObjects.Ellipse;
+  private shadow!: Phaser.GameObjects.Ellipse;
+  private aimG!: Phaser.GameObjects.Graphics;
+
+  private state: State = 'ready';
+  private aimPointerId = -1;
+  private aimStart = { x: 0, y: 0 };
+  private target: Vec | null = null;
+  private currentThrow: Throw | null = null;
+  private flightElapsed = 0;
+  private resetTimer: Phaser.Time.TimerEvent | null = null;
+  private cameraFocus: Vec = { ...QB_START };
 
   constructor() {
     super('field');
@@ -23,8 +62,14 @@ export class FieldScene extends Phaser.Scene {
   create() {
     this.drawField();
 
+    this.aimG = this.add.graphics().setDepth(4);
+    this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
+    this.qb = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
+    this.wr = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
+    this.ball = this.add.ellipse(0, 0, 1, 0.7, COLORS.ball).setStrokeStyle(0.08, COLORS.outline).setDepth(3);
+
     this.label = this.add
-      .text(0, 0, 'Tap anywhere, drag to scroll, ⚙ = feel panel', {
+      .text(0, 0, '', {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#f4efe1',
@@ -34,41 +79,291 @@ export class FieldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(10);
 
+    this.resetPlay();
     this.fitCamera();
+    this.cameras.main.centerOn(this.cameraFocus.x, this.cameraFocus.y);
     this.scale.on('resize', () => this.fitCamera());
 
-    // Re-fit when a feel value changes in the tuning panel.
-    const onFeelChange = () => this.fitCamera();
+    // React live when a value changes in the feel panel.
+    const onFeelChange = () => {
+      this.fitCamera();
+      this.updateLabel();
+      this.sizeBall();
+    };
     window.addEventListener(FEEL_CHANGE_EVENT, onFeelChange);
     this.events.once('shutdown', () => window.removeEventListener(FEEL_CHANGE_EVENT, onFeelChange));
 
-    // Start looking at our own 25-yard line, like a drive start.
-    this.cameras.main.centerOn(END_ZONE_DEPTH + 25, FIELD_WIDTH / 2);
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onUp(p));
+    this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.onUp(p));
+  }
 
-    // Touch test: a ring appears wherever you tap. Drag sideways to scroll the field.
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.showTapRing(p.worldX, p.worldY));
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (!p.isDown) return;
-      const cam = this.cameras.main;
-      cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
+  update(_time: number, deltaMs: number) {
+    const dt = deltaMs / 1000;
+
+    if (this.state === 'flight' && this.currentThrow) {
+      this.flightElapsed += dt;
+      const b = ballAt(this.currentThrow, this.flightElapsed);
+      this.drawBall(b.x, b.y, b.h);
+      const wrPos = this.receiverPosition();
+      this.wr.setPosition(wrPos.x, wrPos.y);
+      this.cameraFocus = { x: b.x + feel.camera.leadYards, y: b.y };
+      if (b.done) this.resolveThrow();
+    }
+
+    // Camera eases toward its focus point (frame-rate independent).
+    const cam = this.cameras.main;
+    const k = 1 - Math.pow(1 - feel.camera.followLerp, dt * 60);
+    cam.scrollX += (this.cameraFocus.x - cam.width / 2 - cam.scrollX) * k;
+    cam.scrollY += (this.cameraFocus.y - cam.height / 2 - cam.scrollY) * k;
+  }
+
+  // ---------- Input ----------
+
+  private onDown(p: Phaser.Input.Pointer) {
+    if (this.state === 'result') {
+      this.resetPlay(); // tap to skip
+      return;
+    }
+    if (this.state !== 'ready' || p.x < this.scale.width / 2) return; // aim with the right thumb
+    this.state = 'aiming';
+    this.aimPointerId = p.id;
+    this.aimStart = { x: p.x, y: p.y };
+    this.target = null;
+  }
+
+  private onMove(p: Phaser.Input.Pointer) {
+    if (this.state !== 'aiming' || p.id !== this.aimPointerId) return;
+    const dx = p.x - this.aimStart.x;
+    const dy = p.y - this.aimStart.y;
+    if (Math.hypot(dx, dy) < MIN_DRAG_PX) {
+      this.target = null;
+      this.aimG.clear();
+      return;
+    }
+    this.target = aimTarget(QB_START, dx, dy, this.scale.height, {
+      mode: feel.throw.aimMode,
+      dragForMaxRatio: feel.throw.aimDragForMaxRatio,
+      maxDistanceYards: feel.throw.maxDistanceYards,
+    });
+    this.drawAimPreview(this.target);
+  }
+
+  private onUp(p: Phaser.Input.Pointer) {
+    if (this.state !== 'aiming' || p.id !== this.aimPointerId) return;
+    this.aimG.clear();
+    if (!this.target) {
+      this.state = 'ready'; // just a tap: nothing thrown
+      return;
+    }
+    this.startWindup(this.target);
+  }
+
+  // ---------- Throw flow ----------
+
+  private startWindup(target: Vec) {
+    this.state = 'windup';
+    const sq = feel.throw.windupSquashRatio;
+    let released = false;
+    this.tweens.add({
+      targets: this.qb,
+      scaleX: 1 + sq,
+      scaleY: 1 - sq,
+      duration: Math.max(1, feel.throw.windupTime * 1000),
+      ease: 'Quad.easeOut',
+      yoyo: true,
+      onYoyo: () => {
+        released = true;
+        this.releaseBall(target);
+      },
+      onComplete: () => {
+        if (!released) this.releaseBall(target);
+      },
     });
   }
 
-  /** Zoom so the full width of the field (sideline to sideline) fits the screen height. */
+  private releaseBall(target: Vec) {
+    this.currentThrow = makeThrow(QB_START, target, feel.throw, feel.throw.arcHeightRatio);
+    this.flightElapsed = 0;
+    this.state = 'flight';
+    this.ball.setVisible(true);
+    this.shadow.setVisible(true);
+    // Landing marker stays on the turf while the ball is in the air.
+    this.aimG.clear();
+    this.drawLandingMarker(target, 0.8);
+  }
+
+  private receiverPosition(): Vec {
+    if (!this.currentThrow) return WR_START;
+    return adjustReceiver(
+      WR_START,
+      this.currentThrow.to,
+      feel.catching.receiverAdjustYards,
+      feel.catching.receiverAdjustSpeed,
+      this.flightElapsed,
+    );
+  }
+
+  private resolveThrow() {
+    const th = this.currentThrow!;
+    const wrPos = this.receiverPosition();
+    this.aimG.clear();
+    this.state = 'result';
+
+    if (isCatch(wrPos, th.to, feel.catching.catchRadiusYards)) {
+      this.ball.setVisible(false);
+      this.shadow.setVisible(false);
+      const yards = Math.round(wrPos.x - LOS_X);
+      // Feedback stack: catch pop -> yards popup -> shake on big gains.
+      this.tweens.add({
+        targets: this.wr,
+        scale: feel.catching.catchPopScale,
+        duration: feel.catching.catchPopTime * 1000,
+        ease: 'Back.easeOut',
+        yoyo: true,
+      });
+      this.floatText(wrPos.x, wrPos.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, '#ffd166');
+      if (yards >= feel.juice.bigGainYards) {
+        this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
+      }
+    } else {
+      // Ball skids a little and fades.
+      const dx = th.to.x - th.from.x;
+      const dy = th.to.y - th.from.y;
+      const d = Math.hypot(dx, dy) || 1;
+      this.tweens.add({ targets: this.shadow, alpha: 0, duration: feel.pacing.bannerTime * 500 });
+      this.tweens.add({
+        targets: this.ball,
+        x: th.to.x + (dx / d) * feel.ball.skidYards,
+        y: th.to.y + (dy / d) * feel.ball.skidYards,
+        alpha: 0,
+        duration: feel.pacing.bannerTime * 1000,
+        ease: 'Quad.easeOut',
+      });
+      this.showBanner('INCOMPLETE');
+    }
+
+    this.resetTimer = this.time.delayedCall(
+      (feel.pacing.bannerTime + feel.pacing.betweenPlaysTime) * 1000,
+      () => this.resetPlay(),
+    );
+  }
+
+  private resetPlay() {
+    this.resetTimer?.remove();
+    this.resetTimer = null;
+    this.state = 'ready';
+    this.currentThrow = null;
+    this.target = null;
+    this.aimG.clear();
+    this.tweens.killTweensOf([this.qb, this.wr, this.ball, this.shadow]);
+    this.qb.setPosition(QB_START.x, QB_START.y).setScale(1);
+    this.wr.setPosition(WR_START.x, WR_START.y).setScale(1);
+    this.ball.setVisible(false).setAlpha(1);
+    this.shadow.setVisible(false).setAlpha(1);
+    this.sizeBall();
+    this.cameraFocus = { x: (QB_START.x + WR_START.x) / 2, y: (QB_START.y + WR_START.y) / 2 };
+    this.updateLabel();
+  }
+
+  // ---------- Drawing ----------
+
+  private sizeBall() {
+    const r = feel.ball.radiusYards;
+    this.ball.setSize(r * 2, r * 1.4).setDisplaySize(r * 2, r * 1.4);
+    this.shadow.setSize(r * 2, r * 1.2).setDisplaySize(r * 2, r * 1.2);
+  }
+
+  /** Ball is lifted up the screen by its height and grows a little; the shadow stays on the turf. */
+  private drawBall(x: number, y: number, h: number) {
+    const r = feel.ball.radiusYards;
+    const grow = 1 + h * feel.ball.growPerYard;
+    this.ball.setPosition(x, y - h * feel.ball.heightDrawRatio).setDisplaySize(r * 2 * grow, r * 1.4 * grow);
+    this.shadow.setPosition(x, y).setAlpha(Math.max(0.12, 0.35 - h * 0.02));
+  }
+
+  private drawAimPreview(target: Vec) {
+    const th = makeThrow(QB_START, target, feel.throw, feel.throw.arcHeightRatio);
+    const g = this.aimG;
+    g.clear();
+    g.fillStyle(COLORS.aim, 0.9);
+    const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - QB_START.x, target.y - QB_START.y) / 1.5)));
+    for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
+    this.drawLandingMarker(target, 1);
+  }
+
+  private drawLandingMarker(target: Vec, alpha: number) {
+    const g = this.aimG;
+    g.lineStyle(0.18, COLORS.aim, alpha);
+    g.strokeCircle(target.x, target.y, feel.catching.catchRadiusYards);
+    g.lineBetween(target.x - 0.5, target.y, target.x + 0.5, target.y);
+    g.lineBetween(target.x, target.y - 0.5, target.x, target.y + 0.5);
+  }
+
+  /** World-space text that floats up and fades (e.g. "+12 YDS"). */
+  private floatText(x: number, y: number, text: string, color: string) {
+    const t = this.add
+      .text(x, y, text, { fontFamily: 'monospace', fontSize: '48px', fontStyle: 'bold', color, stroke: '#14202b', strokeThickness: 8 })
+      .setOrigin(0.5)
+      .setScale(2.2 / 48)
+      .setDepth(6);
+    this.tweens.add({
+      targets: t,
+      y: y - feel.juice.yardsPopupRise,
+      alpha: { from: 1, to: 0 },
+      duration: feel.juice.yardsPopupTime * 1000,
+      ease: 'Quad.easeOut',
+      onComplete: () => t.destroy(),
+    });
+  }
+
+  /** Big centred banner (e.g. INCOMPLETE) fixed to the screen. */
+  private showBanner(text: string) {
+    const cam = this.cameras.main;
+    const z = cam.zoom;
+    const b = this.add
+      .text(0, 0, text, { fontFamily: 'monospace', fontSize: '40px', fontStyle: 'bold', color: '#f4efe1', backgroundColor: '#14202bdd', padding: { x: 18, y: 8 } })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(11)
+      .setScale(0.6 / z);
+    this.placeOnScreen(b, cam.width / 2, cam.height * 0.35);
+    this.tweens.add({ targets: b, scale: 1 / z, duration: feel.pacing.bannerPopTime * 1000, ease: 'Back.easeOut' });
+    this.tweens.add({
+      targets: b,
+      alpha: 0,
+      delay: feel.pacing.bannerTime * 1000,
+      duration: feel.pacing.bannerFadeTime * 1000,
+      onComplete: () => b.destroy(),
+    });
+  }
+
+  private updateLabel() {
+    const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';
+    this.label.setText(`Right side: ${how}, release to throw · ⚙ = feel`);
+  }
+
+  /**
+   * Places a scroll-fixed object at a screen position. Scroll-fixed objects are still
+   * zoomed around the screen centre, so the position has to be adjusted for zoom.
+   */
+  private placeOnScreen(obj: Phaser.GameObjects.Components.Transform, sx: number, sy: number) {
+    const cam = this.cameras.main;
+    const z = cam.zoom;
+    obj.setPosition(cam.width / 2 + (sx - cam.width / 2) / z, cam.height / 2 + (sy - cam.height / 2) / z);
+  }
+
+  /** Zoom so the field width fits the screen height, then zoom in by feel.camera.zoomScale. */
   private fitCamera() {
     const cam = this.cameras.main;
     const m = feel.camera.sidelineMarginYards;
-    cam.setZoom(this.scale.height / (FIELD_WIDTH + m * 2));
+    cam.setZoom((this.scale.height / (FIELD_WIDTH + m * 2)) * Math.max(1, feel.camera.zoomScale));
     cam.setBounds(-m, -m, TOTAL_LENGTH + m * 2, FIELD_WIDTH + m * 2);
-
     // Keep the on-screen label at normal size in the top-left, whatever the zoom.
-    // (Scroll-fixed objects are still scaled around the screen centre by camera zoom.)
-    const z = cam.zoom;
-    this.label.setScale(1 / z);
-    this.label.setPosition(
-      cam.width / 2 - cam.width / 2 / z + 8 / z,
-      cam.height / 2 - cam.height / 2 / z + 8 / z,
-    );
+    this.label.setScale(1 / cam.zoom);
+    this.label.setOrigin(0, 0);
+    this.placeOnScreen(this.label, 8, 8);
   }
 
   private drawField() {
@@ -92,6 +387,10 @@ export class FieldScene extends Phaser.Scene {
     g.lineStyle(0.3, COLORS.line, 1);
     g.strokeRect(0, 0, TOTAL_LENGTH, FIELD_WIDTH);
 
+    // Line of scrimmage.
+    g.fillStyle(COLORS.scrimmage, 0.8);
+    g.fillRect(LOS_X - 0.12, 0, 0.24, FIELD_WIDTH);
+
     // Yard numbers, drawn big and then shrunk down so they stay sharp.
     for (let x = 0; x <= TOTAL_LENGTH; x += 10) {
       const n = yardLineNumber(x);
@@ -104,17 +403,5 @@ export class FieldScene extends Phaser.Scene {
           .setScale(3 / 64);
       }
     }
-  }
-
-  private showTapRing(x: number, y: number) {
-    const ring = this.add.circle(x, y, 1.2).setStrokeStyle(0.25, COLORS.tapRing).setDepth(5);
-    this.tweens.add({
-      targets: ring,
-      scale: 2,
-      alpha: 0,
-      duration: feel.juice.tapRingTime * 1000,
-      ease: 'Quad.easeOut',
-      onComplete: () => ring.destroy(),
-    });
   }
 }

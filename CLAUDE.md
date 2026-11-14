@@ -379,7 +379,7 @@ Stage 1 steps:
 - [x] 2. PWA install to home screen (2026-11-14; done together with hosting, works on phone)
 - [x] 3. Feel tuning panel (2026-11-14): `src/debug/feelPanel.ts` + tested helpers in `src/config/feelTools.ts`. Sliders auto-built from `feel.ts`; tweaks saved in localStorage; scenes listen for the `feelchange` window event to react live.
 - [x] 4. Save export/import skeleton + seeded RNG (2026-11-14): `src/sim/rng.ts` (mulberry32, saveable state), `src/save/saveFormat.ts` (version + migrations + 3 rolling backups, tested), `saveStore.ts` (IndexedDB via `idb`), `saveSession.ts` (`getRng()` / `commitSave()`). Export/Import buttons in the ⚙ panel; phones use the share sheet, desktops download. Tested on PC and phone.
-- [ ] 5. QB throws to one receiver (aim arc, ball shadow, catch)
+- [x] 5. QB throws to one receiver (aim arc, ball shadow, catch) (2026-11-14): math in `src/sim/throw.ts` (tested); scene in `FieldScene.ts`. Aim style switch `feel.throw.aimMode` (0 push / 1 slingshot) still to be chosen by playtesting. Added `camera.zoomScale` (1.5) because the whole field fit on screen and players were tiny. Phone feel test pending.
 - [ ] 6. Routes
 - [ ] 7. Basic defense
 - [ ] 8. Catch / incompletion / tackle

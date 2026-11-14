@@ -57,4 +57,8 @@ describe('feelTools', () => {
       expect(r.step).toBeGreaterThan(0);
     }
   });
+
+  it('makes "...Mode" settings a 0/1 switch', () => {
+    expect(sliderRange('aimMode', 1)).toEqual({ min: 0, max: 1, step: 1 });
+  });
 });
