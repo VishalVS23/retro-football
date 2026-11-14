@@ -27,7 +27,9 @@ import {
 } from '../sim/defense';
 import {
   GOAL_LINE_X,
+  OWN_GOAL_LINE_X,
   checkTackles,
+  evadeSteer,
   playEnd,
   remember,
   startCarrier,
@@ -102,7 +104,7 @@ interface Receiver {
   coverage: Coverage;
 }
 
-type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'result';
+type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'result';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
@@ -123,6 +125,14 @@ export class FieldScene extends Phaser.Scene {
   private steer = 0;
   private steerTouch: { id: number; x: number; y: number; time: number } | null = null;
   private hitPauseLeft = 0;
+  // Interception return: their defender runs at our end zone, our players chase (watch-only).
+  private returner: Carrier = startCarrier({ x: 0, y: 0 });
+  private returnerDot: Phaser.GameObjects.Arc | null = null;
+  private returnStartX = 0;
+  private returnTime = 0;
+  private chasers: Pursuer[] = [];
+  private chaserDots: Phaser.GameObjects.Arc[] = [];
+  private returnSightings: Sightings = [];
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
@@ -228,6 +238,7 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'run') this.stepRun(dt);
+    if (this.state === 'return') this.stepReturn(dt);
 
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
@@ -276,6 +287,10 @@ export class FieldScene extends Phaser.Scene {
     if (this.state === 'run') {
       // Any thumb steers the runner (drag up/down); a quick flick jukes.
       this.steerTouch = { id: p.id, x: p.x, y: p.y, time: this.time.now };
+      return;
+    }
+    if (this.state === 'return') {
+      this.skipReturn(); // tap to skip to the end of the return
       return;
     }
     if (this.state === 'result') {
@@ -469,6 +484,8 @@ export class FieldScene extends Phaser.Scene {
       this.popPlayer(cbDot);
       this.shakeScreen();
       this.showBanner('INTERCEPTED');
+      this.startReturn(cbPos, cbDot);
+      return;
     } else if (result === 'droppedInt' || result === 'drop') {
       // Ball clanks off the player's hands and bounces away.
       const who = result === 'drop' ? wrPos : cbPos;
@@ -491,7 +508,102 @@ export class FieldScene extends Phaser.Scene {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
       this.showBanner('INCOMPLETE');
     }
-    this.recordPlay(result === 'interception' ? { kind: 'interception' } : { kind: 'incomplete' });
+    this.recordPlay({ kind: 'incomplete' });
+    this.scheduleReset();
+  }
+
+  // ---------- Interception return ----------
+
+  /** The defender who picked it off heads for our end zone; everyone on our team chases him. */
+  private startReturn(at: Vec, dot: Phaser.GameObjects.Arc) {
+    this.state = 'return';
+    this.returnTime = 0;
+    this.returnStartX = at.x;
+    this.returner = startCarrier(at);
+    this.returnerDot = dot;
+    this.returnSightings = remember([], 0, this.returner, 1);
+    const ic = feel.interception;
+    const chase = (d: Phaser.GameObjects.Arc, speed: number): Pursuer => ({ pos: { x: d.x, y: d.y }, speed, stunned: 0 });
+    this.chaserDots = [...this.wrDots, this.qb, ...this.blockerDots];
+    this.chasers = [
+      ...this.wrDots.map((d) => chase(d, ic.wrChaseSpeed)),
+      chase(this.qb, ic.qbChaseSpeed),
+      ...this.blockerDots.map((d) => chase(d, ic.olChaseSpeed)),
+    ];
+    this.qb.setStrokeStyle(0.2, COLORS.outline);
+    this.updateLabel();
+  }
+
+  /** Returner's running numbers: he builds up to full speed over returnTurnTime after the pick. */
+  private returnParams() {
+    const ic = feel.interception;
+    const ramp = ic.returnTurnTime > 0 ? Math.min(1, this.returnTime / ic.returnTurnTime) : 1;
+    return { ...this.carryParams(), runSpeed: ic.returnSpeed * ramp };
+  }
+
+  private stepReturn(dt: number) {
+    this.returnTime += dt;
+    const steer = evadeSteer(this.returner.pos, this.chasers, -1, feel.interception.evadeLookYards);
+    this.returner = stepCarrier(this.returner, steer, dt, this.returnParams(), -1);
+    const r = this.returner.pos;
+    this.returnerDot?.setPosition(r.x, r.y);
+    this.returnSightings = remember(this.returnSightings, this.returnTime, this.returner, 1);
+    this.chasers = stepPursuers(this.chasers, this.returnSightings, this.returnTime, dt, {
+      reactionTime: feel.tackling.pursuitReactionTime,
+      leadTime: feel.tackling.pursuitLeadTime,
+      runSpeed: feel.interception.returnSpeed,
+      dirX: -1,
+    });
+    this.chasers.forEach((c, i) => this.chaserDots[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.stunned > 0 ? 0.45 : 1));
+    this.cameraFocus = { x: r.x - feel.camera.leadYards, y: r.y };
+
+    const end = playEnd(r, -1);
+    if (end) {
+      this.endReturn(end);
+      return;
+    }
+    if (this.returnTime < feel.tackling.catchGraceTime) return;
+    const rng = getRngOrFallback();
+    const check = checkTackles(this.chasers, this.returner, () => rng.next(), {
+      tackleReachYards: feel.tackling.tackleReachYards,
+      brokenTackleChance: feel.tackling.brokenTackleChance,
+      jukeEvadeChance: feel.tackling.jukeEvadeChance,
+      stunTime: feel.tackling.stunTime,
+    });
+    if (check.missed) {
+      this.chasers = check.pursuers;
+      this.floatText(r.x, r.y - 2, 'BROKE IT!', '#ff8a8a');
+    }
+    if (check.tackled) this.endReturn('tackled');
+  }
+
+  /** Tap during a return: run the rest of it instantly. */
+  private skipReturn() {
+    for (let i = 0; i < 60 * 30 && this.state === 'return'; i++) this.stepReturn(1 / 60);
+    this.hitPauseLeft = 0;
+    if (this.returnerDot) this.cameras.main.centerOn(this.returner.pos.x, this.returner.pos.y);
+  }
+
+  private endReturn(how: 'tackled' | 'out' | 'touchdown') {
+    this.state = 'result';
+    const r = this.returner.pos;
+    const yards = Math.max(0, Math.round(this.returnStartX - (how === 'touchdown' ? OWN_GOAL_LINE_X : r.x)));
+    if (how === 'touchdown') {
+      this.shakeScreen(feel.juice.touchdownShakeScale);
+      if (this.returnerDot) this.popPlayer(this.returnerDot);
+      this.showBanner('PICK SIX!');
+      this.recordPlay({ kind: 'pickSix' });
+    } else {
+      if (how === 'tackled') {
+        this.hitPauseLeft = feel.juice.hitPauseTime;
+        this.shakeScreen();
+        this.showBanner('STOPPED!');
+      } else {
+        this.showBanner('OUT OF BOUNDS');
+      }
+      this.recordPlay({ kind: 'interception', returnedTo: r.x });
+    }
+    this.floatText(r.x, r.y - 2, `${yards} YD RETURN`, '#ff8a8a');
     this.scheduleReset();
   }
 
@@ -755,7 +867,7 @@ export class FieldScene extends Phaser.Scene {
     this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.ball, this.shadow]);
     this.safetyPos = { x: this.safetyDepthX(), y: FIELD_WIDTH / 2 };
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
-    [...this.cbDots, ...this.rusherDots].forEach((d) => d.setAlpha(1));
+    [...this.cbDots, ...this.rusherDots, ...this.wrDots, this.qb, ...this.blockerDots].forEach((d) => d.setAlpha(1));
     this.steerTouch = null;
     this.steer = 0;
     this.hitPauseLeft = 0;
@@ -858,6 +970,10 @@ export class FieldScene extends Phaser.Scene {
     }
     if (this.state === 'run') {
       this.label.setText('RUN! Drag up/down to steer · quick flick = juke');
+      return;
+    }
+    if (this.state === 'return') {
+      this.label.setText('Interception return · TAP to skip');
       return;
     }
     if (this.aimPointerId !== null) {

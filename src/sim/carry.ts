@@ -1,7 +1,8 @@
 /**
  * Running with the ball after the catch: steering, jukes, defenders chasing, tackles.
  * Pure functions (no Phaser); feel values are passed in. Units: yards and seconds.
- * The ball carrier always runs left-to-right (toward the opponent's end zone at x = 110).
+ * Our ball carrier runs left-to-right (dirX = +1, toward x = 110). An interception returner
+ * runs the other way (dirX = -1, toward our goal line at x = 10).
  */
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import type { Vec } from './throw';
@@ -48,8 +49,8 @@ export function tryJuke(c: Carrier, dir: number, p: CarryParams): Carrier {
   return { ...c, jukeLeft: p.jukeTime, jukeDir: Math.sign(dir), cooldown: p.jukeTime + p.jukeCooldown };
 }
 
-/** `steer` is -1 (up) .. +1 (down) from the player's thumb. */
-export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParams): Carrier {
+/** `steer` is -1 (up) .. +1 (down) from the player's thumb (or the returner's AI). */
+export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParams, dirX: 1 | -1 = 1): Carrier {
   let vy: number;
   let jukeLeft = c.jukeLeft;
   if (jukeLeft > 0) {
@@ -60,7 +61,7 @@ export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParam
     vy = c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt); // eases in and out
   }
   return {
-    pos: { x: c.pos.x + p.runSpeed * dt, y: c.pos.y + vy * dt },
+    pos: { x: c.pos.x + dirX * p.runSpeed * dt, y: c.pos.y + vy * dt },
     vy,
     jukeLeft,
     jukeDir: c.jukeDir,
@@ -68,11 +69,12 @@ export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParam
   };
 }
 
-/** The goal line he's running toward. */
+/** The goal line our runner heads for, and the one an interception returner heads for. */
 export const GOAL_LINE_X = TOTAL_LENGTH - END_ZONE_DEPTH;
+export const OWN_GOAL_LINE_X = END_ZONE_DEPTH;
 
-export function playEnd(pos: Vec): 'touchdown' | 'out' | null {
-  if (pos.x >= GOAL_LINE_X) return 'touchdown';
+export function playEnd(pos: Vec, dirX: 1 | -1 = 1): 'touchdown' | 'out' | null {
+  if (dirX > 0 ? pos.x >= GOAL_LINE_X : pos.x <= OWN_GOAL_LINE_X) return 'touchdown';
   if (pos.y < 0 || pos.y > FIELD_WIDTH) return 'out';
   return null;
 }
@@ -93,6 +95,8 @@ export interface PursuitParams {
   /** How far ahead (in seconds) they aim, to take a pursuit angle. */
   leadTime: number;
   runSpeed: number;
+  /** Which way the runner is heading (+1 right, -1 left). Defaults to +1. */
+  dirX?: 1 | -1;
 }
 
 /** What the defenders have seen of the runner, so they can react late. */
@@ -109,7 +113,7 @@ function sightingAt(seen: Sightings, t: number) {
 
 export function stepPursuers(pursuers: Pursuer[], seen: Sightings, t: number, dt: number, p: PursuitParams): Pursuer[] {
   const s = sightingAt(seen, t - p.reactionTime);
-  const target = { x: s.pos.x + p.runSpeed * p.leadTime, y: s.pos.y + s.vy * p.leadTime };
+  const target = { x: s.pos.x + (p.dirX ?? 1) * p.runSpeed * p.leadTime, y: s.pos.y + s.vy * p.leadTime };
   return pursuers.map((d) => {
     if (d.stunned > 0) return { ...d, stunned: Math.max(0, d.stunned - dt) };
     const gap = dist(d.pos, target);
@@ -117,6 +121,36 @@ export function stepPursuers(pursuers: Pursuer[], seen: Sightings, t: number, dt
     if (gap === 0) return d;
     return { ...d, pos: { x: d.pos.x + ((target.x - d.pos.x) / gap) * step, y: d.pos.y + ((target.y - d.pos.y) / gap) * step } };
   });
+}
+
+// ---------- Returner AI ----------
+
+/**
+ * Steering for a computer-controlled runner (an interception returner): veer away from the
+ * nearest chaser in front of or beside him, harder the closer he is, and keep off the sidelines.
+ * Returns -1 (up) .. +1 (down), like a thumb.
+ */
+export function evadeSteer(pos: Vec, chasers: Pursuer[], dirX: 1 | -1, lookYards: number): number {
+  let nearest: Pursuer | null = null;
+  let nearestD = Infinity;
+  for (const c of chasers) {
+    if (c.stunned > 0) continue;
+    if ((c.pos.x - pos.x) * dirX < -2) continue; // already behind him: ignore
+    const d = dist(c.pos, pos);
+    if (d < nearestD) {
+      nearestD = d;
+      nearest = c;
+    }
+  }
+  let steer = 0;
+  if (nearest && nearestD < lookYards) {
+    const away = Math.sign(pos.y - nearest.pos.y) || (pos.y < FIELD_WIDTH / 2 ? 1 : -1);
+    steer = away * (1 - nearestD / lookYards);
+  }
+  const margin = 5; // yards from the sideline where he starts turning back in
+  if (pos.y < margin) steer = Math.max(steer, 1 - pos.y / margin);
+  if (pos.y > FIELD_WIDTH - margin) steer = Math.min(steer, -(1 - (FIELD_WIDTH - pos.y) / margin));
+  return Math.max(-1, Math.min(1, steer));
 }
 
 // ---------- Tackles ----------

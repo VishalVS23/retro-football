@@ -12,6 +12,8 @@ export const YARDS_FOR_FIRST_DOWN = 10;
 export const NEW_DRIVE_X = OWN_GOAL_X + 25;
 export const TD_POINTS = 6;
 export const SAFETY_POINTS = 2;
+/** Interception downed in their own end zone = touchback: their ball at their 20. */
+export const TOUCHBACK_X = OPP_GOAL_X - 20;
 
 export interface GameState {
   /** Line of scrimmage, whole yards. */
@@ -21,6 +23,11 @@ export interface GameState {
   firstDownX: number;
   us: number; // our score
   them: number; // their score
+  /**
+   * Where the opponent takes over after our last turnover (x, our coordinates), or null.
+   * Opponent drives (Stage 2 step 6) start here; until then our next drive starts at our 25.
+   */
+  oppStartX: number | null;
 }
 
 /** How a play ended, as far as the rules care. */
@@ -28,13 +35,14 @@ export type PlayOutcome =
   | { kind: 'spot'; x: number } // ball carrier down / out of bounds / sacked at this x
   | { kind: 'incomplete' }
   | { kind: 'touchdown' }
-  | { kind: 'interception' };
+  | { kind: 'interception'; returnedTo: number } // picked off and returned to this x
+  | { kind: 'pickSix' }; // picked off and returned for a touchdown
 
 /** Something worth a banner. null = just the next down. */
-export type DriveEvent = 'firstDown' | 'turnoverOnDowns' | 'touchdown' | 'safety' | 'interception' | null;
+export type DriveEvent = 'firstDown' | 'turnoverOnDowns' | 'touchdown' | 'safety' | 'interception' | 'pickSix' | null;
 
 export function newGame(): GameState {
-  return { ...firstDownAt(NEW_DRIVE_X), us: 0, them: 0 };
+  return { ...firstDownAt(NEW_DRIVE_X), us: 0, them: 0, oppStartX: null };
 }
 
 function firstDownAt(ballX: number): Pick<GameState, 'ballX' | 'down' | 'firstDownX'> {
@@ -43,18 +51,24 @@ function firstDownAt(ballX: number): Pick<GameState, 'ballX' | 'down' | 'firstDo
 
 /** Applies one play's result and says what happened. */
 export function applyPlay(s: GameState, o: PlayOutcome): { state: GameState; event: DriveEvent } {
+  const next = (state: GameState, event: DriveEvent) => ({ state, event });
   if (o.kind === 'touchdown') {
-    return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), us: s.us + TD_POINTS }, event: 'touchdown' };
+    return next({ ...s, ...firstDownAt(NEW_DRIVE_X), us: s.us + TD_POINTS, oppStartX: null }, 'touchdown');
+  }
+  if (o.kind === 'pickSix') {
+    return next({ ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + TD_POINTS, oppStartX: null }, 'pickSix');
   }
   if (o.kind === 'interception') {
-    return { state: { ...s, ...firstDownAt(NEW_DRIVE_X) }, event: 'interception' };
+    if (o.returnedTo <= OWN_GOAL_X) return applyPlay(s, { kind: 'pickSix' });
+    const oppStartX = o.returnedTo >= OPP_GOAL_X ? TOUCHBACK_X : Math.round(o.returnedTo);
+    return next({ ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX }, 'interception');
   }
 
   let spot = s.ballX;
   if (o.kind === 'spot') {
     // Down in our own end zone (behind the goal line) = safety.
     if (o.x < OWN_GOAL_X) {
-      return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + SAFETY_POINTS }, event: 'safety' };
+      return next({ ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + SAFETY_POINTS, oppStartX: null }, 'safety');
     }
     if (o.x >= OPP_GOAL_X) {
       return applyPlay(s, { kind: 'touchdown' });
@@ -64,7 +78,7 @@ export function applyPlay(s: GameState, o: PlayOutcome): { state: GameState; eve
   }
 
   if (spot >= s.firstDownX) return { state: { ...s, ...firstDownAt(spot) }, event: 'firstDown' };
-  if (s.down === 4) return { state: { ...s, ...firstDownAt(NEW_DRIVE_X) }, event: 'turnoverOnDowns' };
+  if (s.down === 4) return next({ ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: spot }, 'turnoverOnDowns');
   return { state: { ...s, ballX: spot, down: (s.down + 1) as GameState['down'] }, event: null };
 }
 

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { NEW_DRIVE_X, OPP_GOAL_X, OWN_GOAL_X, applyPlay, downText, newGame, spotText, type GameState } from './drive';
+import { NEW_DRIVE_X, OPP_GOAL_X, OWN_GOAL_X, TOUCHBACK_X, applyPlay, downText, newGame, spotText, type GameState } from './drive';
 
-const at = (ballX: number, down: GameState['down'], firstDownX: number, us = 0, them = 0): GameState => ({
+const at = (ballX: number, down: GameState['down'], firstDownX: number, us = 0, them = 0, oppStartX: number | null = null): GameState => ({
   ballX,
   down,
   firstDownX,
   us,
   them,
+  oppStartX,
 });
 
 describe('drive rules', () => {
@@ -43,7 +44,7 @@ describe('drive rules', () => {
   it('failing on 4th down is a turnover on downs (new drive for now)', () => {
     const { state, event } = applyPlay(at(50, 4, 52), { kind: 'incomplete' });
     expect(event).toBe('turnoverOnDowns');
-    expect(state).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10));
+    expect(state).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 0, 0, 50)); // they'd take over at the spot
   });
 
   it('converting on 4th down keeps the drive going', () => {
@@ -79,10 +80,21 @@ describe('drive rules', () => {
     expect(applyPlay(at(100, 1, 110), { kind: 'spot', x: 109.8 }).state.ballX).toBe(OPP_GOAL_X - 1);
   });
 
-  it('an interception ends the drive without points', () => {
-    const { state, event } = applyPlay(at(70, 3, 75, 6, 0), { kind: 'interception' });
+  it('an interception ends the drive; they take over where the return ended', () => {
+    const { state, event } = applyPlay(at(70, 3, 75, 6, 0), { kind: 'interception', returnedTo: 61.6 });
     expect(event).toBe('interception');
-    expect(state).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 6, 0));
+    expect(state).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 6, 0, 62));
+  });
+
+  it('a pick downed in their own end zone is a touchback at their 20', () => {
+    expect(applyPlay(at(90, 1, 100), { kind: 'interception', returnedTo: 113 }).state.oppStartX).toBe(TOUCHBACK_X);
+    expect(spotText(TOUCHBACK_X)).toBe('OPP 20');
+  });
+
+  it('a pick returned all the way is a pick six: 6 points to them', () => {
+    const { state, event } = applyPlay(at(50, 2, 60, 7, 3), { kind: 'interception', returnedTo: OWN_GOAL_X });
+    expect(event).toBe('pickSix');
+    expect(state).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 7, 9));
   });
 
   it('names field spots like a broadcast', () => {

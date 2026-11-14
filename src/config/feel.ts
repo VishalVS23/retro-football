@@ -97,6 +97,19 @@ export const feel = {
     dbPursuitSpeed: 7.2,
     dlPursuitSpeed: 5.5,
   },
+  /** Interception returns: the defender runs at our end zone and our players chase him (watch-only). */
+  interception: {
+    /** Returner's running speed (later: his speed rating). Below our receivers' chase speed. */
+    returnSpeed: 6.2,
+    /** Seconds to turn around and get up to full speed after the pick. */
+    returnTurnTime: 0.6,
+    /** He starts dodging a chaser this close in front of him. */
+    evadeLookYards: 8,
+    /** Chasing speeds: our receivers, the QB, our linemen. */
+    wrChaseSpeed: 7.2,
+    qbChaseSpeed: 5.5,
+    olChaseSpeed: 5,
+  },
   routes: {
     /** Receiver top speed, yards per second (later scaled by his speed rating). */
     topSpeed: 8,
