@@ -387,7 +387,7 @@ Stage 1 steps:
 - [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
 
 Stage 2 steps (approved 2026-11-14; still show a short plan for each step before coding):
-- [ ] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar. **Built 2026-11-14, waiting for the user's phone test.** Rules in `src/sim/drive.ts` (tested): ball spotted to the nearest yard, never on a goal line; sacks/tackles behind our goal line = safety; touchdown = 6 (no PAT yet). Until steps 5–6, every drive-ending event restarts at our 25. Scene field is `match` (not `game`: that name belongs to Phaser). Hint text moved to bottom-left; scoreboard top-centre.
+- [x] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar. **Done 2026-11-14, phone tested.** Rules in `src/sim/drive.ts` (tested): ball spotted to the nearest yard, never on a goal line; sacks/tackles behind our goal line = safety; touchdown = 6 (no PAT yet). Until steps 5–6, every drive-ending event restarts at our 25. Scene field is `match` (not `game`: that name belongs to Phaser). Hint text moved to bottom-left; scoreboard top-centre.
 - [ ] 2. Play calling screen based on the user's mockup (playbook cards with mini route diagrams, field preview, EXECUTE / AUDIBLE / CANCEL); ~6 pass plays to start
 - [ ] 3. Three receivers per play, each with his own cornerback (read the open man)
 - [ ] 4. Game clock and quarters, timeouts, two-minute warning
@@ -397,7 +397,7 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session)
-1. If the user's phone test of Stage 2 step 1 went well, tick it; then show the plan for **step 2 (play calling screen)**. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
+1. Step 1 done. Show the plan for the next step and wait for approval (suggested swapping steps 2 and 3: three receivers before the play-call screen). Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
 - Unit tests: `npm test` from **PowerShell** (not Git Bash). Typecheck: `npm run typecheck`. Build: `npm run build`.
