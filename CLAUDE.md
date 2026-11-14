@@ -372,7 +372,8 @@ Flow decisions:
 | Stage | Status | Notes |
 |---|---|---|
 | 1 Feel prototype | **Done** (2026-11-14) | All 9 steps built and tested on phone |
-| 2–13 | Not started | |
+| 2 Full games | Planned, waiting for approval (2026-11-14) | Plan below; start with step 1 |
+| 3–13 | Not started | |
 
 Stage 1 steps:
 - [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop and phone)
@@ -384,6 +385,26 @@ Stage 1 steps:
 - [x] 7. Basic defense (2026-11-14): `src/sim/defense.ts` (tested). Cornerback in man coverage (reaction delay, closing cushion, slower break on the ball), contested catches: catch / DROPPED / BROKEN UP / INTERCEPTED / LUCKY! (defender dropped it; user wanted one word) via seeded RNG. A ball thrown straight to the defender is a pick 75% of the time, never 'incomplete' (user feedback); open receivers catch 95%. Both chances become hands ratings in stage 3. Two rushers vs two blockers replace the fixed sack timer (tuned to ~3s); red pressure outline when a rusher is close. Balance test: a well-led on-time slant is caught 60%+ of the time.
 - [x] 8. Catch / incompletion / tackle (2026-11-14): `src/sim/carry.ts` (tested). After the catch the receiver auto-runs; any thumb drags up/down to steer, a quick flick jukes (cooldown). Defenders (CB, new deep safety, rushers) chase with a reaction delay and pursuit angle; tackle attempts can be broken or juked (seeded RNG), 0.2s grace after the catch. Ends: TACKLED (hit-pause + shake), OUT OF BOUNDS, TOUCHDOWN!. Fixed screen shake being hugely over-scaled by the zoomed camera (`shakeScreen` helper). Catches/picks only count with the catcher's centre point (feet) in bounds (`isInBounds`). Phone tested: everything works, movement feels good.
 - [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
+
+Stage 2 steps (proposed 2026-11-14, not yet approved; show plan, wait for OK before coding):
+- [ ] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar
+- [ ] 2. Play calling screen based on the user's mockup (playbook cards with mini route diagrams, field preview, EXECUTE / AUDIBLE / CANCEL); ~6 pass plays to start
+- [ ] 3. Three receivers per play, each with his own cornerback (read the open man)
+- [ ] 4. Game clock and quarters, timeouts, two-minute warning
+- [ ] 5. Scoring and kicking: TD, extra point, field goal, punt (timing tap), 4th-down choice only when it matters
+- [ ] 6. Simulated opponent drives: short skippable summary (simple sim; real league sim is stage 4)
+- [ ] 7. End-of-game screen with final score and basic stats; overtime
+- [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
+
+### Next up (start of next session)
+1. Show the Stage 2 plan above, get the user's OK, then build **Stage 2 step 1** (downs, distance, scoreboard).
+2. Questions to ask the user: target game length (suggest 5–10 min per game on phone); the image files for their play-call screen and UI kit (needed by step 2).
+3. Before Stage 2 games get long: make auto-update ask before reloading (or wait until between games) so an update never interrupts a game.
+
+### How to test (for Claude)
+- Unit tests: `npm test` from **PowerShell** (not Git Bash). Typecheck: `npm run typecheck`. Build: `npm run build`.
+- Browser checks: `npm run dev` (port 5173, or 5174 if busy), then drive the game with `playwright-core` + the installed Chrome (`channel: 'chrome'`) from a script in the session scratchpad (never add Playwright to the project). In dev, `window.__game.scene.keys.field` exposes the scene state (`state`, `routeIndex`) for scripts.
+- Phone: push to `main`, wait ~1 min for the deploy, reopen the app. The ⚙ panel header shows the build time.
 
 ## Decisions & refinements
 
@@ -399,4 +420,11 @@ Stage 1 steps:
 - **2026-11-14: Receiver dodge bug fixed.** His drift toward the ball is now aimed from where his route will put him at landing (`receiverInFlight` in `routes.ts`), so he never swerves away from an underthrown ball. User wants sack time and receiver speed to come from ratings in stage 3 (pass rush vs O-line; receiver speed).
 - **2026-11-14: Play-call screen design (user's own mockup)** = target for stage 2 play calling: top bar (down & distance, field zone, offense type), big field diagram with labelled yellow routes and arrowheads, players as pixel sprites with position labels, right-side PLAY SELECT list of playbook cards (mini route diagrams, checkbox on the chosen one), bottom-left player form card (speed/catch/agility bars plus last-3-games trends), buttons EXECUTE PLAY (green), AUDIBLE (gold), CANCEL (red), TEAM. Ask the user for the image files when building it.
 - **2026-11-14: App auto-updates.** `registerSW` in `main.ts` checks for a new version on launch and whenever the app returns to the foreground, then reloads onto it (iPhone home-screen apps resume instead of restarting, so they were stuck on old versions). The ⚙ panel header shows the build time to confirm which version is running.
-- **2026-11-14: Stage 1 complete.**
+- **2026-11-14: Camera zoomed in 1.5x** (`camera.zoomScale`); the whole field fit on screen and players were tiny dots. Camera now follows up/down as well as along the field.
+- **2026-11-14: Problem fixed: screen shake was massive.** Phaser multiplies shake intensity by camera zoom twice; with our ~10px-per-yard zoom every shake moved the screen hundreds of pixels. All shakes now go through `shakeScreen()` in `FieldScene.ts`, which divides by zoom². Never call `cameras.main.shake` directly.
+- **2026-11-14: Problem fixed: cornerback contested almost every pass** (he sprinted to the landing spot at full speed). He now breaks on the ball at `cbBallSpeedRatio` 0.6; balance test checks an on-time slant is caught 60%+.
+- **2026-11-14: Catch rules.** Ball thrown straight to a defender: INTERCEPTED (75%) or LUCKY! (he drops it), never "incomplete". Open receivers drop 5% (DROPPED). Catches/picks with the catcher's centre point out of bounds are INCOMPLETE. All chances are sliders until hands ratings exist (stage 3).
+- **2026-11-14: Placeholder rules to replace with ratings in stage 3:** receiver and defender catch chances, rusher shed time (pass rush vs O-line), receiver/runner speed, QB ball speed (arm strength), broken-tackle chance (strength / "fights for extra yards").
+- **2026-11-14: Parked ideas:** throwing-zone glow hint with an off switch; interception returns (an interception currently just ends the play); QB scrambling; kick returns (maybe later, per the feel notes).
+- **2026-11-14: Dev workflow notes.** Git Bash heredocs break on Python code with nested quotes, so write multi-line edit scripts to the scratchpad and run them from there. A dev-only `window.__game` hook in `main.ts` lets browser test scripts read game state (excluded from production builds).
+- **2026-11-14: Stage 1 complete.** Everything tested on PC and phone: throwing, routes, defense, catches/picks, running, jukes, tackles. 67 unit tests passing. Next: Stage 2 (see "Next up").
