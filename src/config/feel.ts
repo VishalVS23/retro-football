@@ -55,8 +55,8 @@ export const feel = {
     breakupChance: 0.6,
     /** Interception chance when he's closer to the ball than the receiver. */
     interceptChance: 0.35,
-    /** Interception chance when the ball lands on him and the receiver isn't there. */
-    overthrowInterceptChance: 0.5,
+    /** Chance he holds on when the ball is thrown straight to him (later: hands rating). */
+    defenderCatchChance: 0.75,
   },
   routes: {
     /** Receiver top speed, yards per second (later scaled by his speed rating). */
@@ -104,6 +104,8 @@ export const feel = {
     catchRadiusYards: 1.5,
     /** How far receivers will adjust toward a badly-placed ball. */
     receiverAdjustYards: 2,
+    /** Chance an open receiver holds on to a catchable ball (later: hands, morale, form). */
+    receiverCatchChance: 0.95,
     /** How fast receivers drift toward the ball, yards per second. */
     receiverAdjustSpeed: 6,
     /** Size the receiver pops to on a catch. */

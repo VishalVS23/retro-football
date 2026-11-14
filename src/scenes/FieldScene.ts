@@ -315,7 +315,8 @@ export class FieldScene extends Phaser.Scene {
       contestRadiusYards: feel.defense.contestRadiusYards,
       breakupChance: feel.defense.breakupChance,
       interceptChance: feel.defense.interceptChance,
-      overthrowInterceptChance: feel.defense.overthrowInterceptChance,
+      receiverCatchChance: feel.catching.receiverCatchChance,
+      defenderCatchChance: feel.defense.defenderCatchChance,
     });
 
     if (result === 'interception') {
@@ -324,6 +325,11 @@ export class FieldScene extends Phaser.Scene {
       this.popPlayer(this.cb);
       this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
       this.showBanner('INTERCEPTED');
+    } else if (result === 'droppedInt' || result === 'drop') {
+      // Ball clanks off the player's hands and bounces away.
+      const who = result === 'drop' ? wrPos : this.coverage.pos;
+      this.skidBall(th.to, { x: th.to.x - th.from.x + (th.to.y - who.y), y: th.to.y - th.from.y });
+      this.showBanner(result === 'drop' ? 'DROPPED' : 'ALMOST PICKED');
     } else if (result === 'breakup') {
       // Swatted away: the ball pops off sideways from the defender.
       const cb = this.coverage.pos;

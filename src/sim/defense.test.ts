@@ -26,7 +26,8 @@ const contest = {
   contestRadiusYards: 2.5,
   breakupChance: 0.6,
   interceptChance: 0.35,
-  overthrowInterceptChance: 0.5,
+  receiverCatchChance: 0.95,
+  defenderCatchChance: 0.75,
 };
 const rush = { blockedSpeed: 1, freeSpeed: 6, sackReachYards: 1.2 };
 const dt = 1 / 60;
@@ -127,17 +128,20 @@ describe('pass rush', () => {
 describe('resolving the pass', () => {
   const landing = { x: 50, y: 20 };
 
-  it('open receiver always catches', () => {
+  it('open receiver usually catches, occasionally drops', () => {
     expect(resolvePass({ x: 50.5, y: 20 }, { x: 56, y: 20 }, landing, 0.0, contest)).toBe('catch');
+    expect(resolvePass({ x: 50.5, y: 20 }, { x: 56, y: 20 }, landing, 0.94, contest)).toBe('catch');
+    expect(resolvePass({ x: 50.5, y: 20 }, { x: 56, y: 20 }, landing, 0.97, contest)).toBe('drop');
   });
 
   it('nobody near the ball is incomplete', () => {
     expect(resolvePass({ x: 45, y: 20 }, { x: 56, y: 20 }, landing, 0.0, contest)).toBe('incomplete');
   });
 
-  it('ball landing on the defender with the receiver absent can be picked', () => {
+  it('a ball thrown straight to the defender is usually picked, sometimes dropped (never "incomplete")', () => {
     expect(resolvePass({ x: 45, y: 20 }, { x: 50.2, y: 20 }, landing, 0.1, contest)).toBe('interception');
-    expect(resolvePass({ x: 45, y: 20 }, { x: 50.2, y: 20 }, landing, 0.9, contest)).toBe('incomplete');
+    expect(resolvePass({ x: 45, y: 20 }, { x: 50.2, y: 20 }, landing, 0.7, contest)).toBe('interception');
+    expect(resolvePass({ x: 45, y: 20 }, { x: 50.2, y: 20 }, landing, 0.9, contest)).toBe('droppedInt');
   });
 
   it('a tight defender can intercept, break it up, or lose the battle', () => {
@@ -145,7 +149,7 @@ describe('resolving the pass', () => {
     const cb = { x: 50.3, y: 20 }; // closer than the receiver
     expect(resolvePass(wr, cb, landing, 0.05, contest)).toBe('interception');
     expect(resolvePass(wr, cb, landing, 0.5, contest)).toBe('breakup');
-    expect(resolvePass(wr, cb, landing, 0.99, contest)).toBe('catch');
+    expect(resolvePass(wr, cb, landing, 0.9, contest)).toBe('catch');
   });
 
   it('a trailing defender can break it up but never intercepts', () => {

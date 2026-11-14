@@ -119,7 +119,12 @@ export function closestRusher(rushers: Rusher[], qb: Vec): number {
 
 // ---------- When the ball arrives ----------
 
-export type PassResult = 'catch' | 'breakup' | 'interception' | 'incomplete';
+/**
+ * catch / drop: receiver caught it / had it and dropped it.
+ * interception / droppedInt: defender caught it / had it and dropped it ("almost picked").
+ * breakup: defender knocked it away. incomplete: nobody got to it.
+ */
+export type PassResult = 'catch' | 'drop' | 'breakup' | 'interception' | 'droppedInt' | 'incomplete';
 
 export interface ContestParams {
   catchRadiusYards: number;
@@ -129,8 +134,10 @@ export interface ContestParams {
   breakupChance: number;
   /** Chance of an interception when he's closer to the ball than the receiver. */
   interceptChance: number;
-  /** Chance of an interception when the ball lands on him and the receiver isn't there. */
-  overthrowInterceptChance: number;
+  /** Chance an open receiver hangs on to a catchable ball (later: his hands rating). */
+  receiverCatchChance: number;
+  /** Chance a defender hangs on when the ball comes straight to him (later: his hands rating). */
+  defenderCatchChance: number;
 }
 
 /**
@@ -141,17 +148,21 @@ export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: Con
   const wrD = dist(wr, landing);
   const cbD = dist(cb, landing);
   const wrCanCatch = wrD <= p.catchRadiusYards;
-  const cbCanReach = cbD <= p.catchRadiusYards;
+  const cbCanCatch = cbD <= p.catchRadiusYards;
 
+  // Thrown to the defender (receiver nowhere near): he usually picks it off.
   if (!wrCanCatch) {
-    return cbCanReach && roll < p.overthrowInterceptChance ? 'interception' : 'incomplete';
+    if (!cbCanCatch) return 'incomplete';
+    return roll < p.defenderCatchChance ? 'interception' : 'droppedInt';
   }
-  if (cbD > p.contestRadiusYards) return 'catch';
 
-  const strength = 1 - cbD / p.contestRadiusYards; // 1 = right on the ball, 0 = edge of range
+  // Receiver can get it; how much can the defender interfere?
+  const strength = cbD > p.contestRadiusYards ? 0 : 1 - cbD / p.contestRadiusYards; // 1 = right on the ball
   const pInt = cbD < wrD ? p.interceptChance * strength : 0;
   const pBreakup = p.breakupChance * strength;
   if (roll < pInt) return 'interception';
   if (roll < pInt + pBreakup) return 'breakup';
-  return 'catch';
+  // Whatever's left: he catches it or drops it.
+  const left = 1 - pInt - pBreakup;
+  return roll < pInt + pBreakup + left * p.receiverCatchChance ? 'catch' : 'drop';
 }
