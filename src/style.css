@@ -148,3 +148,18 @@ body {
   content: ' •';
   color: #ffd166;
 }
+.fp-save h3 {
+  margin: 4px 0 2px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd166;
+}
+.fp-save-info {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.fp-save {
+  border-bottom: 1px solid #f4efe133;
+  margin-bottom: 4px;
+}

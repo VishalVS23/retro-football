@@ -1,9 +1,14 @@
 import Phaser from 'phaser';
 import { FieldScene } from './scenes/FieldScene';
 import { setupFeelPanel } from './debug/feelPanel';
+import { addSaveControls } from './debug/saveControls';
+import { startSaveSession } from './save/saveSession';
 
 // Load any saved feel tweaks before the game starts, and add the ⚙ panel.
-setupFeelPanel();
+const feelPanel = setupFeelPanel();
+
+// Open (or create) the save, then add the Export/Import buttons to the ⚙ panel.
+void startSaveSession().then(() => addSaveControls(feelPanel.panel, feelPanel.flash));
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,

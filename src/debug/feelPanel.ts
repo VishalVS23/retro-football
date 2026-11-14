@@ -148,4 +148,5 @@ export function setupFeelPanel() {
   });
 
   document.body.append(toggle, panel);
+  return { panel, flash };
 }
