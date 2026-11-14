@@ -32,3 +32,6 @@ const applyOrientation = () => {
 };
 portrait.addEventListener('change', applyOrientation);
 applyOrientation();
+
+// Dev only: lets automated browser tests peek at the game state. Not included in the published build.
+if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;

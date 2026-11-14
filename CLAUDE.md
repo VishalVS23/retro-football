@@ -371,7 +371,7 @@ Flow decisions:
 
 | Stage | Status | Notes |
 |---|---|---|
-| 1 Feel prototype | In progress (2026-11-14) | Plan approved |
+| 1 Feel prototype | Built, phone test pending (2026-11-14) | All 9 steps done |
 | 2–13 | Not started | |
 
 Stage 1 steps:
@@ -382,7 +382,7 @@ Stage 1 steps:
 - [x] 5. QB throws to one receiver (aim arc, ball shadow, catch) (2026-11-14): math in `src/sim/throw.ts` (tested); scene in `FieldScene.ts`. Aim style: **slingshot (aimMode 1) chosen** after phone test. Added `camera.zoomScale` (1.5) because the whole field fit on screen and players were tiny. Phone tested: feels good. Ball a bit slow (arm strength will speed it up in stage 3); arc reads like a straight line from the top-down view, so revisit height cues once defenders exist.
 - [x] 6. Routes (2026-11-14): `src/sim/routes.ts` (Slant/Out/Go, acceleration, slowdown at cuts, tested). Tap anywhere to snap (user's idea, replaces a Snap button); route line shown pre-snap; QB drops back; earliest release 0.3s; pressure cue (red QB outline) and placeholder SACKED at `pocket.sackTime` until the pass rush exists. Routes rotate each play until play calling (stage 2).
 - [x] 7. Basic defense (2026-11-14): `src/sim/defense.ts` (tested). Cornerback in man coverage (reaction delay, closing cushion, slower break on the ball), contested catches: catch / DROPPED / BROKEN UP / INTERCEPTED / LUCKY! (defender dropped it; user wanted one word) via seeded RNG. A ball thrown straight to the defender is a pick 75% of the time, never 'incomplete' (user feedback); open receivers catch 95%. Both chances become hands ratings in stage 3. Two rushers vs two blockers replace the fixed sack timer (tuned to ~3s); red pressure outline when a rusher is close. Balance test: a well-led on-time slant is caught 60%+ of the time.
-- [ ] 8. Catch / incompletion / tackle
+- [x] 8. Catch / incompletion / tackle (2026-11-14): `src/sim/carry.ts` (tested). After the catch the receiver auto-runs; any thumb drags up/down to steer, a quick flick jukes (cooldown). Defenders (CB, new deep safety, rushers) chase with a reaction delay and pursuit angle; tackle attempts can be broken or juked (seeded RNG), 0.2s grace after the catch. Ends: TACKLED (hit-pause + shake), OUT OF BOUNDS, TOUCHDOWN!. Fixed screen shake being hugely over-scaled by the zoomed camera (`shakeScreen` helper). Phone test pending.
 - [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
 
 ## Decisions & refinements

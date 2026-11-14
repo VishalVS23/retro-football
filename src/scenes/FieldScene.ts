@@ -23,6 +23,19 @@ import {
   type Coverage,
   type Rusher,
 } from '../sim/defense';
+import {
+  GOAL_LINE_X,
+  checkTackles,
+  playEnd,
+  remember,
+  startCarrier,
+  stepCarrier,
+  stepPursuers,
+  tryJuke,
+  type Carrier,
+  type Pursuer,
+  type Sightings,
+} from '../sim/carry';
 import { getRngOrFallback } from '../save/saveSession';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
@@ -58,7 +71,8 @@ const RUSH_STARTS: Vec[] = [
 ];
 const BLOCK_STARTS: Vec[] = RUSH_STARTS.map((r) => ({ x: LOS_X - 1, y: r.y }));
 
-type State = 'presnap' | 'live' | 'windup' | 'flight' | 'result';
+type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'result';
+const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
 export class FieldScene extends Phaser.Scene {
@@ -66,6 +80,18 @@ export class FieldScene extends Phaser.Scene {
   private qb!: Phaser.GameObjects.Arc;
   private wr!: Phaser.GameObjects.Arc;
   private cb!: Phaser.GameObjects.Arc;
+  private safety!: Phaser.GameObjects.Arc;
+  private safetyPos: Vec = { x: 0, y: 0 };
+  // After the catch:
+  private carrier: Carrier = startCarrier({ x: 0, y: 0 });
+  private pursuers: Pursuer[] = [];
+  private pursuerDots: Phaser.GameObjects.Arc[] = [];
+  private sightings: Sightings = [];
+  private runTime = 0;
+  private steer = 0;
+  private steerTouch: { id: number; x: number; y: number; time: number } | null = null;
+  private hitPauseLeft = 0;
+  private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
   private coverage!: Coverage;
@@ -107,6 +133,7 @@ export class FieldScene extends Phaser.Scene {
     this.wr = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     const dot = (color: number) => this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     this.cb = dot(COLORS.defense);
+    this.safety = dot(COLORS.defense);
     this.rusherDots = RUSH_STARTS.map(() => dot(COLORS.defense));
     this.blockerDots = BLOCK_STARTS.map(() => dot(COLORS.team));
     this.ball = this.add.ellipse(0, 0, 1, 0.7, COLORS.ball).setStrokeStyle(0.08, COLORS.outline).setDepth(3);
@@ -144,6 +171,11 @@ export class FieldScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
+    if (this.hitPauseLeft > 0) {
+      this.hitPauseLeft -= dt; // freeze-frame on a big hit
+      return;
+    }
+    if (this.state === 'run') this.stepRun(dt);
 
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
@@ -195,6 +227,11 @@ export class FieldScene extends Phaser.Scene {
   // ---------- Input ----------
 
   private onDown(p: Phaser.Input.Pointer) {
+    if (this.state === 'run') {
+      // Any thumb steers the runner (drag up/down); a quick flick jukes.
+      this.steerTouch = { id: p.id, x: p.x, y: p.y, time: this.time.now };
+      return;
+    }
     if (this.state === 'result') {
       this.resetPlay(); // tap to skip
       return;
@@ -210,12 +247,28 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private onMove(p: Phaser.Input.Pointer) {
+    if (this.state === 'run' && this.steerTouch && p.id === this.steerTouch.id) {
+      const full = Math.max(1, this.scale.height * feel.running.steerDragRatio);
+      this.steer = Math.max(-1, Math.min(1, (p.y - this.steerTouch.y) / full));
+      return;
+    }
     if (this.state !== 'live' || p.id !== this.aimPointerId) return;
     this.aimDrag = { x: p.x - this.aimStart.x, y: p.y - this.aimStart.y };
     this.updateAim();
   }
 
   private onUp(p: Phaser.Input.Pointer) {
+    if (this.steerTouch && p.id === this.steerTouch.id) {
+      const t = this.steerTouch;
+      this.steerTouch = null;
+      this.steer = 0;
+      const dy = p.y - t.y;
+      const quick = (this.time.now - t.time) / 1000 <= feel.running.jukeFlickTime;
+      if (this.state === 'run' && quick && Math.abs(dy) >= JUKE_MIN_PX && Math.abs(dy) > Math.abs(p.x - t.x)) {
+        this.carrier = tryJuke(this.carrier, Math.sign(dy), this.carryParams());
+      }
+      return;
+    }
     if (p.id !== this.aimPointerId) return;
     this.aimPointerId = null;
     this.aimDrag = null;
@@ -323,7 +376,7 @@ export class FieldScene extends Phaser.Scene {
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
       this.popPlayer(this.cb);
-      this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
+      this.shakeScreen();
       this.showBanner('INTERCEPTED');
     } else if (result === 'droppedInt' || result === 'drop') {
       // Ball clanks off the player's hands and bounces away.
@@ -340,18 +393,24 @@ export class FieldScene extends Phaser.Scene {
     } else if (result === 'catch') {
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
-      const yards = Math.round(wrPos.x - LOS_X);
-      // Feedback stack: catch pop -> yards popup -> shake on big gains.
+      // Catch pop, then control passes to the receiver straight away.
       this.popPlayer(this.wr);
-      this.floatText(wrPos.x, wrPos.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, '#ffd166');
-      if (yards >= feel.juice.bigGainYards) {
-        this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
-      }
+      this.startRun(wrPos);
+      return;
     } else {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
       this.showBanner('INCOMPLETE');
     }
     this.scheduleReset();
+  }
+
+  /**
+   * Screen shake. Phaser scales shake by the camera zoom twice, and our camera is zoomed way in
+   * (1 yard = ~10px), so divide that back out: intensity is then a fraction of the screen width.
+   */
+  private shakeScreen(mult = 1) {
+    const cam = this.cameras.main;
+    cam.shake(feel.juice.screenShakeTime * 1000 * mult, (feel.juice.screenShakeIntensity * mult) / (cam.zoom * cam.zoom));
   }
 
   /** Catch / pick / swat "pop" on a player. */
@@ -412,6 +471,21 @@ export class FieldScene extends Phaser.Scene {
     );
     this.cb.setPosition(this.coverage.pos.x, this.coverage.pos.y);
 
+    // Safety: sits deep, shading toward the receiver; breaks on the ball once it's thrown.
+    const deep = ball
+      ? ball.landing
+      : { x: LOS_X + feel.defense.safetyDepthYards, y: (FIELD_WIDTH / 2 + this.runner.pos.y) / 2 };
+    const sSpeed = feel.tackling.dbPursuitSpeed * (ball ? feel.defense.cbBallSpeedRatio : feel.defense.safetyDriftRatio);
+    const gap = Math.hypot(deep.x - this.safetyPos.x, deep.y - this.safetyPos.y);
+    if (gap > 0) {
+      const step = Math.min(gap, sSpeed * dt);
+      this.safetyPos = {
+        x: this.safetyPos.x + ((deep.x - this.safetyPos.x) / gap) * step,
+        y: this.safetyPos.y + ((deep.y - this.safetyPos.y) / gap) * step,
+      };
+    }
+    this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
+
     const p = this.rushParams();
     this.rushers = this.rushers.map((r) => stepRusher(r, this.qbPos, this.playTime, dt, p));
     this.rushers.forEach((r, i) => {
@@ -422,6 +496,93 @@ export class FieldScene extends Phaser.Scene {
         this.blockerDots[i].setPosition(spot.x, spot.y);
       }
     });
+  }
+
+  private carryParams() {
+    return {
+      runSpeed: feel.running.runSpeed,
+      steerSpeed: feel.running.steerSpeed,
+      steerResponse: feel.running.steerResponse,
+      jukeSpeed: feel.running.jukeSpeed,
+      jukeTime: feel.running.jukeTime,
+      jukeCooldown: feel.running.jukeCooldown,
+    };
+  }
+
+  /** After the catch: the receiver becomes the ball carrier and every defender chases him. */
+  private startRun(at: Vec) {
+    this.state = 'run';
+    this.runTime = 0;
+    this.carrier = startCarrier(at);
+    this.sightings = remember([], 0, this.carrier, 1);
+    const db = feel.tackling.dbPursuitSpeed;
+    const dl = feel.tackling.dlPursuitSpeed;
+    this.pursuers = [
+      { pos: { ...this.coverage.pos }, speed: db, stunned: 0 },
+      { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
+      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0 })),
+    ];
+    this.pursuerDots = [this.cb, this.safety, ...this.rusherDots];
+    this.updateLabel();
+  }
+
+  private stepRun(dt: number) {
+    this.runTime += dt;
+    this.carrier = stepCarrier(this.carrier, this.steer, dt, this.carryParams());
+    this.wr.setPosition(this.carrier.pos.x, this.carrier.pos.y);
+    this.sightings = remember(this.sightings, this.runTime, this.carrier, 1);
+    this.pursuers = stepPursuers(this.pursuers, this.sightings, this.runTime, dt, {
+      reactionTime: feel.tackling.pursuitReactionTime,
+      leadTime: feel.tackling.pursuitLeadTime,
+      runSpeed: feel.running.runSpeed,
+    });
+    this.pursuers.forEach((d, i) => this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 ? 0.45 : 1));
+    this.cameraFocus = { x: this.carrier.pos.x + feel.camera.leadYards, y: this.carrier.pos.y };
+
+    if (this.runTime < feel.tackling.catchGraceTime) {
+      const end = playEnd(this.carrier.pos);
+      if (end) this.endRun(end);
+      return;
+    }
+    const rng = getRngOrFallback();
+    const check = checkTackles(this.pursuers, this.carrier, () => rng.next(), {
+      tackleReachYards: feel.tackling.tackleReachYards,
+      brokenTackleChance: feel.tackling.brokenTackleChance,
+      jukeEvadeChance: feel.tackling.jukeEvadeChance,
+      stunTime: feel.tackling.stunTime,
+    });
+    if (check.missed) {
+      this.pursuers = check.pursuers;
+      this.floatText(this.carrier.pos.x, this.carrier.pos.y - 2, check.missed === 'juked' ? 'JUKED!' : 'BROKE IT!', '#7ec8e3');
+    }
+    if (check.tackled) {
+      this.endRun('tackled');
+      return;
+    }
+    const end = playEnd(this.carrier.pos);
+    if (end) this.endRun(end);
+  }
+
+  private endRun(how: 'tackled' | 'out' | 'touchdown') {
+    this.state = 'result';
+    this.steerTouch = null;
+    this.steer = 0;
+    const c = this.carrier.pos;
+    const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - LOS_X);
+    const shake = (mult: number) => this.shakeScreen(mult);
+    if (how === 'touchdown') {
+      shake(feel.juice.touchdownShakeScale);
+      this.popPlayer(this.wr);
+      this.showBanner('TOUCHDOWN!');
+    } else if (how === 'tackled') {
+      this.hitPauseLeft = feel.juice.hitPauseTime; // tiny freeze-frame, then shake
+      shake(yards >= feel.juice.bigGainYards ? feel.juice.bigHitShakeScale : 1);
+      this.showBanner('TACKLED');
+    } else {
+      this.showBanner('OUT OF BOUNDS');
+    }
+    this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, '#ffd166');
+    this.scheduleReset();
   }
 
   /** The pass rush got home. */
@@ -438,7 +599,7 @@ export class FieldScene extends Phaser.Scene {
       duration: feel.juice.screenShakeTime * 1000,
       yoyo: true,
     });
-    this.cameras.main.shake(feel.juice.screenShakeTime * 1000, feel.juice.screenShakeIntensity);
+    this.shakeScreen();
     this.showBanner('SACKED');
     this.scheduleReset();
   }
@@ -465,7 +626,14 @@ export class FieldScene extends Phaser.Scene {
     this.aimDrag = null;
     this.underPressure = false;
     this.aimG.clear();
-    this.tweens.killTweensOf([this.qb, this.wr, this.cb, this.ball, this.shadow]);
+    this.tweens.killTweensOf([this.qb, this.wr, this.cb, this.safety, this.ball, this.shadow]);
+    this.safetyPos = { x: LOS_X + feel.defense.safetyDepthYards, y: FIELD_WIDTH / 2 };
+    this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
+    [this.cb, ...this.rusherDots].forEach((d) => d.setAlpha(1));
+    this.steerTouch = null;
+    this.steer = 0;
+    this.hitPauseLeft = 0;
+    this.clearBanner(); // tapping to skip clears the old banner straight away
     const cbStart = { x: WR_START.x + feel.defense.cbCushionYards, y: WR_START.y };
     this.coverage = startCoverage(cbStart, WR_START);
     this.cb.setPosition(cbStart.x, cbStart.y).setScale(1);
@@ -537,6 +705,10 @@ export class FieldScene extends Phaser.Scene {
       this.label.setText(`${ROUTES[this.routeIndex].name} route · TAP to snap · ⚙ = feel`);
       return;
     }
+    if (this.state === 'run') {
+      this.label.setText('RUN! Drag up/down to steer · quick flick = juke');
+      return;
+    }
     const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';
     this.label.setText(`Right side: ${how}, release to throw`);
   }
@@ -593,7 +765,15 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** Big centred banner (e.g. INCOMPLETE) fixed to the screen. */
+  private clearBanner() {
+    if (!this.banner) return;
+    this.tweens.killTweensOf(this.banner);
+    this.banner.destroy();
+    this.banner = null;
+  }
+
   private showBanner(text: string) {
+    this.clearBanner();
     const cam = this.cameras.main;
     const z = cam.zoom;
     const b = this.add
@@ -603,6 +783,7 @@ export class FieldScene extends Phaser.Scene {
       .setDepth(11)
       .setScale(0.6 / z);
     this.placeOnScreen(b, cam.width / 2, cam.height * 0.35);
+    this.banner = b;
     this.tweens.add({ targets: b, scale: 1 / z, duration: feel.pacing.bannerPopTime * 1000, ease: 'Back.easeOut' });
     this.tweens.add({
       targets: b,

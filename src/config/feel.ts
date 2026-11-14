@@ -57,6 +57,45 @@ export const feel = {
     interceptChance: 0.35,
     /** Chance he holds on when the ball is thrown straight to him (later: hands rating). */
     defenderCatchChance: 0.75,
+    /** How deep the safety lines up behind the line of scrimmage. */
+    safetyDepthYards: 15,
+    /** How fast the safety drifts while reading the play (fraction of his speed). */
+    safetyDriftRatio: 0.5,
+  },
+  running: {
+    /** Ball carrier's forward speed after the catch (later: his speed rating). */
+    runSpeed: 7.5,
+    /** Fastest sideways speed when steering with your thumb. */
+    steerSpeed: 5,
+    /** How snappy steering is (higher = turns quicker). */
+    steerResponse: 10,
+    /** Dragging this fraction of the screen height = full steer. */
+    steerDragRatio: 0.2,
+    /** Juke: sideways burst speed, how long it lasts, and the wait before the next. */
+    jukeSpeed: 9,
+    jukeTime: 0.18,
+    jukeCooldown: 0.6,
+    /** A drag shorter than this (seconds) counts as a flick = juke. */
+    jukeFlickTime: 0.25,
+  },
+  tackling: {
+    /** A defender this close can try to tackle. */
+    tackleReachYards: 1.1,
+    /** Tiny window after the catch before anyone can tackle (time to react / juke). */
+    catchGraceTime: 0.2,
+    /** Chance the runner breaks a tackle attempt (later: strength, "fights for extra yards"). */
+    brokenTackleChance: 0.15,
+    /** Chance a defender completely misses if the runner is mid-juke. */
+    jukeEvadeChance: 0.6,
+    /** How long a defender who missed is out of the play. */
+    stunTime: 0.7,
+    /** How late defenders react to the runner's moves. */
+    pursuitReactionTime: 0.2,
+    /** How far ahead they aim when chasing (pursuit angle), in seconds. */
+    pursuitLeadTime: 0.35,
+    /** Chasing speeds: defensive backs (fast) and linemen (slower). */
+    dbPursuitSpeed: 7.2,
+    dlPursuitSpeed: 5.5,
   },
   routes: {
     /** Receiver top speed, yards per second (later scaled by his speed rating). */
@@ -131,6 +170,9 @@ export const feel = {
     yardsPopupTime: 0.9,
     /** How far the "+12 YDS" popup rises, in yards. */
     yardsPopupRise: 3,
+    /** Screen shake multipliers for touchdowns and big hits (after long gains). */
+    touchdownShakeScale: 2,
+    bigHitShakeScale: 1.5,
   },
 };
 
