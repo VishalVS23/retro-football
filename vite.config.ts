@@ -7,6 +7,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ command }) => ({
   // GitHub Pages serves the game from /retro-football/, local dev from /.
   base: command === 'build' ? '/retro-football/' : '/',
+  // Build time stamp, shown in the ⚙ panel so you can tell which version the phone is running.
+  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   server: {
     host: true, // lets your phone open the game over Wi-Fi
     port: 5173,

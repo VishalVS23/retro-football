@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from './field';
+import { FIELD_WIDTH, TOTAL_LENGTH, isInBounds, yardLineNumber } from './field';
 
 describe('field', () => {
   it('has standard dimensions', () => {
@@ -19,5 +19,12 @@ describe('field', () => {
     expect(yardLineNumber(110)).toBeNull();
     expect(yardLineNumber(5)).toBeNull();
     expect(yardLineNumber(25)).toBeNull();
+  });
+
+  it('judges in/out of bounds by the feet (centre point)', () => {
+    expect(isInBounds({ x: 50, y: 0 })).toBe(true); // on the line counts as in for us
+    expect(isInBounds({ x: 50, y: -0.2 })).toBe(false);
+    expect(isInBounds({ x: 50, y: FIELD_WIDTH + 0.2 })).toBe(false);
+    expect(isInBounds({ x: TOTAL_LENGTH + 0.1, y: 20 })).toBe(false);
   });
 });

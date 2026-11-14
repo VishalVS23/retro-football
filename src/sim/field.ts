@@ -19,3 +19,11 @@ export function yardLineNumber(x: number): number | null {
   if (fromGoal % 10 !== 0) return null;
   return fromGoal <= 50 ? fromGoal : FIELD_LENGTH - fromGoal;
 }
+
+/**
+ * Is this spot inside the field (sidelines and end lines included as in-bounds)?
+ * Players are judged by their centre point = their feet.
+ */
+export function isInBounds(p: { x: number; y: number }): boolean {
+  return p.x >= 0 && p.x <= TOTAL_LENGTH && p.y >= 0 && p.y <= FIELD_WIDTH;
+}

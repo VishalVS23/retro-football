@@ -163,3 +163,10 @@ body {
   border-bottom: 1px solid #f4efe133;
   margin-bottom: 4px;
 }
+
+.fp-build {
+  font-weight: normal;
+  font-size: 11px;
+  opacity: 0.6;
+  margin-left: 6px;
+}

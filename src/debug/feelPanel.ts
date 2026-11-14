@@ -62,7 +62,7 @@ export function setupFeelPanel() {
   panel.id = 'feel-panel';
   panel.innerHTML = `
     <div class="fp-head">
-      <strong>Feel tuning</strong>
+      <strong>Feel tuning <small class="fp-build">build ${new Date(__BUILD_TIME__).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></strong>
       <span class="fp-msg"></span>
     </div>
     <div class="fp-buttons">

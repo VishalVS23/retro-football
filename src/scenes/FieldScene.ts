@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { feel } from '../config/feel';
-import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
+import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, isInBounds, yardLineNumber } from '../sim/field';
 import {
   AIM_SLINGSHOT,
   aimTarget,
@@ -363,7 +363,7 @@ export class FieldScene extends Phaser.Scene {
     this.aimG.clear();
     this.state = 'result';
 
-    const result = resolvePass(wrPos, this.coverage.pos, th.to, getRngOrFallback().next(), {
+    let result = resolvePass(wrPos, this.coverage.pos, th.to, getRngOrFallback().next(), {
       catchRadiusYards: feel.catching.catchRadiusYards,
       contestRadiusYards: feel.defense.contestRadiusYards,
       breakupChance: feel.defense.breakupChance,
@@ -371,6 +371,13 @@ export class FieldScene extends Phaser.Scene {
       receiverCatchChance: feel.catching.receiverCatchChance,
       defenderCatchChance: feel.defense.defenderCatchChance,
     });
+
+    // A catch only counts with the catcher's feet (centre of his circle) in bounds.
+    const catcher = result === 'catch' ? wrPos : result === 'interception' ? this.coverage.pos : null;
+    if (catcher && !isInBounds(catcher)) {
+      result = 'incomplete';
+      this.floatText(catcher.x, catcher.y - 2, 'OUT OF BOUNDS', '#f4efe1');
+    }
 
     if (result === 'interception') {
       this.ball.setVisible(false);
