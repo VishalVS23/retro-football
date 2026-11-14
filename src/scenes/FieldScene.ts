@@ -36,6 +36,7 @@ import {
   type Pursuer,
   type Sightings,
 } from '../sim/carry';
+import { OPP_GOAL_X, applyPlay, downText, newGame, spotText, type GameState, type PlayOutcome } from '../sim/drive';
 import { getRngOrFallback } from '../save/saveSession';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
@@ -52,24 +53,31 @@ const COLORS = {
   shadow: 0x000000,
   aim: 0xffd166,
   scrimmage: 0x7ec8e3,
+  firstDown: 0xffd23f,
   route: 0xffd166,
   routeOutline: 0x0d1b2a,
 };
 
-// Formation for this test (football layout, not feel): line of scrimmage at our 25.
-const LOS_X = END_ZONE_DEPTH + 25;
-const QB_START: Vec = { x: LOS_X - 2, y: FIELD_WIDTH / 2 };
-const WR_START: Vec = { x: LOS_X - 0.5, y: FIELD_WIDTH / 2 - 12 };
+// Formation (football layout, not feel), lined up on the current line of scrimmage.
 const WR_TOWARD_MIDDLE = 1; // he lines up above the middle, so "inside" is +y
 const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
 const PRESSURE_COLOR = 0xff3b3b;
-// Two rushers lined up just over the ball, either side of the QB, with a blocker each.
-const RUSH_STARTS: Vec[] = [
-  { x: LOS_X + 1, y: FIELD_WIDTH / 2 - 3 },
-  { x: LOS_X + 1, y: FIELD_WIDTH / 2 + 3 },
-];
-const BLOCK_STARTS: Vec[] = RUSH_STARTS.map((r) => ({ x: LOS_X - 1, y: r.y }));
+const RUSHER_COUNT = 2;
+
+/** Where everyone lines up for a snap at losX: QB under centre, one WR, two rushers with a blocker each. */
+function formation(losX: number) {
+  const rush: Vec[] = [
+    { x: losX + 1, y: FIELD_WIDTH / 2 - 3 },
+    { x: losX + 1, y: FIELD_WIDTH / 2 + 3 },
+  ];
+  return {
+    qb: { x: losX - 2, y: FIELD_WIDTH / 2 },
+    wr: { x: losX - 0.5, y: FIELD_WIDTH / 2 - 12 },
+    rush,
+    block: rush.map((r) => ({ x: losX - 1, y: r.y })),
+  };
+}
 
 type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'result';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
@@ -101,12 +109,18 @@ export class FieldScene extends Phaser.Scene {
   private aimG!: Phaser.GameObjects.Graphics;
   private routeG!: Phaser.GameObjects.Graphics;
 
+  // Downs, distance and score (rules live in sim/drive.ts).
+  private match: GameState = newGame();
+  private form = formation(newGame().ballX);
+  private scoreboard!: Phaser.GameObjects.Text;
+  private markersG!: Phaser.GameObjects.Graphics;
+
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
   private routeIndex = 0;
   private path: Vec[] = [];
-  private runner: Runner = startRunner([WR_START]);
-  private qbPos: Vec = { ...QB_START };
+  private runner: Runner = startRunner([this.form.wr]);
+  private qbPos: Vec = { ...this.form.qb };
   private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
   private aimDrag: { x: number; y: number } | null = null;
@@ -114,10 +128,10 @@ export class FieldScene extends Phaser.Scene {
   private queuedTarget: Vec | null = null; // released before the earliest throw time
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
-  private wrAtLanding: Vec = { ...WR_START }; // where his route takes him when the ball lands
+  private wrAtLanding: Vec = { ...this.form.wr }; // where his route takes him when the ball lands
   private underPressure = false;
   private resetTimer: Phaser.Time.TimerEvent | null = null;
-  private cameraFocus: Vec = { ...QB_START };
+  private cameraFocus: Vec = { ...this.form.qb };
 
   constructor() {
     super('field');
@@ -126,6 +140,7 @@ export class FieldScene extends Phaser.Scene {
   create() {
     this.drawField();
 
+    this.markersG = this.add.graphics().setDepth(0.5); // line of scrimmage + first-down line
     this.routeG = this.add.graphics().setDepth(1);
     this.aimG = this.add.graphics().setDepth(4);
     this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
@@ -134,8 +149,8 @@ export class FieldScene extends Phaser.Scene {
     const dot = (color: number) => this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     this.cb = dot(COLORS.defense);
     this.safety = dot(COLORS.defense);
-    this.rusherDots = RUSH_STARTS.map(() => dot(COLORS.defense));
-    this.blockerDots = BLOCK_STARTS.map(() => dot(COLORS.team));
+    this.rusherDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.defense));
+    this.blockerDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.team));
     this.ball = this.add.ellipse(0, 0, 1, 0.7, COLORS.ball).setStrokeStyle(0.08, COLORS.outline).setDepth(3);
 
     this.label = this.add
@@ -145,6 +160,19 @@ export class FieldScene extends Phaser.Scene {
         color: '#f4efe1',
         backgroundColor: '#14202bcc',
         padding: { x: 6, y: 4 },
+      })
+      .setScrollFactor(0)
+      .setDepth(10);
+
+    // Scoreboard bar, top centre (placeholder style until the UI kit pass).
+    this.scoreboard = this.add
+      .text(0, 0, '', {
+        fontFamily: 'monospace',
+        fontSize: '16px',
+        fontStyle: 'bold',
+        color: '#f4efe1',
+        backgroundColor: '#0d1b2aee',
+        padding: { x: 10, y: 5 },
       })
       .setScrollFactor(0)
       .setDepth(10);
@@ -307,7 +335,8 @@ export class FieldScene extends Phaser.Scene {
   private updateQbDropback() {
     const u = Math.min(1, this.playTime / Math.max(0.01, feel.pocket.dropbackTime));
     const eased = 0.5 - 0.5 * Math.cos(Math.PI * u);
-    this.qbPos = { x: QB_START.x - feel.pocket.dropbackYards * eased, y: QB_START.y };
+    const start = this.form.qb;
+    this.qbPos = { x: start.x - feel.pocket.dropbackYards * eased, y: start.y };
     this.qb.setPosition(this.qbPos.x, this.qbPos.y);
   }
 
@@ -408,7 +437,20 @@ export class FieldScene extends Phaser.Scene {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
       this.showBanner('INCOMPLETE');
     }
+    this.recordPlay(result === 'interception' ? { kind: 'interception' } : { kind: 'incomplete' });
     this.scheduleReset();
+  }
+
+  /**
+   * Feeds the play's result into the downs/score rules. Big moments (first down, turnover on
+   * downs, safety) replace the play's own banner; the yards popup still shows the gain.
+   */
+  private recordPlay(outcome: PlayOutcome) {
+    const { state, event } = applyPlay(this.match, outcome);
+    this.match = state;
+    const banner = { firstDown: 'FIRST DOWN!', turnoverOnDowns: 'TURNOVER ON DOWNS', safety: 'SAFETY' } as const;
+    if (event === 'firstDown' || event === 'turnoverOnDowns' || event === 'safety') this.showBanner(banner[event]);
+    this.updateScoreboard();
   }
 
   /**
@@ -481,7 +523,7 @@ export class FieldScene extends Phaser.Scene {
     // Safety: sits deep, shading toward the receiver; breaks on the ball once it's thrown.
     const deep = ball
       ? ball.landing
-      : { x: LOS_X + feel.defense.safetyDepthYards, y: (FIELD_WIDTH / 2 + this.runner.pos.y) / 2 };
+      : { x: this.safetyDepthX(), y: (FIELD_WIDTH / 2 + this.runner.pos.y) / 2 };
     const sSpeed = feel.tackling.dbPursuitSpeed * (ball ? feel.defense.cbBallSpeedRatio : feel.defense.safetyDriftRatio);
     const gap = Math.hypot(deep.x - this.safetyPos.x, deep.y - this.safetyPos.y);
     if (gap > 0) {
@@ -575,7 +617,7 @@ export class FieldScene extends Phaser.Scene {
     this.steerTouch = null;
     this.steer = 0;
     const c = this.carrier.pos;
-    const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - LOS_X);
+    const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - this.match.ballX);
     const shake = (mult: number) => this.shakeScreen(mult);
     if (how === 'touchdown') {
       shake(feel.juice.touchdownShakeScale);
@@ -589,6 +631,7 @@ export class FieldScene extends Phaser.Scene {
       this.showBanner('OUT OF BOUNDS');
     }
     this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, '#ffd166');
+    this.recordPlay(how === 'touchdown' ? { kind: 'touchdown' } : { kind: 'spot', x: c.x });
     this.scheduleReset();
   }
 
@@ -608,6 +651,9 @@ export class FieldScene extends Phaser.Scene {
     });
     this.shakeScreen();
     this.showBanner('SACKED');
+    const loss = Math.round(this.qbPos.x - this.match.ballX);
+    this.floatText(this.qbPos.x, this.qbPos.y - 2, `${loss} YDS`, '#ff8a8a');
+    this.recordPlay({ kind: 'spot', x: this.qbPos.x });
     this.scheduleReset();
   }
 
@@ -618,11 +664,18 @@ export class FieldScene extends Phaser.Scene {
     );
   }
 
+  /** The safety's spot: deep behind the line, but never past the back of the end zone. */
+  private safetyDepthX() {
+    return Math.min(this.match.ballX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1);
+  }
+
   private resetPlay() {
     this.resetTimer?.remove();
     this.resetTimer = null;
+    this.form = formation(this.match.ballX); // line up wherever the last play left the ball
+    const { qb: qbStart, wr: wrStart } = this.form;
     if (this.path.length) this.routeIndex = (this.routeIndex + 1) % ROUTES.length; // try each route in turn
-    this.path = routePath(WR_START, ROUTES[this.routeIndex], WR_TOWARD_MIDDLE);
+    this.path = routePath(wrStart, ROUTES[this.routeIndex], WR_TOWARD_MIDDLE);
     this.runner = startRunner(this.path);
     this.state = 'presnap';
     this.playTime = 0;
@@ -634,32 +687,58 @@ export class FieldScene extends Phaser.Scene {
     this.underPressure = false;
     this.aimG.clear();
     this.tweens.killTweensOf([this.qb, this.wr, this.cb, this.safety, this.ball, this.shadow]);
-    this.safetyPos = { x: LOS_X + feel.defense.safetyDepthYards, y: FIELD_WIDTH / 2 };
+    this.safetyPos = { x: this.safetyDepthX(), y: FIELD_WIDTH / 2 };
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
     [this.cb, ...this.rusherDots].forEach((d) => d.setAlpha(1));
     this.steerTouch = null;
     this.steer = 0;
     this.hitPauseLeft = 0;
     this.clearBanner(); // tapping to skip clears the old banner straight away
-    const cbStart = { x: WR_START.x + feel.defense.cbCushionYards, y: WR_START.y };
-    this.coverage = startCoverage(cbStart, WR_START);
+    const cbStart = { x: wrStart.x + feel.defense.cbCushionYards, y: wrStart.y };
+    this.coverage = startCoverage(cbStart, wrStart);
     this.cb.setPosition(cbStart.x, cbStart.y).setScale(1);
     const rng = getRngOrFallback();
-    this.rushers = RUSH_STARTS.map((pos) => ({
+    this.rushers = this.form.rush.map((pos) => ({
       pos: { ...pos },
       shedAt: feel.pocket.shedTime + (rng.next() * 2 - 1) * feel.pocket.shedTimeVariance,
     }));
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
-    BLOCK_STARTS.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
-    this.qbPos = { ...QB_START };
-    this.qb.setPosition(QB_START.x, QB_START.y).setScale(1).setStrokeStyle(0.2, COLORS.outline);
-    this.wr.setPosition(WR_START.x, WR_START.y).setScale(1);
+    this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
+    this.qbPos = { ...qbStart };
+    this.qb.setPosition(qbStart.x, qbStart.y).setScale(1).setStrokeStyle(0.2, COLORS.outline);
+    this.wr.setPosition(wrStart.x, wrStart.y).setScale(1);
     this.ball.setVisible(false).setAlpha(1);
     this.shadow.setVisible(false).setAlpha(1);
     this.sizeBall();
+    this.drawMarkers();
     this.drawRoute();
-    this.cameraFocus = { x: QB_START.x + 12, y: (QB_START.y + WR_START.y) / 2 };
+    this.cameraFocus = { x: qbStart.x + 12, y: (qbStart.y + wrStart.y) / 2 };
     this.updateLabel();
+    this.updateScoreboard();
+  }
+
+  /** Blue line of scrimmage and yellow first-down line (none when it's "& Goal"). */
+  private drawMarkers() {
+    const g = this.markersG;
+    g.clear();
+    g.fillStyle(COLORS.scrimmage, 0.8);
+    g.fillRect(this.match.ballX - 0.12, 0, 0.24, FIELD_WIDTH);
+    if (this.match.firstDownX < OPP_GOAL_X) {
+      g.fillStyle(COLORS.firstDown, 0.9);
+      g.fillRect(this.match.firstDownX - 0.15, 0, 0.3, FIELD_WIDTH);
+    }
+  }
+
+  private updateScoreboard() {
+    const g = this.match;
+    this.scoreboard.setText(`YOU ${g.us} - ${g.them} CPU   ${downText(g)}  ·  ${spotText(g.ballX)}`);
+    this.placeScoreboard();
+  }
+
+  private placeScoreboard() {
+    const cam = this.cameras.main;
+    this.scoreboard.setScale(1 / cam.zoom).setOrigin(0.5, 0);
+    this.placeOnScreen(this.scoreboard, cam.width / 2, 8);
   }
 
   /**
@@ -817,10 +896,12 @@ export class FieldScene extends Phaser.Scene {
     const m = feel.camera.sidelineMarginYards;
     cam.setZoom((this.scale.height / (FIELD_WIDTH + m * 2)) * Math.max(1, feel.camera.zoomScale));
     cam.setBounds(-m, -m, TOTAL_LENGTH + m * 2, FIELD_WIDTH + m * 2);
-    // Keep the on-screen label at normal size in the top-left, whatever the zoom.
+    // Keep the on-screen hint at normal size in the bottom-left, whatever the zoom
+    // (the scoreboard has the top centre, the ⚙ button the top right).
     this.label.setScale(1 / cam.zoom);
-    this.label.setOrigin(0, 0);
-    this.placeOnScreen(this.label, 8, 8);
+    this.label.setOrigin(0, 1);
+    this.placeOnScreen(this.label, 8, cam.height - 8);
+    this.placeScoreboard();
   }
 
   private drawField() {
@@ -843,10 +924,6 @@ export class FieldScene extends Phaser.Scene {
     }
     g.lineStyle(0.3, COLORS.line, 1);
     g.strokeRect(0, 0, TOTAL_LENGTH, FIELD_WIDTH);
-
-    // Line of scrimmage.
-    g.fillStyle(COLORS.scrimmage, 0.8);
-    g.fillRect(LOS_X - 0.12, 0, 0.24, FIELD_WIDTH);
 
     // Yard numbers, drawn big and then shrunk down so they stay sharp.
     for (let x = 0; x <= TOTAL_LENGTH; x += 10) {

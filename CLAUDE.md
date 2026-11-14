@@ -372,7 +372,7 @@ Flow decisions:
 | Stage | Status | Notes |
 |---|---|---|
 | 1 Feel prototype | **Done** (2026-11-14) | All 9 steps built and tested on phone |
-| 2 Full games | Planned, waiting for approval (2026-11-14) | Plan below; start with step 1 |
+| 2 Full games | **In progress** (plan approved 2026-11-14) | 2-minute quarters |
 | 3–13 | Not started | |
 
 Stage 1 steps:
@@ -386,8 +386,8 @@ Stage 1 steps:
 - [x] 8. Catch / incompletion / tackle (2026-11-14): `src/sim/carry.ts` (tested). After the catch the receiver auto-runs; any thumb drags up/down to steer, a quick flick jukes (cooldown). Defenders (CB, new deep safety, rushers) chase with a reaction delay and pursuit angle; tackle attempts can be broken or juked (seeded RNG), 0.2s grace after the catch. Ends: TACKLED (hit-pause + shake), OUT OF BOUNDS, TOUCHDOWN!. Fixed screen shake being hugely over-scaled by the zoomed camera (`shakeScreen` helper). Catches/picks only count with the catcher's centre point (feet) in bounds (`isInBounds`). Phone tested: everything works, movement feels good.
 - [x] 9. Free hosting (2026-11-14, moved earlier): https://vishalvs23.github.io/retro-football/
 
-Stage 2 steps (proposed 2026-11-14, not yet approved; show plan, wait for OK before coding):
-- [ ] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar
+Stage 2 steps (approved 2026-11-14; still show a short plan for each step before coding):
+- [ ] 1. Game state: downs, distance, line of scrimmage moves with each play, first downs, turnover on downs, scoreboard bar. **Built 2026-11-14, waiting for the user's phone test.** Rules in `src/sim/drive.ts` (tested): ball spotted to the nearest yard, never on a goal line; sacks/tackles behind our goal line = safety; touchdown = 6 (no PAT yet). Until steps 5–6, every drive-ending event restarts at our 25. Scene field is `match` (not `game`: that name belongs to Phaser). Hint text moved to bottom-left; scoreboard top-centre.
 - [ ] 2. Play calling screen based on the user's mockup (playbook cards with mini route diagrams, field preview, EXECUTE / AUDIBLE / CANCEL); ~6 pass plays to start
 - [ ] 3. Three receivers per play, each with his own cornerback (read the open man)
 - [ ] 4. Game clock and quarters, timeouts, two-minute warning
@@ -397,9 +397,7 @@ Stage 2 steps (proposed 2026-11-14, not yet approved; show plan, wait for OK bef
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session)
-1. Show the Stage 2 plan above, get the user's OK, then build **Stage 2 step 1** (downs, distance, scoreboard).
-2. Questions to ask the user: target game length (suggest 5–10 min per game on phone); the image files for their play-call screen and UI kit (needed by step 2).
-3. Before Stage 2 games get long: make auto-update ask before reloading (or wait until between games) so an update never interrupts a game.
+1. If the user's phone test of Stage 2 step 1 went well, tick it; then show the plan for **step 2 (play calling screen)**. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
 - Unit tests: `npm test` from **PowerShell** (not Git Bash). Typecheck: `npm run typecheck`. Build: `npm run build`.
@@ -427,4 +425,8 @@ Stage 2 steps (proposed 2026-11-14, not yet approved; show plan, wait for OK bef
 - **2026-11-14: Placeholder rules to replace with ratings in stage 3:** receiver and defender catch chances, rusher shed time (pass rush vs O-line), receiver/runner speed, QB ball speed (arm strength), broken-tackle chance (strength / "fights for extra yards").
 - **2026-11-14: Parked ideas:** throwing-zone glow hint with an off switch; interception returns (an interception currently just ends the play); QB scrambling; kick returns (maybe later, per the feel notes).
 - **2026-11-14: Dev workflow notes.** Git Bash heredocs break on Python code with nested quotes, so write multi-line edit scripts to the scratchpad and run them from there. A dev-only `window.__game` hook in `main.ts` lets browser test scripts read game state (excluded from production builds).
+- **2026-11-14: Design images contain real NFL material** (Bills/Giants logos, AFC, BUF/NYG, "Retro Bowl Championship"). Use their layouts and style only; replace all names/logos with our fictional league. Images kept in git-ignored `design-refs/`.
+- **2026-11-14: Auto-update stays as is** (reloads straight away, even mid-game). User is the only player and prefers it simple.
+- **2026-11-14: The play-call mockup and UI kit exist only as images** (no source files). When building step 2, ask the user to paste/attach the images and build the screen from them in code.
+- **2026-11-14: Stage 2 plan approved. Quarters are 2 minutes of game clock** (user's choice). How the clock runs between plays gets decided in step 4.
 - **2026-11-14: Stage 1 complete.** Everything tested on PC and phone: throwing, routes, defense, catches/picks, running, jukes, tackles. 67 unit tests passing. Next: Stage 2 (see "Next up").
