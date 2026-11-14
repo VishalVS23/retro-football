@@ -375,7 +375,7 @@ Flow decisions:
 | 2–13 | Not started | |
 
 Stage 1 steps:
-- [ ] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest
+- [x] 1. Project setup: Phaser + TS + Vite, blank landscape screen, rotate-your-phone overlay, `feel.ts`, `vite --host`, Vitest (2026-11-14; tested on desktop, phone test pending until hosting)
 - [ ] 2. PWA install to home screen
 - [ ] 3. Feel tuning panel
 - [ ] 4. Save export/import skeleton + seeded RNG
