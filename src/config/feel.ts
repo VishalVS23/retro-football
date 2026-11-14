@@ -47,7 +47,7 @@ export const feel = {
   },
   ball: {
     /** How far up the screen the ball is drawn per yard of height (shows the arc). */
-    heightDrawRatio: 0.6,
+    heightDrawRatio: 1,
     /** How much bigger the ball looks per yard of height. */
     growPerYard: 0.05,
     /** Ball radius on the ground, in yards. */
