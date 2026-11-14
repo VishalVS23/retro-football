@@ -133,6 +133,7 @@ export class FieldScene extends Phaser.Scene {
   private chasers: Pursuer[] = [];
   private chaserDots: Phaser.GameObjects.Arc[] = [];
   private returnSightings: Sightings = [];
+  private skipBtn: HTMLButtonElement | null = null; // DOM button, shown during returns and result banners
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
@@ -225,6 +226,22 @@ export class FieldScene extends Phaser.Scene {
     window.addEventListener(FEEL_CHANGE_EVENT, onFeelChange);
     this.events.once('shutdown', () => window.removeEventListener(FEEL_CHANGE_EVENT, onFeelChange));
 
+    // SKIP button (a DOM button, so taps on it never reach the field). Taps elsewhere don't skip.
+    const skip = document.createElement('button');
+    skip.id = 'skip-btn';
+    skip.textContent = 'SKIP ▸';
+    skip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.skip();
+    });
+    document.body.appendChild(skip);
+    this.skipBtn = skip;
+    this.events.once('shutdown', () => skip.remove());
+
+    // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
+    this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => this.toggleBullet());
+
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onUp(p));
@@ -233,6 +250,7 @@ export class FieldScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
+    this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result');
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
       return;
@@ -289,19 +307,10 @@ export class FieldScene extends Phaser.Scene {
       this.steerTouch = { id: p.id, x: p.x, y: p.y, time: this.time.now };
       return;
     }
-    if (this.state === 'return') {
-      this.skipReturn(); // tap to skip to the end of the return
-      return;
-    }
-    if (this.state === 'result') {
-      this.resetPlay(); // tap to skip
-      return;
-    }
+    // Returns and result banners are skipped with the SKIP button only (stray taps did it by accident).
+    if (this.state === 'return' || this.state === 'result') return;
     if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
-      // Other thumb taps while aiming: switch between a normal pass and a bullet.
-      this.bulletAim = !this.bulletAim;
-      this.updateAim();
-      this.updateLabel();
+      this.toggleBullet(); // other thumb taps while aiming
       return;
     }
     if (this.state === 'presnap') this.snap(); // tap anywhere to snap
@@ -314,6 +323,20 @@ export class FieldScene extends Phaser.Scene {
       this.bulletAim = false;
       this.updateLabel();
     }
+  }
+
+  /** Switch the pass being aimed between normal and bullet (other thumb, or SPACE on a keyboard). */
+  private toggleBullet() {
+    if (this.state !== 'live' || this.aimPointerId === null) return;
+    this.bulletAim = !this.bulletAim;
+    this.updateAim();
+    this.updateLabel();
+  }
+
+  /** SKIP button: finish a return instantly, or go straight to the next play. */
+  private skip() {
+    if (this.state === 'return') this.skipReturn();
+    else if (this.state === 'result') this.resetPlay();
   }
 
   private onMove(p: Phaser.Input.Pointer) {
@@ -453,7 +476,8 @@ export class FieldScene extends Phaser.Scene {
   private resolveThrow() {
     const th = this.currentThrow!;
     const wrSpots = this.receivers.map((_, i) => this.receiverPosition(i));
-    const cbSpots = this.receivers.map((r) => r.coverage.pos);
+    // Every defender in coverage can contest: the three cornerbacks and the deep safety.
+    const cbSpots = [...this.receivers.map((r) => r.coverage.pos), { ...this.safetyPos }];
     this.aimG.clear();
     this.state = 'result';
 
@@ -469,7 +493,7 @@ export class FieldScene extends Phaser.Scene {
     let result = pass.result;
     const wrPos = wrSpots[pass.receiver];
     const cbPos = cbSpots[pass.defender];
-    const cbDot = this.cbDots[pass.defender];
+    const cbDot = [...this.cbDots, this.safety][pass.defender];
 
     // A catch only counts with the catcher's feet (centre of his circle) in bounds.
     const catcher = result === 'catch' ? wrPos : result === 'interception' ? cbPos : null;
@@ -973,11 +997,11 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'return') {
-      this.label.setText('Interception return · TAP to skip');
+      this.label.setText('Interception return');
       return;
     }
     if (this.aimPointerId !== null) {
-      this.label.setText(this.bulletAim ? 'BULLET · tap other thumb for normal pass' : 'Tap other thumb = BULLET pass');
+      this.label.setText(this.bulletAim ? 'BULLET · other thumb / SPACE = normal pass' : 'Other thumb / SPACE = BULLET pass');
       return;
     }
     const how = feel.throw.aimMode === AIM_SLINGSHOT ? 'pull BACK from your target' : 'drag TOWARD your target';

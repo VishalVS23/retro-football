@@ -198,6 +198,19 @@ describe('passing with three receivers', () => {
     expect(r.result).toBe('interception');
   });
 
+  it('the deep safety (4th defender) can pick off a ball thrown over everyone', () => {
+    const deep = { x: 85, y: 27 };
+    const defenders = [
+      { x: 72, y: 12 },
+      { x: 66, y: 30 },
+      { x: 64, y: 44 },
+      { x: 85.3, y: 27 }, // safety sitting on the landing spot
+    ];
+    const r = resolveTargetedPass(receivers, defenders, deep, 0.1, contest);
+    expect(r.defender).toBe(3);
+    expect(r.result).toBe('interception');
+  });
+
   it('every play has one route per receiver', () => {
     for (const play of PLAYS) expect(play.routes).toHaveLength(3);
   });
