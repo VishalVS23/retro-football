@@ -10,7 +10,7 @@ export const feel = {
     /** Extra space shown above and below the field, in yards. */
     sidelineMarginYards: 3,
     /** 1 = whole field width fits the screen height; higher = closer in (camera follows up/down). */
-    zoomScale: 1.5,
+    zoomScale: 1.2,
     /** How far the camera looks ahead of the ball, in yards. */
     leadYards: 4,
     /** 0..1, how quickly the camera catches up each frame (higher = snappier). */
