@@ -49,6 +49,13 @@ export const feel = {
     cbBallReactionTime: 0.2,
     /** Fraction of his speed when breaking on the ball (lower = harder for him to contest). */
     cbBallSpeedRatio: 0.6,
+    /** Closest a defender gets to the receiver's body when breaking on the ball (can't run through him). */
+    cbBodyGapYards: 0.8,
+    /**
+     * Defender behind the receiver (further from the QB) contests at this fraction of his strength:
+     * the receiver shields the ball with his body. Lower = stop routes (Hitch, Curl) easier.
+     */
+    shieldedContestRatio: 0.5,
     /** A defender within this distance of the landing spot can contest the catch. */
     contestRadiusYards: 2.5,
     /** Breakup chance when he's right on the ball (less when further away). */

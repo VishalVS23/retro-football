@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blockerSpot,
   closestIndex,
+  isShielded,
   reachedQb,
   resolvePass,
   resolveTargetedPass,
@@ -21,6 +22,7 @@ const cover = {
   cushionCloseTime: 1.5,
   ballReactionTime: 0.2,
   ballSpeedRatio: 0.6,
+  bodyGapYards: 0.8,
 };
 const run = { topSpeed: 8, acceleration: 16, cutSpeedRatio: 0.55 };
 const contest = {
@@ -30,6 +32,7 @@ const contest = {
   interceptChance: 0.35,
   receiverCatchChance: 0.95,
   defenderCatchChance: 0.75,
+  shieldedContestRatio: 0.5,
 };
 const rush = { blockedSpeed: 1, freeSpeed: 6, sackReachYards: 1.2 };
 const dt = 1 / 60;
@@ -90,6 +93,78 @@ describe('balance', () => {
     let catches = 0;
     for (let k = 0; k < 100; k++) if (resolvePass(wr.pos, cb.pos, landing, (k + 0.5) / 100, contest) === 'catch') catches++;
     expect(catches).toBeGreaterThanOrEqual(60);
+  });
+});
+
+/** QB after his dropback, for a snap at the 35 (receivers line up at x 34.5). */
+const QB = { x: 30, y: 26.7 };
+
+describe('balance: stop routes', () => {
+  /**
+   * Throws `throwAt` seconds after the snap, aimed at the spot where the receiver plants,
+   * and counts catches out of 100 evenly spaced rolls.
+   */
+  function stopRouteCatches(name: string, throwAt: number, flight: number, k = contest) {
+    const wrStart = { x: 34.5, y: 14.7 };
+    const def = ROUTES.find((r) => r.name === name)!;
+    const path = routePath(wrStart, def, 1);
+    let wr = startRunner(path, def.stop);
+    let cb: Coverage = startCoverage({ x: wrStart.x + 5, y: wrStart.y }, wrStart);
+    for (let t = 0; t < throwAt - 1e-9; t += dt) {
+      wr = stepRunner(wr, path, dt, run);
+      cb = stepCoverage(cb, wr.pos, dt, cover);
+    }
+    const landing = path[path.length - 1];
+    for (let t = 0; t < flight - 1e-9; t += dt) {
+      wr = stepRunner(wr, path, dt, run);
+      cb = stepCoverage(cb, wr.pos, dt, cover, { landing, sinceThrow: t + dt });
+    }
+    let catches = 0;
+    for (let r = 0; r < 100; r++) if (resolvePass(wr.pos, cb.pos, landing, (r + 0.5) / 100, k, QB) === 'catch') catches++;
+    return catches;
+  }
+
+  it('an on-time hitch is usually caught', () => {
+    expect(stopRouteCatches('Hitch', 1.0, 0.7)).toBeGreaterThanOrEqual(65);
+  });
+
+  it('a curl is usually caught once he has turned back', () => {
+    expect(stopRouteCatches('Curl', 2.2, 1.0)).toBeGreaterThanOrEqual(65);
+  });
+
+  it('a curl thrown far too early goes nowhere near him', () => {
+    expect(stopRouteCatches('Curl', 0.8, 1.0)).toBeLessThan(20);
+  });
+
+  it('without body shielding the corner would smother stop routes (why the rule exists)', () => {
+    expect(stopRouteCatches('Hitch', 1.0, 0.7, { ...contest, shieldedContestRatio: 1 })).toBeLessThan(stopRouteCatches('Hitch', 1.0, 0.7));
+  });
+});
+
+describe('body shielding', () => {
+  it('a defender behind the receiver (further from the QB) is shielded', () => {
+    expect(isShielded({ x: 40, y: 20 }, { x: 41.5, y: 20 }, QB)).toBe(true);
+    expect(isShielded({ x: 40, y: 20 }, { x: 38.5, y: 20 }, QB)).toBe(false);
+  });
+
+  it('a shielded defender breaks up fewer passes', () => {
+    const landing = { x: 40, y: 20 };
+    const wr = { x: 40, y: 20 };
+    const behind = { x: 41, y: 20 };
+    const count = (thrower?: { x: number; y: number }) => {
+      let n = 0;
+      for (let r = 0; r < 100; r++) if (resolvePass(wr, behind, landing, (r + 0.5) / 100, contest, thrower) === 'catch') n++;
+      return n;
+    };
+    expect(count(QB)).toBeGreaterThan(count());
+  });
+
+  it("the corner can't run through the receiver when breaking on the ball", () => {
+    let c = startCoverage({ x: 45, y: 20 }, { x: 40, y: 20 });
+    const wr = { x: 40, y: 20 };
+    for (let i = 0; i < 120; i++) c = stepCoverage(c, wr, dt, cover, { landing: wr, sinceThrow: 1 });
+    expect(Math.hypot(c.pos.x - wr.x, c.pos.y - wr.y)).toBeCloseTo(0.8, 1);
+    expect(c.pos.x).toBeGreaterThan(wr.x); // stayed on his own (downfield) side
   });
 });
 

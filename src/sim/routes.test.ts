@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type Runner } from './routes';
+import { PLAYS, ROUTES, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
 import type { Vec } from './throw';
 
 const params = { topSpeed: 8, acceleration: 16, cutSpeedRatio: 0.5 };
@@ -84,5 +84,62 @@ describe('routes', () => {
   it('is deterministic', () => {
     const path = routePath(start, route('Slant'), 1);
     expect(run(path, 1.7)).toEqual(run(path, 1.7));
+  });
+});
+
+describe('stop routes (Hitch, Curl)', () => {
+  const runStop = (name: string, seconds: number) => {
+    const path = routePath(start, route(name), 1);
+    let r = startRunner(path, route(name).stop);
+    for (let t = 0; t < seconds - 1e-9; t += 1 / 60) r = stepRunner(r, path, 1 / 60, params);
+    return { r, path };
+  };
+
+  it('a hitch plants on its last point and stays there', () => {
+    const { r, path } = runStop('Hitch', 4);
+    const end = path[path.length - 1];
+    expect(r.pos.x).toBeCloseTo(end.x);
+    expect(r.pos.y).toBeCloseTo(end.y);
+    expect(r.speed).toBe(0);
+  });
+
+  it('a curl comes back toward the QB and inside after pushing upfield', () => {
+    const { path } = runStop('Curl', 0);
+    expect(path[2].x).toBeLessThan(path[1].x); // comes back
+    expect(path[2].y).toBeGreaterThan(path[1].y); // leans toward the middle (receiver up top)
+    const { r } = runStop('Curl', 5);
+    expect(r.pos.x).toBeCloseTo(path[2].x);
+  });
+
+  it('predicting a stopped receiver gives the same spot', () => {
+    const { r, path } = runStop('Hitch', 3);
+    expect(runnerAfter(r, path, 1, params).pos).toEqual(r.pos);
+  });
+});
+
+describe('hot routes', () => {
+  it('cycles through every route and wraps round', () => {
+    let r = ROUTES[0];
+    const seen = new Set<string>();
+    for (let i = 0; i < ROUTES.length; i++) {
+      seen.add(r.name);
+      r = nextRoute(r);
+    }
+    expect(seen.size).toBe(ROUTES.length);
+    expect(r.name).toBe(ROUTES[0].name); // back to the start
+  });
+
+  it('changes one receiver for this snap and never touches the playbook', () => {
+    const play = PLAYS[0];
+    const before = play.routes.map((r) => r.name);
+    const hot = withHotRoute(play, 1, route('Go'));
+    expect(hot.routes.map((r) => r.name)).toEqual([before[0], 'Go', before[2]]);
+    expect(play.routes.map((r) => r.name)).toEqual(before);
+  });
+
+  it('every play has three routes and the new plays exist', () => {
+    for (const p of PLAYS) expect(p.routes).toHaveLength(3);
+    expect(PLAYS.map((p) => p.name)).toEqual(expect.arrayContaining(['Hitch Slant', 'Curls']));
+    expect(PLAYS).toHaveLength(6);
   });
 });

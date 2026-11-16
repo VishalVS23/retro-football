@@ -13,6 +13,8 @@ export interface RouteDef {
    * y = yards toward the MIDDLE of the field (negative = toward his sideline).
    */
   points: Vec[];
+  /** Stop route (Hitch, Curl): he plants on the last point and waits for the ball instead of running on. */
+  stop?: boolean;
 }
 
 // Sideways routes end a few yards short of the sideline so the pre-snap route art stays on screen at
@@ -24,8 +26,12 @@ const POST: RouteDef = { name: 'Post', points: [{ x: 0, y: 0 }, { x: 10, y: 0 },
 const CORNER: RouteDef = { name: 'Corner', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: -7 }] };
 const DIG: RouteDef = { name: 'Dig', points: [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 18 }] };
 const DRAG: RouteDef = { name: 'Drag', points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 5, y: 20 }] };
+// Stop routes: push upfield, then turn back toward the QB (the Curl also leans inside) and wait.
+const HITCH: RouteDef = { name: 'Hitch', points: [{ x: 0, y: 0 }, { x: 7, y: 0 }, { x: 5, y: 1 }], stop: true };
+const CURL: RouteDef = { name: 'Curl', points: [{ x: 0, y: 0 }, { x: 13, y: 0 }, { x: 11, y: 2.5 }], stop: true };
 
-export const ROUTES: RouteDef[] = [SLANT, OUT, GO, POST, CORNER, DIG, DRAG];
+/** Every route, in the order a hot route cycles through them. */
+export const ROUTES: RouteDef[] = [SLANT, OUT, GO, POST, CORNER, DIG, DRAG, HITCH, CURL];
 
 /** A pass play: one route per receiver, in formation order (see FieldScene `formation`). */
 export interface PlayDef {
@@ -39,7 +45,20 @@ export const PLAYS: PlayDef[] = [
   { name: 'Verticals', routes: [GO, GO, GO] },
   { name: 'Post Corner', routes: [POST, CORNER, DIG] },
   { name: 'Crossers', routes: [DIG, DRAG, POST] },
+  { name: 'Hitch Slant', routes: [HITCH, SLANT, HITCH] },
+  { name: 'Curls', routes: [CURL, DIG, CURL] },
 ];
+
+/** Hot route: the route after `current` in ROUTES (wrapping round to the first). */
+export function nextRoute(current: RouteDef): RouteDef {
+  const i = ROUTES.findIndex((r) => r.name === current.name);
+  return ROUTES[(i + 1) % ROUTES.length];
+}
+
+/** A copy of `play` with receiver `wr` running `route` instead. The playbook itself never changes. */
+export function withHotRoute(play: PlayDef, wr: number, route: RouteDef): PlayDef {
+  return { ...play, routes: play.routes.map((r, i) => (i === wr ? route : r)) };
+}
 
 /**
  * Turns a route into field positions. `towardMiddle` is +1 if the middle of the field
@@ -65,6 +84,8 @@ export interface Runner {
   seg: number;
   /** Direction he's currently running (unit vector). */
   dir: Vec;
+  /** Stop route: stands still once the route is finished. */
+  stop?: boolean;
 }
 
 const dist = (a: Vec, b: Vec) => Math.hypot(b.x - a.x, b.y - a.y);
@@ -73,15 +94,16 @@ const unit = (a: Vec, b: Vec): Vec => {
   return { x: (b.x - a.x) / d, y: (b.y - a.y) / d };
 };
 
-export function startRunner(path: Vec[]): Runner {
-  return { pos: { ...path[0] }, speed: 0, seg: 0, dir: path.length > 1 ? unit(path[0], path[1]) : { x: 1, y: 0 } };
+export function startRunner(path: Vec[], stop = false): Runner {
+  return { pos: { ...path[0] }, speed: 0, seg: 0, dir: path.length > 1 ? unit(path[0], path[1]) : { x: 1, y: 0 }, stop };
 }
 
 const EDGE = 0.5; // stay just inside the sidelines
 
 /**
  * Advances the runner by `dt` seconds along the path: speeds up, slows at each cut,
- * and keeps running straight once the route is finished (stopping at the sideline).
+ * and keeps running straight once the route is finished (stopping at the sideline), unless it's
+ * a stop route: then he plants on the last point and waits.
  */
 export function stepRunner(r: Runner, path: Vec[], dt: number, p: RunParams): Runner {
   let speed = Math.min(p.topSpeed, r.speed + p.acceleration * dt);
@@ -109,13 +131,14 @@ export function stepRunner(r: Runner, path: Vec[], dt: number, p: RunParams): Ru
       }
     }
   }
+  if (r.stop && seg >= path.length - 1) return { pos, speed: 0, seg, dir, stop: true };
   if (remaining > 0) pos = { x: pos.x + dir.x * remaining, y: pos.y + dir.y * remaining };
 
   if (pos.y < EDGE || pos.y > FIELD_WIDTH - EDGE) {
     pos.y = Math.min(FIELD_WIDTH - EDGE, Math.max(EDGE, pos.y));
     speed = 0; // ran into the sideline
   }
-  return { pos, speed, seg, dir };
+  return { pos, speed, seg, dir, stop: r.stop };
 }
 
 /** Where the runner will be after `seconds` more of his route (used to see where he'll be when the ball lands). */

@@ -25,6 +25,11 @@ export interface CoverParams {
   cushionYards: number;
   /** Seconds after the snap for that cushion to close to nothing. */
   cushionCloseTime: number;
+  /**
+   * Closest he can get to the receiver's body while breaking on the ball (he can't run through
+   * him). Together with `shieldedContestRatio` this is what gets stop routes (Hitch, Curl) open.
+   */
+  bodyGapYards?: number;
   /** After the throw, how long before he breaks on the ball. */
   ballReactionTime: number;
   /** Fraction of his top speed when breaking on the ball (he has to read it in the air). */
@@ -73,6 +78,13 @@ export function stepCoverage(
     const seen = delayedPos(history, t - p.reactionTime);
     const cushion = p.cushionYards * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
     target = { x: seen.x + cushion, y: seen.y };
+  }
+  // He can't run through the receiver: he stops short, on his own side of him.
+  const gap = p.bodyGapYards ?? 0;
+  if (gap > 0 && dist(wrPos, target) < gap) {
+    const from = dist(wrPos, c.pos) > 1e-6 ? c.pos : { x: wrPos.x + 1, y: wrPos.y };
+    const k = gap / dist(wrPos, from);
+    target = { x: wrPos.x + (from.x - wrPos.x) * k, y: wrPos.y + (from.y - wrPos.y) * k };
   }
   const speed = Math.min(top, c.speed + p.acceleration * dt);
   return { pos: moveToward(c.pos, target, speed * dt), speed, t, history };
@@ -138,6 +150,11 @@ export interface ContestParams {
   receiverCatchChance: number;
   /** Chance a defender hangs on when the ball comes straight to him (later: his hands rating). */
   defenderCatchChance: number;
+  /**
+   * Defender behind the receiver (further from the QB): the receiver shields him with his body, so
+   * he contests at this fraction of his normal strength. 1 = no shielding. Gets stop routes open.
+   */
+  shieldedContestRatio?: number;
 }
 
 /**
@@ -168,14 +185,20 @@ export function resolveTargetedPass(
   landing: Vec,
   roll: number,
   p: ContestParams,
+  thrower?: Vec,
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
   const defender = closestIndex(defenders, landing);
-  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p);
+  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p, thrower);
   return { result, receiver, defender };
 }
 
-export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: ContestParams): PassResult {
+/** Is the defender behind the receiver, as seen from the thrower (the receiver is in his way)? */
+export function isShielded(wr: Vec, cb: Vec, thrower: Vec): boolean {
+  return dist(cb, thrower) > dist(wr, thrower) + 0.5;
+}
+
+export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: ContestParams, thrower?: Vec): PassResult {
   const wrD = dist(wr, landing);
   const cbD = dist(cb, landing);
   const wrCanCatch = wrD <= p.catchRadiusYards;
@@ -188,7 +211,8 @@ export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: Con
   }
 
   // Receiver can get it; how much can the defender interfere?
-  const strength = cbD > p.contestRadiusYards ? 0 : 1 - cbD / p.contestRadiusYards; // 1 = right on the ball
+  let strength = cbD > p.contestRadiusYards ? 0 : 1 - cbD / p.contestRadiusYards; // 1 = right on the ball
+  if (thrower && isShielded(wr, cb, thrower)) strength *= p.shieldedContestRatio ?? 1;
   const pInt = cbD < wrD ? p.interceptChance * strength : 0;
   const pBreakup = p.breakupChance * strength;
   if (roll < pInt) return 'interception';

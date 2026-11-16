@@ -11,7 +11,7 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
-import { PLAYS, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type Runner } from '../sim/routes';
+import { PLAYS, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
 import {
   blockerSpot,
   closestRusher,
@@ -134,6 +134,7 @@ export class FieldScene extends Phaser.Scene {
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
   private playIndex = 0; // the play called (index into PLAYS)
+  private calledPlay: PlayDef = PLAYS[0]; // that play with any hot routes (this snap only)
   private qbPos: Vec = { ...this.form.qb };
   private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
@@ -484,7 +485,8 @@ export class FieldScene extends Phaser.Scene {
       interceptChance: feel.defense.interceptChance,
       receiverCatchChance: this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance,
       defenderCatchChance: feel.defense.defenderCatchChance,
-    });
+      shieldedContestRatio: feel.defense.shieldedContestRatio,
+    }, th.from);
 
     let result = pass.result;
     const wrPos = wrSpots[pass.receiver];
@@ -697,6 +699,7 @@ export class FieldScene extends Phaser.Scene {
       cushionCloseTime: feel.defense.cbCushionCloseTime,
       ballReactionTime: feel.defense.cbBallReactionTime,
       ballSpeedRatio: feel.defense.cbBallSpeedRatio,
+      bodyGapYards: feel.defense.cbBodyGapYards,
     };
     // Man coverage: each cornerback follows his own receiver, and all of them break on a thrown ball.
     this.receivers.forEach((r, i) => {
@@ -868,11 +871,12 @@ export class FieldScene extends Phaser.Scene {
     this.resetTimer = null;
     this.form = formation(this.match.ballX); // line up wherever the last play left the ball
     const qbStart = this.form.qb;
-    const play = PLAYS[this.playIndex];
+    if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
+    const play = this.calledPlay;
     this.receivers = this.form.wrs.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       const cbStart = { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
-      return { path, runner: startRunner(path), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos) };
+      return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos) };
     });
     this.targetIndex = 0;
     this.carrierDot = null;
@@ -928,14 +932,11 @@ export class FieldScene extends Phaser.Scene {
       match: this.match,
       plays: PLAYS,
       selected: this.playIndex,
-      onExecute: (i) => {
-        if (i !== this.playIndex) {
-          this.playIndex = i;
-          this.resetPlay(false); // line up the new play
-        } else {
-          this.state = 'presnap';
-          this.updateLabel();
-        }
+      current: this.calledPlay,
+      onExecute: (i, play) => {
+        this.playIndex = i;
+        this.calledPlay = play;
+        this.resetPlay(false); // line up the chosen play (with any hot routes)
       },
       onCancel: () => {
         this.state = 'presnap';
