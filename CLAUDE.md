@@ -401,7 +401,7 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 7. End-of-game screen with final score and basic stats; overtime
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
-### Next up (start of next session)
+### Next up (start of next session; checked 2026-11-16: all work committed, pushed and deployed, last deploy green)
 1. If the user's phone test of **3a (play calling screen)** went well, tick it; then build **3b** (approved, plan in Decisions 2026-11-15). Also ask how the 1.2 zoom feels. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
@@ -433,10 +433,11 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - **2026-11-15: Port 5173 may be taken by the user's HooMaps dev server.** Use another port (e.g. `npm run dev -- --port 5180 --strictPort`) for browser tests, and never stop the HooMaps server.
 - **2026-11-15: Step 3 plan approved:** 3a = play calling screen (HTML/CSS overlay in the UI-kit style, Press Start 2P font self-hosted via @fontsource, opens before every play with the last play preselected; EXECUTE / AUDIBLE / CANCEL / TEAM (greyed); no player form card until stage 3). 3b = hot routes via AUDIBLE (tap a receiver on the diagram to cycle routes), Hitch/Curl stop routes, 2 more plays (6 total). Run plays later, once there's a running back.
 - **2026-11-14: Skipping is a SKIP button only** (user kept skipping returns/results by tapping out of habit). Supersedes "tap to skip" in the feel notes.
-- **2026-11-14: Parked ideas:** downfield blocking by receivers after a catch; throwing-zone glow hint with an off switch; interception returns (an interception currently just ends the play); QB scrambling; kick returns (maybe later, per the feel notes).
+- **2026-11-14: Parked ideas:** downfield blocking by receivers after a catch; throwing-zone glow hint with an off switch; ~~interception returns~~ (built in Stage 2 step 2c); QB scrambling; kick returns (maybe later, per the feel notes).
 - **2026-11-14: Dev workflow notes.** Git Bash heredocs break on Python code with nested quotes, so write multi-line edit scripts to the scratchpad and run them from there. A dev-only `window.__game` hook in `main.ts` lets browser test scripts read game state (excluded from production builds).
 - **2026-11-14: Design images contain real NFL material** (Bills/Giants logos, AFC, BUF/NYG, "Retro Bowl Championship"). Use their layouts and style only; replace all names/logos with our fictional league. Images kept in git-ignored `design-refs/`.
 - **2026-11-14: Auto-update stays as is** (reloads straight away, even mid-game). User is the only player and prefers it simple.
 - **2026-11-14: The play-call mockup and UI kit exist only as images** (no source files). When building step 2, ask the user to paste/attach the images and build the screen from them in code.
 - **2026-11-14: Stage 2 plan approved. Quarters are 2 minutes of game clock** (user's choice). How the clock runs between plays gets decided in step 4.
 - **2026-11-14: Stage 1 complete.** Everything tested on PC and phone: throwing, routes, defense, catches/picks, running, jukes, tackles. 67 unit tests passing. Next: Stage 2 (see "Next up").
+- **2026-11-16: Checkpoint.** Tracker reviewed: Stage 1 done, Stage 2 steps 1–2d done, 3a built and waiting for the user's phone test, then 3b. Problem noted: two chats edited the project at the same time (an older chat's dev server died while a newer chat carried on). Work in **one chat at a time** and start each new chat with "Read CLAUDE.md and check the latest git commits".
