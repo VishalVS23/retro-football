@@ -40,6 +40,8 @@ import {
   type Pursuer,
   type Sightings,
 } from '../sim/carry';
+import { formation } from '../sim/formation';
+import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { OPP_GOAL_X, applyPlay, downText, newGame, spotText, type GameState, type PlayOutcome } from '../sim/drive';
 import { getRngOrFallback } from '../save/saveSession';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -73,29 +75,6 @@ const RECEIVER_COUNT = 3;
 // leaves room under the scoreboard. (Layout, not feel: it follows the formation.)
 const FORMATION_VIEW_Y = FIELD_WIDTH / 2 - 3;
 
-/**
- * Where everyone lines up for a snap at losX: QB under centre, three receivers (two up top,
- * one at the bottom), two rushers with a blocker each. `towardMiddle` = which way is "inside".
- */
-function formation(losX: number) {
-  const mid = FIELD_WIDTH / 2;
-  const rush: Vec[] = [
-    { x: losX + 1, y: mid - 3 },
-    { x: losX + 1, y: mid + 3 },
-  ];
-  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = [
-    { pos: { x: losX - 0.5, y: mid - 13 }, towardMiddle: 1 }, // wide, top
-    { pos: { x: losX - 1, y: mid - 6.5 }, towardMiddle: 1 }, // slot, top
-    { pos: { x: losX - 0.5, y: mid + 13 }, towardMiddle: -1 }, // wide, bottom
-  ];
-  return {
-    qb: { x: losX - 2, y: mid },
-    wrs,
-    rush,
-    block: rush.map((r) => ({ x: losX - 1, y: r.y })),
-  };
-}
-
 /** One receiver on this play: his route, where he is on it, and the cornerback covering him. */
 interface Receiver {
   path: Vec[];
@@ -104,7 +83,7 @@ interface Receiver {
   coverage: Coverage;
 }
 
-type State = 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'result';
+type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'result';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
@@ -134,6 +113,7 @@ export class FieldScene extends Phaser.Scene {
   private chaserDots: Phaser.GameObjects.Arc[] = [];
   private returnSightings: Sightings = [];
   private skipBtn: HTMLButtonElement | null = null; // DOM button, shown during returns and result banners
+  private playsBtn: HTMLButtonElement | null = null; // DOM button: reopen play calling before the snap
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
@@ -153,7 +133,7 @@ export class FieldScene extends Phaser.Scene {
 
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
-  private playIndex = -1; // which play in PLAYS (rotates each snap until play calling exists)
+  private playIndex = 0; // the play called (index into PLAYS)
   private qbPos: Vec = { ...this.form.qb };
   private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
@@ -237,7 +217,22 @@ export class FieldScene extends Phaser.Scene {
     });
     document.body.appendChild(skip);
     this.skipBtn = skip;
-    this.events.once('shutdown', () => skip.remove());
+
+    const plays = document.createElement('button');
+    plays.id = 'plays-btn';
+    plays.textContent = 'PLAYS';
+    plays.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.state === 'presnap') this.openCall();
+    });
+    document.body.appendChild(plays);
+    this.playsBtn = plays;
+    this.events.once('shutdown', () => {
+      skip.remove();
+      plays.remove();
+      closePlayCall();
+    });
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => this.toggleBullet());
@@ -251,6 +246,7 @@ export class FieldScene extends Phaser.Scene {
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
     this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result');
+    this.playsBtn?.classList.toggle('show', this.state === 'presnap');
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
       return;
@@ -308,7 +304,7 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     // Returns and result banners are skipped with the SKIP button only (stray taps did it by accident).
-    if (this.state === 'return' || this.state === 'result') return;
+    if (this.state === 'return' || this.state === 'result' || this.state === 'calling') return;
     if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
       this.toggleBullet(); // other thumb taps while aiming
       return;
@@ -863,12 +859,15 @@ export class FieldScene extends Phaser.Scene {
     return Math.min(this.match.ballX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1);
   }
 
-  private resetPlay() {
+  /**
+   * Lines everyone up for the next snap with the called play. With `call` (the default, after
+   * every play) the play calling screen opens first.
+   */
+  private resetPlay(call = true) {
     this.resetTimer?.remove();
     this.resetTimer = null;
     this.form = formation(this.match.ballX); // line up wherever the last play left the ball
     const qbStart = this.form.qb;
-    this.playIndex = (this.playIndex + 1) % PLAYS.length; // try each play in turn until play calling exists
     const play = PLAYS[this.playIndex];
     this.receivers = this.form.wrs.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -918,6 +917,31 @@ export class FieldScene extends Phaser.Scene {
     this.cameraFocus = { x: qbStart.x + 12, y: FORMATION_VIEW_Y };
     this.updateLabel();
     this.updateScoreboard();
+    if (call) this.openCall();
+  }
+
+  /** Shows the play calling screen; EXECUTE lines up the chosen play, CANCEL keeps the current one. */
+  private openCall() {
+    this.state = 'calling';
+    this.updateLabel();
+    openPlayCall({
+      match: this.match,
+      plays: PLAYS,
+      selected: this.playIndex,
+      onExecute: (i) => {
+        if (i !== this.playIndex) {
+          this.playIndex = i;
+          this.resetPlay(false); // line up the new play
+        } else {
+          this.state = 'presnap';
+          this.updateLabel();
+        }
+      },
+      onCancel: () => {
+        this.state = 'presnap';
+        this.updateLabel();
+      },
+    });
   }
 
   /** Blue line of scrimmage and yellow first-down line (none when it's "& Goal"). */
@@ -988,6 +1012,8 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private updateLabel() {
+    this.label.setVisible(this.state !== 'calling'); // the play calling screen covers the field
+    if (this.state === 'calling') return;
     if (this.state === 'presnap') {
       this.label.setText(`${PLAYS[this.playIndex].name} · TAP to snap · ⚙ = feel`);
       return;

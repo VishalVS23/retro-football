@@ -33,7 +33,7 @@ export default defineConfig(({ command }) => ({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'], // woff2 = the pixel font, so it works offline
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // Phaser is ~1.2 MB
       },
     }),
