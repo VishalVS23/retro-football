@@ -402,7 +402,7 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session; checked 2026-11-16: all work committed, pushed and deployed, last deploy green)
-1. If the user's phone test of **3a (play calling screen)** went well, tick it; then build **3b** (approved, plan in Decisions 2026-11-15). Also ask how the 1.2 zoom feels. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
+1. If the user's phone test of **3a (play calling screen)** went well, tick it; then build **3b** (approved, plan in Decisions 2026-11-15). Also ask how the 1.2 zoom feels. **First confirm the phone is on the new build** (⚙ header must say Nov 15 or later, see Decisions 2026-11-16 stale build); if it is still stuck after several reopens, add a "Check for update" button to the ⚙ panel (small fix, show the user first). Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
 - Unit tests: `npm test` from **PowerShell** (not Git Bash). Typecheck: `npm run typecheck`. Build: `npm run build`.
@@ -441,3 +441,4 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - **2026-11-14: Stage 2 plan approved. Quarters are 2 minutes of game clock** (user's choice). How the clock runs between plays gets decided in step 4.
 - **2026-11-14: Stage 1 complete.** Everything tested on PC and phone: throwing, routes, defense, catches/picks, running, jukes, tackles. 67 unit tests passing. Next: Stage 2 (see "Next up").
 - **2026-11-16: Checkpoint.** Tracker reviewed: Stage 1 done, Stage 2 steps 1–2d done, 3a built and waiting for the user's phone test, then 3b. Problem noted: two chats edited the project at the same time (an older chat's dev server died while a newer chat carried on). Work in **one chat at a time** and start each new chat with "Read CLAUDE.md and check the latest git commits".
+- **2026-11-16: Problem: phone stuck on an old build.** The phone still ran the Nov 14 12:08 PM build (SKIP button version) after the zoom change and 3a were deployed, so 3a looked missing on the phone while the laptop was fine. Auto-update usually needs a full close and reopen (sometimes twice). The phone also had a saved `zoom scale` of 0 from the ⚙ panel (harmless: values below 1 mean no extra zoom). Fix given: swipe the app closed, reopen twice, check the ⚙ build time, then ⚙ -> Reset. Always ask for the ⚙ build time when a phone test looks wrong.
