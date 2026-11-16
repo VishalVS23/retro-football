@@ -41,8 +41,15 @@ const game = new Phaser.Game({
 // Pause the game while the phone is held upright (the "Rotate your phone" screen shows).
 const portrait = window.matchMedia('(orientation: portrait)');
 const applyOrientation = () => {
-  if (portrait.matches) game.loop.sleep();
-  else game.loop.wake();
+  if (portrait.matches) {
+    game.loop.sleep();
+    return;
+  }
+  game.loop.wake();
+  // The game was asleep while upright, so it missed the screen-size change. Re-measure now,
+  // and again shortly after (iPhones report the new landscape size a moment late).
+  game.scale.refresh();
+  setTimeout(() => game.scale.refresh(), 300);
 };
 portrait.addEventListener('change', applyOrientation);
 applyOrientation();
