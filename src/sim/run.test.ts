@@ -94,17 +94,20 @@ describe('run play balance (headless, 300 runs each)', () => {
     };
   };
   for (const name of ['Dive', 'Toss']) {
-    it(`${name}: a runner who jukes the first tackler averages about 3-6 yards, with some long runs`, () => {
-      const s = stats(name, 2.2);
-      expect(s.avg).toBeGreaterThan(3);
-      expect(s.avg).toBeLessThan(6.5);
-      expect(s.long).toBeGreaterThan(0.005);
+    it(`${name}: gains a few yards on average, juking or not, with no runaway big plays`, () => {
+      for (const juke of [0, 2.2]) {
+        const s = stats(name, juke);
+        expect(s.avg).toBeGreaterThan(1.2);
+        expect(s.avg).toBeLessThan(6);
+        // Beating one defender must not be a free touchdown: chasers are faster than the runner.
+        expect(s.long).toBeLessThan(0.08);
+      }
     });
-    it(`${name}: a runner who never jukes gains less and is sometimes stuffed`, () => {
+    it(`${name}: a runner who never jukes is sometimes stuffed; juking avoids most of that`, () => {
       const lazy = stats(name, 0);
-      expect(lazy.avg).toBeGreaterThan(0.5);
-      expect(lazy.avg).toBeLessThan(stats(name, 2.2).avg - 1);
+      const juker = stats(name, 2.2);
       expect(lazy.stuffed).toBeGreaterThan(0.05);
+      expect(juker.stuffed).toBeLessThan(lazy.stuffed / 2);
     });
   }
 });

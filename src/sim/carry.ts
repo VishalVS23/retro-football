@@ -24,6 +24,10 @@ export interface CarryParams {
   jukeTime: number;
   /** Wait after a juke before the next one. */
   jukeCooldown: number;
+  /** Forward speed during a juke, as a fraction of full speed (1 = a juke costs nothing). Default 1. */
+  jukeForwardRatio?: number;
+  /** Time to get back to full speed after a juke. Default 0. */
+  jukeRecoverTime?: number;
 }
 
 export interface Carrier {
@@ -33,6 +37,8 @@ export interface Carrier {
   jukeLeft: number;
   jukeDir: number;
   cooldown: number;
+  /** Seconds left getting back up to full speed after a juke. */
+  recover?: number;
 }
 
 export function startCarrier(pos: Vec): Carrier {
@@ -46,26 +52,35 @@ export function isJuking(c: Carrier) {
 /** Starts a juke up (dir -1) or down (dir +1) if he's ready. */
 export function tryJuke(c: Carrier, dir: number, p: CarryParams): Carrier {
   if (c.cooldown > 0 || dir === 0) return c;
-  return { ...c, jukeLeft: p.jukeTime, jukeDir: Math.sign(dir), cooldown: p.jukeTime + p.jukeCooldown };
+  return { ...c, jukeLeft: p.jukeTime, jukeDir: Math.sign(dir), cooldown: p.jukeTime + p.jukeCooldown, recover: p.jukeRecoverTime ?? 0 };
 }
 
 /** `steer` is -1 (up) .. +1 (down) from the player's thumb (or the returner's AI). */
 export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParams, dirX: 1 | -1 = 1): Carrier {
   let vy: number;
   let jukeLeft = c.jukeLeft;
+  let recover = c.recover ?? 0;
+  // A juke costs forward speed: slow during it, then back up to full speed over jukeRecoverTime.
+  const slowest = p.jukeForwardRatio ?? 1;
+  let forward = 1;
   if (jukeLeft > 0) {
     vy = c.jukeDir * p.jukeSpeed;
     jukeLeft = Math.max(0, jukeLeft - dt);
+    forward = slowest;
   } else {
     const want = Math.max(-1, Math.min(1, steer)) * p.steerSpeed;
     vy = c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt); // eases in and out
+    const total = p.jukeRecoverTime ?? 0;
+    if (recover > 0 && total > 0) forward = 1 - (1 - slowest) * (recover / total);
+    recover = Math.max(0, recover - dt);
   }
   return {
-    pos: { x: c.pos.x + dirX * p.runSpeed * dt, y: c.pos.y + vy * dt },
+    pos: { x: c.pos.x + dirX * p.runSpeed * forward * dt, y: c.pos.y + vy * dt },
     vy,
     jukeLeft,
     jukeDir: c.jukeDir,
     cooldown: Math.max(0, c.cooldown - dt),
+    recover,
   };
 }
 

@@ -48,6 +48,21 @@ describe('ball carrier', () => {
     expect(tryJuke(c, 1, carry).jukeDir).toBe(1); // ready again
   });
 
+  it('a juke costs forward speed, then he gets back up to full speed', () => {
+    const p = { ...carry, jukeForwardRatio: 0.5, jukeRecoverTime: 0.3 };
+    let c = tryJuke(startCarrier({ x: 40, y: 20 }), 1, p);
+    for (let i = 0; i < Math.round(0.18 / dt); i++) c = stepCarrier(c, 0, dt, p);
+    expect(c.pos.x - 40).toBeCloseTo(7.5 * 0.5 * 0.18, 1); // half speed during the juke
+    const x0 = c.pos.x;
+    for (let i = 0; i < Math.round(0.3 / dt); i++) c = stepCarrier(c, 0, dt, p);
+    const recovering = c.pos.x - x0;
+    expect(recovering).toBeGreaterThan(7.5 * 0.5 * 0.3);
+    expect(recovering).toBeLessThan(7.5 * 0.3);
+    const x1 = c.pos.x;
+    c = stepCarrier(c, 0, dt, p);
+    expect((c.pos.x - x1) / dt).toBeCloseTo(7.5); // full speed again
+  });
+
   it('knows touchdowns and out of bounds', () => {
     expect(playEnd({ x: GOAL_LINE_X + 0.1, y: 20 })).toBe('touchdown');
     expect(playEnd({ x: 60, y: -0.1 })).toBe('out');

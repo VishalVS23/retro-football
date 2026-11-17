@@ -78,7 +78,7 @@ export const feel = {
     lbSpeedRatio: 0.85,
     lbReactionTime: 0.35,
     /** His chasing speed once someone has the ball. */
-    lbPursuitSpeed: 6.5,
+    lbPursuitSpeed: 6.8,
   },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
@@ -111,6 +111,10 @@ export const feel = {
     jukeSpeed: 9,
     jukeTime: 0.18,
     jukeCooldown: 0.6,
+    /** A juke costs speed: forward speed during it, as a fraction of full speed... */
+    jukeForwardRatio: 0.8,
+    /** ...and how long it takes to get back to full speed afterwards. */
+    jukeRecoverTime: 0.2,
     /** A drag shorter than this (seconds) counts as a flick = juke. */
     jukeFlickTime: 0.25,
   },
@@ -131,13 +135,16 @@ export const feel = {
     /** Chance a defender completely misses if the runner is mid-juke. */
     jukeEvadeChance: 0.6,
     /** How long a defender who missed is out of the play. */
-    stunTime: 0.7,
+    stunTime: 0.55,
     /** How late defenders react to the runner's moves. */
     pursuitReactionTime: 0.2,
     /** How far ahead they aim when chasing (pursuit angle), in seconds. */
     pursuitLeadTime: 0.35,
-    /** Chasing speeds: defensive backs (fast) and linemen (slower). */
-    dbPursuitSpeed: 7.2,
+    /**
+     * Chasing speeds: defensive backs and linemen. DBs are a bit faster than any ball carrier, so a
+     * defender with an angle can still run you down; one you've fully beaten can't.
+     */
+    dbPursuitSpeed: 7.9,
     dlPursuitSpeed: 5.5,
   },
   /** Interception returns: the defender runs at our end zone and our players chase him (watch-only). */

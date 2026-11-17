@@ -777,6 +777,8 @@ export class FieldScene extends Phaser.Scene {
       jukeSpeed: feel.running.jukeSpeed,
       jukeTime: feel.running.jukeTime,
       jukeCooldown: feel.running.jukeCooldown,
+      jukeForwardRatio: feel.running.jukeForwardRatio,
+      jukeRecoverTime: feel.running.jukeRecoverTime,
     };
   }
 
