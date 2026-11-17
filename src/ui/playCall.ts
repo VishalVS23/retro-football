@@ -15,6 +15,11 @@ export interface PlayCallOptions {
   match: GameState;
   /** Quarter and time, e.g. "Q2 1:05". */
   clock: string;
+  /** Our timeouts left, and whether one can be called now (only while the clock is running). */
+  timeoutsLeft: number;
+  canTimeout: boolean;
+  /** Calls the timeout; returns the timeouts left afterwards. */
+  onTimeout: () => number;
   plays: PlayDef[];
   selected: number;
   /** The play lined up right now (may have hot routes); kept if it's the selected play. */
@@ -83,6 +88,7 @@ export function openPlayCall(o: PlayCallOptions) {
     <div class="pc-btns">
       <button class="pc-btn pc-go" data-act="go">EXECUTE PLAY</button>
       <button class="pc-btn pc-audible" data-act="audible" title="Change a receiver's route for this play">AUDIBLE</button>
+      <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock: no huddle time comes off at the snap">TIMEOUT (${o.timeoutsLeft})</button>
       <button class="pc-btn pc-cancel" data-act="cancel">CANCEL</button>
       <button class="pc-btn pc-team" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
     </div>
@@ -91,6 +97,8 @@ export function openPlayCall(o: PlayCallOptions) {
   const fieldPanel = root.querySelector<HTMLDivElement>('.pc-field')!;
   const field = root.querySelector<HTMLDivElement>('.pc-field-svg')!;
   const audibleBtn = root.querySelector<HTMLButtonElement>('.pc-audible')!;
+  const timeoutBtn = root.querySelector<HTMLButtonElement>('.pc-timeout')!;
+  timeoutBtn.disabled = !o.canTimeout;
 
   /** Draws a play into a box, fitting the box's shape (see BIG / MINI). */
   const drawInto = (el: HTMLElement, play: PlayDef, win: DiagramWindow, detailed: boolean, extra: { hot?: boolean[]; tappable?: boolean } = {}) => {
@@ -146,6 +154,11 @@ export function openPlayCall(o: PlayCallOptions) {
     const act = (e.target as HTMLElement).closest<HTMLButtonElement>('.pc-btn')?.dataset.act;
     if (act === 'go') finish(() => o.onExecute(selected, calledPlay()));
     if (act === 'audible') setAudible(!audible);
+    if (act === 'timeout' && !timeoutBtn.disabled) {
+      timeoutBtn.textContent = `TIMEOUT (${o.onTimeout()})`;
+      timeoutBtn.disabled = true; // the clock is stopped now
+      timeoutBtn.classList.add('used');
+    }
     if (act === 'cancel') finish(o.onCancel);
   });
   const onKey = (e: KeyboardEvent) => {

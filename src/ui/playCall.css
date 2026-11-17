@@ -255,3 +255,12 @@
 .pc-team {
   background: #2f6fd6;
 }
+.pc-timeout {
+  background: #9b5de5;
+  color: #fff;
+}
+/* Just called: show it's done rather than "not available". */
+.pc-timeout.used:disabled {
+  filter: none;
+  opacity: 0.75;
+}

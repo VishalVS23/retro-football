@@ -213,28 +213,3 @@ body {
   display: block;
 }
 
-/* TIMEOUT button: pre-snap, just left of PLAYS. Greyed when the clock is stopped or none are left. */
-#timeout-btn {
-  position: fixed;
-  right: calc(env(safe-area-inset-right) + 118px);
-  bottom: calc(env(safe-area-inset-bottom) + 12px);
-  z-index: 5;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 2px solid #0d1b2a;
-  background: #e63946;
-  color: #fff;
-  font: bold 16px monospace;
-  letter-spacing: 1px;
-  cursor: pointer;
-  touch-action: manipulation;
-  display: none;
-}
-#timeout-btn.show {
-  display: block;
-}
-#timeout-btn.off {
-  background: #6b7280;
-  color: #d1d5db;
-  cursor: default;
-}

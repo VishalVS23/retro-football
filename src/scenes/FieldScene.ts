@@ -147,7 +147,6 @@ export class FieldScene extends Phaser.Scene {
   private pendingBreak: ClockEvent = null; // END OF Q1 / HALFTIME / FINAL / warning, shown after the play
   private finishBreak: (() => void) | null = null; // what happens when that banner is done (new half, new game)
   private nextClock: ClockState | null = null; // next quarter's clock; the scoreboard shows 0:00 until the break
-  private timeoutBtn: HTMLButtonElement | null = null;
   private markersG!: Phaser.GameObjects.Graphics;
 
   private state: State = 'presnap';
@@ -251,21 +250,9 @@ export class FieldScene extends Phaser.Scene {
     });
     document.body.appendChild(plays);
     this.playsBtn = plays;
-
-    // TIMEOUT button (pre-snap only): stops a running clock so the huddle takes no time.
-    const timeout = document.createElement('button');
-    timeout.id = 'timeout-btn';
-    timeout.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.timeout();
-    });
-    document.body.appendChild(timeout);
-    this.timeoutBtn = timeout;
     this.events.once('shutdown', () => {
       skip.remove();
       plays.remove();
-      timeout.remove();
       closePlayCall();
     });
 
@@ -282,7 +269,6 @@ export class FieldScene extends Phaser.Scene {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
     this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result');
     this.playsBtn?.classList.toggle('show', this.state === 'presnap');
-    this.timeoutBtn?.classList.toggle('show', this.state === 'presnap');
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
       return;
@@ -469,17 +455,6 @@ export class FieldScene extends Phaser.Scene {
       this.showBanner(this.warningText());
       this.updateLabel();
     } else if (r.event) this.showBreak(r.event);
-  }
-
-  /**
-   * TIMEOUT button: the clock stops (no huddle runoff at the next snap) and the play calling
-   * screen opens, so you can pick the next play with the clock stopped (user's request).
-   */
-  private timeout() {
-    if (this.state !== 'presnap' || !canCallTimeout(this.clock)) return;
-    this.clock = callTimeout(this.clock);
-    this.updateScoreboard();
-    this.openCall();
   }
 
   /** A new quarter's clock waits (scoreboard shows 0:00) until its END OF / HALFTIME banner is done. */
@@ -1137,6 +1112,15 @@ export class FieldScene extends Phaser.Scene {
     openPlayCall({
       match: this.match,
       clock: clockText(this.clock),
+      timeoutsLeft: this.clock.timeouts,
+      canTimeout: canCallTimeout(this.clock),
+      // TIMEOUT on the play calling screen: the clock stops, so no huddle runoff at the snap.
+      onTimeout: () => {
+        this.clock = callTimeout(this.clock);
+        this.updateScoreboard();
+        this.updateLabel();
+        return this.clock.timeouts;
+      },
       plays: PLAYS,
       selected: this.playIndex,
       current: this.calledPlay,
@@ -1168,10 +1152,6 @@ export class FieldScene extends Phaser.Scene {
   private updateScoreboard() {
     const g = this.match;
     const text = `YOU ${g.us} - ${g.them} CPU  ${clockText(this.clock)}  ${downText(g)} · ${spotText(g.ballX)}`;
-    if (this.timeoutBtn) {
-      this.timeoutBtn.textContent = `TIMEOUT ${this.clock.timeouts}`;
-      this.timeoutBtn.classList.toggle('off', !canCallTimeout(this.clock));
-    }
     if (text === this.scoreText) return;
     this.scoreText = text;
     this.scoreboard.setText(text);
