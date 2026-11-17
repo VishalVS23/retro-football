@@ -284,6 +284,33 @@ export const feel = {
     /** Game seconds a field goal takes off the clock (extra points are untimed). */
     clockRunoff: 5,
   },
+  punting: {
+    /** Green zone half-width (fraction of half the bar); outside it = SHANK. */
+    green: 0.45,
+    /** Seconds for the marker to cross the bar once. */
+    sweepTime: 0.85,
+    /** Yards in the air: centred tap, tap at the edge of the green. */
+    centreYards: 50,
+    edgeYards: 38,
+    /** Sideways drift of a good punt tapped at the edge of the green, yards. */
+    spreadYards: 6,
+    /** Shank: yards in the air just outside the green / at the end of the bar. */
+    shankMaxYards: 30,
+    shankMinYards: 20,
+    /** Sideways slice of the worst shank, yards (half that just outside the green). */
+    shankSliceYards: 22,
+    /** Roll after landing, yards: good punt, shank. */
+    rollYards: 5,
+    shankRollYards: 2,
+    /** Hang time (seconds in the air) of a full punt; shorter punts hang a bit less. */
+    hangTime: 1.8,
+    /** Peak height of a full punt, yards. */
+    arcHeightYards: 14,
+    /** Rolling speed after landing, yards per second. */
+    rollSpeed: 7,
+    /** Game seconds a punt takes off the clock. */
+    clockRunoff: 6,
+  },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */
     quarterLength: 120,

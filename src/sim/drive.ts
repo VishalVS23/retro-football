@@ -61,6 +61,7 @@ export type DriveEvent =
   | 'missedFieldGoal'
   | 'extraPoint'
   | 'missedExtraPoint'
+  | 'punt'
   | null;
 
 export function newGame(): GameState {
@@ -131,6 +132,14 @@ export function applyKick(s: GameState, kind: 'fieldGoal' | 'extraPoint', good: 
   }
   if (good) return { state: { ...after, us: s.us + FIELD_GOAL_POINTS }, event: 'fieldGoal' };
   return { state: { ...after, oppStartX: Math.min(s.ballX - HOLD_YARDS, TOUCHBACK_X) }, event: 'missedFieldGoal' };
+}
+
+/**
+ * A punt: they take over at `spotX` (from punting.ts: touchback, out of bounds or where it stopped).
+ * Until opponent drives exist, our next drive starts at our 25.
+ */
+export function applyPunt(s: GameState, spotX: number): { state: GameState; event: DriveEvent } {
+  return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: spotX, tryPending: false }, event: 'punt' };
 }
 
 const ORDINAL = ['', '1st', '2nd', '3rd', '4th'];

@@ -8,6 +8,7 @@ import './playCall.css';
 import type { GameState } from '../sim/drive';
 import { downText } from '../sim/drive';
 import { TOTAL_LENGTH } from '../sim/field';
+import type { FourthChoice } from '../sim/fourthDown';
 import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
 import { playDiagramSvg } from './playDiagram';
@@ -34,6 +35,11 @@ export interface PlayCallOptions {
    */
   kickLabel: string | null;
   onKick: () => void;
+  /** 4th down: show PUNT. */
+  canPunt: boolean;
+  onPunt: () => void;
+  /** The coach's 4th-down tip (null on other downs); its button gets a gold glow. */
+  tip: { choice: FourthChoice; text: string } | null;
 }
 
 let close: (() => void) | null = null;
@@ -67,6 +73,8 @@ export function openPlayCall(o: PlayCallOptions) {
   let audible = false;
   const calledPlay = (): PlayDef => ({ ...plays[selected], routes: [...routes] });
 
+  const rec = (c: FourthChoice) => (o.tip?.choice === c ? ' pc-rec' : '');
+
   const root = document.createElement('div');
   root.id = 'playcall';
   root.innerHTML = `
@@ -76,7 +84,7 @@ export function openPlayCall(o: PlayCallOptions) {
       <div class="pc-chip">ZONE: <b>${fieldZone(match.ballX)}</b></div>
       <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
     </div>
-    <div class="pc-field pc-panel"><div class="pc-field-svg"></div><div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
+    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${o.tip ? `<div class="pc-tip">COACH: <b>${o.tip.text.toUpperCase()}</b></div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
       <div class="pc-cards">
@@ -93,12 +101,13 @@ export function openPlayCall(o: PlayCallOptions) {
       </div>
     </div>
     <div class="pc-btns">
-      <button class="pc-btn pc-go" data-act="go">${match.tryPending ? 'GO FOR 2' : 'EXECUTE PLAY'}</button>
-      ${o.kickLabel ? `<button class="pc-btn pc-kick" data-act="kick">${o.kickLabel}</button>` : ''}
+      <button class="pc-btn pc-go${rec('go')}" data-act="go">${match.tryPending ? 'GO FOR 2' : 'EXECUTE PLAY'}</button>
+      ${o.canPunt ? `<button class="pc-btn pc-punt${rec('punt')}" data-act="punt">PUNT</button>` : ''}
+      ${o.kickLabel ? `<button class="pc-btn pc-kick${rec('fieldGoal')}" data-act="kick">${o.kickLabel}</button>` : ''}
       <button class="pc-btn pc-audible" data-act="audible" title="Change a receiver's route for this play">AUDIBLE</button>
       <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock: no huddle time comes off at the snap">TIMEOUT (${o.timeoutsLeft})</button>
       <button class="pc-btn pc-cancel" data-act="cancel">CANCEL</button>
-      <button class="pc-btn pc-team${o.kickLabel ? ' pc-hide' : ''}" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
+      <button class="pc-btn pc-team${o.kickLabel || o.canPunt ? ' pc-hide' : ''}" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
     </div>
   `;
   document.body.appendChild(root);
@@ -165,6 +174,7 @@ export function openPlayCall(o: PlayCallOptions) {
     const act = (e.target as HTMLElement).closest<HTMLButtonElement>('.pc-btn')?.dataset.act;
     if (act === 'go') finish(() => o.onExecute(selected, calledPlay()));
     if (act === 'kick') finish(o.onKick);
+    if (act === 'punt') finish(o.onPunt);
     if (act === 'audible') setAudible(!audible);
     if (act === 'timeout' && !timeoutBtn.disabled) {
       timeoutBtn.textContent = `TIMEOUT (${o.onTimeout()})`;

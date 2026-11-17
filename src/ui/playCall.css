@@ -272,3 +272,41 @@
 .pc-team.pc-hide {
   display: none;
 }
+.pc-btn {
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .pc-btns {
+    gap: 6px;
+  }
+  .pc-btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
+/* PUNT (4th down only): teal. */
+.pc-punt {
+  background: #2a9d8f;
+}
+/* The coach's pick on 4th down: gold outline. */
+.pc-btn.pc-rec {
+  outline: 3px solid var(--pc-gold);
+  outline-offset: 1px;
+}
+/* The coach's 4th-down tip, along the top of the big diagram. */
+.pc-tip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 5px 6px;
+  text-align: center;
+  font-size: clamp(6px, 0.95vw, 10px);
+  line-height: 1.4;
+  background: #0d1b2acc;
+  pointer-events: none;
+}
+.pc-tip b {
+  color: var(--pc-gold);
+  font-weight: normal;
+}
