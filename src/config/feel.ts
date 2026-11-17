@@ -249,6 +249,18 @@ export const feel = {
     /** Banner pop-in and fade-out. */
     bannerPopTime: 0.12,
     bannerFadeTime: 0.15,
+    /** END OF Q1 / HALFTIME / FINAL banners stay up longer than play banners. */
+    breakBannerTime: 1.8,
+  },
+  clock: {
+    /** Game seconds per quarter (user's choice: 2 minutes). */
+    quarterLength: 120,
+    /** Game seconds the huddle takes when the clock keeps running (tackle in bounds). */
+    huddleRunoff: 5,
+    /** Late-quarter warning in Q2 and Q4 (clock stops once at this time). */
+    warningTime: 30,
+    /** Our timeouts per half (whole number). */
+    timeoutsPerHalf: 3,
   },
   juice: {
     hitPauseTime: 0.06,

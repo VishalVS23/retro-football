@@ -64,8 +64,9 @@
   border-radius: 4px;
   box-shadow: 0 0 0 2px var(--pc-navy);
 }
-.pc-chip:first-child {
-  flex-shrink: 0; /* down & distance always shows in full */
+.pc-chip:first-child,
+.pc-chip-fixed {
+  flex-shrink: 0; /* down & distance and the clock always show in full */
 }
 @media (max-width: 760px) {
   .pc-chip-off {

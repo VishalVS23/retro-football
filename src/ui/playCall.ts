@@ -13,6 +13,8 @@ import { playDiagramSvg } from './playDiagram';
 
 export interface PlayCallOptions {
   match: GameState;
+  /** Quarter and time, e.g. "Q2 1:05". */
+  clock: string;
   plays: PlayDef[];
   selected: number;
   /** The play lined up right now (may have hot routes); kept if it's the selected play. */
@@ -58,6 +60,7 @@ export function openPlayCall(o: PlayCallOptions) {
   root.innerHTML = `
     <div class="pc-top">
       <div class="pc-chip">PLAY CALL: <b>${downText(match)}</b></div>
+      <div class="pc-chip pc-chip-fixed"><b>${o.clock}</b></div>
       <div class="pc-chip">ZONE: <b>${fieldZone(match.ballX)}</b></div>
       <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
     </div>

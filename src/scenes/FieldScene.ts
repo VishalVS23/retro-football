@@ -42,7 +42,19 @@ import {
 } from '../sim/carry';
 import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
-import { OPP_GOAL_X, applyPlay, downText, newGame, spotText, type GameState, type PlayOutcome } from '../sim/drive';
+import { OPP_GOAL_X, applyPlay, downText, newGame, spotText, startDrive, type GameState, type PlayOutcome } from '../sim/drive';
+import {
+  beforeSnap,
+  callTimeout,
+  canCallTimeout,
+  clockText,
+  endPlay,
+  newClock,
+  playStopsClock,
+  tickPlay,
+  type ClockEvent,
+  type ClockState,
+} from '../sim/clock';
 import { getRngOrFallback } from '../save/saveSession';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
@@ -129,6 +141,13 @@ export class FieldScene extends Phaser.Scene {
   private match: GameState = newGame();
   private form = formation(newGame().ballX);
   private scoreboard!: Phaser.GameObjects.Text;
+  private scoreText = '';
+  // Game clock (rules live in sim/clock.ts).
+  private clock: ClockState = newClock(feel.clock);
+  private pendingBreak: ClockEvent = null; // END OF Q1 / HALFTIME / FINAL / warning, shown after the play
+  private finishBreak: (() => void) | null = null; // what happens when that banner is done (new half, new game)
+  private nextClock: ClockState | null = null; // next quarter's clock; the scoreboard shows 0:00 until the break
+  private timeoutBtn: HTMLButtonElement | null = null;
   private markersG!: Phaser.GameObjects.Graphics;
 
   private state: State = 'presnap';
@@ -232,9 +251,21 @@ export class FieldScene extends Phaser.Scene {
     });
     document.body.appendChild(plays);
     this.playsBtn = plays;
+
+    // TIMEOUT button (pre-snap only): stops a running clock so the huddle takes no time.
+    const timeout = document.createElement('button');
+    timeout.id = 'timeout-btn';
+    timeout.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.timeout();
+    });
+    document.body.appendChild(timeout);
+    this.timeoutBtn = timeout;
     this.events.once('shutdown', () => {
       skip.remove();
       plays.remove();
+      timeout.remove();
       closePlayCall();
     });
 
@@ -251,9 +282,15 @@ export class FieldScene extends Phaser.Scene {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
     this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result');
     this.playsBtn?.classList.toggle('show', this.state === 'presnap');
+    this.timeoutBtn?.classList.toggle('show', this.state === 'presnap');
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
       return;
+    }
+    // The clock runs while the ball is live (a play in progress always finishes, even at 0:00).
+    if (['live', 'windup', 'flight', 'run', 'return'].includes(this.state)) {
+      this.clock = tickPlay(this.clock, dt);
+      this.updateScoreboard();
     }
     if (this.state === 'run') this.stepRun(dt);
     if (this.state === 'return') this.stepReturn(dt);
@@ -315,7 +352,7 @@ export class FieldScene extends Phaser.Scene {
       this.toggleBullet(); // other thumb taps while aiming
       return;
     }
-    if (this.state === 'presnap') this.snap(); // tap anywhere to snap
+    if (this.state === 'presnap') this.trySnap(); // tap anywhere to snap
     if (this.state === 'live' && this.calledPlay.run) {
       // Run play: no throwing. A thumb held down now steers the RB once he has the ball.
       this.steerTouch = { id: p.id, x: p.x, y: p.y, time: this.time.now };
@@ -343,7 +380,7 @@ export class FieldScene extends Phaser.Scene {
   /** SKIP button: finish a return instantly, or go straight to the next play. */
   private skip() {
     if (this.state === 'return') this.skipReturn();
-    else if (this.state === 'result') this.resetPlay();
+    else if (this.state === 'result') this.afterPlay();
   }
 
   private onMove(p: Phaser.Input.Pointer) {
@@ -421,6 +458,41 @@ export class FieldScene extends Phaser.Scene {
   }
 
   // ---------- Play flow ----------
+
+  /** The huddle runoff comes off first; it can run out the quarter or hit the warning (no snap then). */
+  private trySnap() {
+    const r = beforeSnap(this.clock, feel.clock);
+    this.setClock(r.clock, r.event);
+    this.updateScoreboard();
+    if (r.snap) this.snap();
+    else if (r.event === 'warning') {
+      this.showBanner(this.warningText());
+      this.updateLabel();
+    } else if (r.event) this.showBreak(r.event);
+  }
+
+  /** TIMEOUT button: the clock stops, so no huddle runoff at the next snap. */
+  private timeout() {
+    if (this.state !== 'presnap' || !canCallTimeout(this.clock)) return;
+    this.clock = callTimeout(this.clock);
+    this.showBanner('TIMEOUT');
+    this.updateScoreboard();
+    this.updateLabel();
+  }
+
+  /** A new quarter's clock waits (scoreboard shows 0:00) until its END OF / HALFTIME banner is done. */
+  private setClock(next: ClockState, event: ClockEvent) {
+    if (event === 'endQuarter' || event === 'halftime' || event === 'final') {
+      this.clock = { ...this.clock, timeLeft: 0, running: false };
+      this.nextClock = event === 'final' ? null : next;
+    } else {
+      this.clock = next;
+    }
+  }
+
+  private warningText() {
+    return `${Math.round(feel.clock.warningTime)} SEC WARNING`;
+  }
 
   private snap() {
     this.state = 'live';
@@ -656,9 +728,12 @@ export class FieldScene extends Phaser.Scene {
    * Feeds the play's result into the downs/score rules. Big moments (first down, turnover on
    * downs, safety) replace the play's own banner; the yards popup still shows the gain.
    */
-  private recordPlay(outcome: PlayOutcome) {
+  private recordPlay(outcome: PlayOutcome, outOfBounds = false) {
     const { state, event } = applyPlay(this.match, outcome);
     this.match = state;
+    const clock = endPlay(this.clock, playStopsClock(outcome, event, outOfBounds), feel.clock);
+    this.setClock(clock.clock, clock.event);
+    this.pendingBreak = clock.event;
     const banner = { firstDown: 'FIRST DOWN!', turnoverOnDowns: 'TURNOVER ON DOWNS', safety: 'SAFETY' } as const;
     if (event === 'firstDown' || event === 'turnoverOnDowns' || event === 'safety') this.showBanner(banner[event]);
     this.updateScoreboard();
@@ -895,7 +970,7 @@ export class FieldScene extends Phaser.Scene {
       this.showBanner('OUT OF BOUNDS');
     }
     this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, yards < 0 ? '#ff8a8a' : '#ffd166');
-    this.recordPlay(how === 'touchdown' ? { kind: 'touchdown' } : { kind: 'spot', x: c.x });
+    this.recordPlay(how === 'touchdown' ? { kind: 'touchdown' } : { kind: 'spot', x: c.x }, how === 'out');
     this.scheduleReset();
   }
 
@@ -924,8 +999,56 @@ export class FieldScene extends Phaser.Scene {
   private scheduleReset() {
     this.resetTimer = this.time.delayedCall(
       (feel.pacing.bannerTime + feel.pacing.betweenPlaysTime) * 1000,
-      () => this.resetPlay(),
+      () => this.afterPlay(),
     );
+  }
+
+  /** After the play's banner: show any clock break (end of quarter...), else the next play. */
+  private afterPlay() {
+    this.resetTimer?.remove();
+    this.resetTimer = null;
+    const ev = this.pendingBreak;
+    this.pendingBreak = null;
+    if (ev) {
+      this.showBreak(ev);
+      return;
+    }
+    const finish = this.finishBreak;
+    this.finishBreak = null;
+    finish?.();
+    this.resetPlay();
+  }
+
+  /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
+  private showBreak(ev: Exclude<ClockEvent, null>) {
+    this.state = 'result';
+    const text = {
+      warning: this.warningText(),
+      endQuarter: `END OF Q${this.clock.quarter}`,
+      halftime: 'HALFTIME',
+      final: `FINAL  ${this.match.us}-${this.match.them}`,
+    }[ev];
+    const hold = ev === 'warning' ? feel.pacing.bannerTime : feel.pacing.breakBannerTime;
+    this.showBanner(text, hold);
+    // Until kickoffs and opponent drives exist: the second half starts at our 25; FINAL starts a new game.
+    const next = this.nextClock;
+    this.nextClock = null;
+    if (next) this.finishBreak = () => (this.clock = next);
+    if (ev === 'halftime') {
+      this.finishBreak = () => {
+        this.clock = next ?? this.clock;
+        this.match = startDrive(this.match);
+      };
+    }
+    if (ev === 'final') {
+      this.finishBreak = () => {
+        this.match = newGame();
+        this.clock = newClock(feel.clock);
+      };
+    }
+    this.updateScoreboard();
+    this.updateLabel();
+    this.resetTimer = this.time.delayedCall((hold + feel.pacing.betweenPlaysTime) * 1000, () => this.afterPlay());
   }
 
   /** The safety's spot: deep behind the line, but never past the back of the end zone. */
@@ -1011,6 +1134,7 @@ export class FieldScene extends Phaser.Scene {
     this.updateLabel();
     openPlayCall({
       match: this.match,
+      clock: clockText(this.clock),
       plays: PLAYS,
       selected: this.playIndex,
       current: this.calledPlay,
@@ -1038,9 +1162,17 @@ export class FieldScene extends Phaser.Scene {
     }
   }
 
+  /** Cheap to call every frame: only redraws when the text changes. */
   private updateScoreboard() {
     const g = this.match;
-    this.scoreboard.setText(`YOU ${g.us} - ${g.them} CPU   ${downText(g)}  ·  ${spotText(g.ballX)}`);
+    const text = `YOU ${g.us} - ${g.them} CPU  ${clockText(this.clock)}  ${downText(g)} · ${spotText(g.ballX)}`;
+    if (this.timeoutBtn) {
+      this.timeoutBtn.textContent = `TIMEOUT ${this.clock.timeouts}`;
+      this.timeoutBtn.classList.toggle('off', !canCallTimeout(this.clock));
+    }
+    if (text === this.scoreText) return;
+    this.scoreText = text;
+    this.scoreboard.setText(text);
     this.placeScoreboard();
   }
 
@@ -1097,7 +1229,8 @@ export class FieldScene extends Phaser.Scene {
     this.label.setVisible(this.state !== 'calling'); // the play calling screen covers the field
     if (this.state === 'calling') return;
     if (this.state === 'presnap') {
-      this.label.setText(`${PLAYS[this.playIndex].name} · TAP to snap · ⚙ = feel`);
+      const run = this.clock.running ? ` (clock running: -${Math.round(feel.clock.huddleRunoff)}s)` : '';
+      this.label.setText(`${PLAYS[this.playIndex].name} · TAP to snap${run} · ⚙ = feel`);
       return;
     }
     if (this.state === 'run') {
@@ -1207,7 +1340,7 @@ export class FieldScene extends Phaser.Scene {
     this.banner = null;
   }
 
-  private showBanner(text: string) {
+  private showBanner(text: string, hold = feel.pacing.bannerTime) {
     this.clearBanner();
     const cam = this.cameras.main;
     const z = cam.zoom;
@@ -1223,7 +1356,7 @@ export class FieldScene extends Phaser.Scene {
     this.tweens.add({
       targets: b,
       alpha: 0,
-      delay: feel.pacing.bannerTime * 1000,
+      delay: hold * 1000,
       duration: feel.pacing.bannerFadeTime * 1000,
       onComplete: () => b.destroy(),
     });

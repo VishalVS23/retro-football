@@ -96,3 +96,8 @@ export function spotText(x: number): string {
   if (fromOurGoal === 50) return '50';
   return fromOurGoal < 50 ? `OWN ${fromOurGoal}` : `OPP ${FIELD_LENGTH - fromOurGoal}`;
 }
+
+/** A fresh drive from our 25, score kept (second-half start until kickoffs exist). */
+export function startDrive(s: GameState): GameState {
+  return { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: null };
+}
