@@ -406,8 +406,12 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session)
-1. Steps 3f and 4 phone tested and ticked (2026-11-17).
-2. **Step 5 (kicking) plan shown 2026-11-17, waiting for approval**: 5a = kick meter + field goals + extra point / 2-point try; 5b = punts + 4th-down choices on the play-call screen. See the chat plan (summarised in Decisions once approved).
+1. **Get the user's answers on the step 5 (kicking) plan, then build 5a.** The plan, shown 2026-11-17:
+   - **5a. Kick meter + field goals + extra points.** A one-tap timing meter: a marker sweeps across a bar, tap in the green zone; nearer the centre = straighter; longer kicks = smaller zone and a faster marker; outside the green = hooks wide. Field goals arc toward goalposts drawn at the back of the end zone: GOOD! (3) / WIDE LEFT / WIDE RIGHT / SHORT, range ~55 yd, ~5 game seconds off the clock. After a TD: KICK (1 pt, easy meter) or GO FOR 2 (one play from their 2).
+   - **5b. Punts + 4th down.** Same meter; a better tap = longer punt (~35-50 yd), camera follows the ball, end zone = touchback at their 20. On 4th down only, the play-call screen adds PUNT and FIELD GOAL (FG only in range) plus a short coach tip ("4th & 1 at their 38: go for it").
+   - Until step 6: after a punt / FG / miss the opponent's start spot goes in `oppStartX` and our next drive starts at our 25. No kickoffs or punt returns yet; kicker ratings in Stage 3. Pure rules in a new `src/sim/kicking.ts` (tested); all kick numbers in `feel.ts`.
+   - **Open questions for the user:** (a) one-tap sweeping meter OK, or two taps (power, then aim)? Suggested: one tap. (b) Include the 2-point try in 5a? Suggested: yes.
+2. After step 5: step 6 (simulated opponent drives), 7 (end-of-game screen, overtime), 8 (mid-game save + migration).
 3. Parked: downfield blocking by free teammates (option B from 2026-11-17, best with blocking ratings in Stage 3), defense adapting to repeated plays, QB slide, throw on the run, blockers moving on a scramble, receivers blocking on run plays, a fullback, option plays, a manual handoff / fake handoff. Design images are saved locally in `design-refs/` (git-ignored because they contain real NFL logos; use layout/style only, never those logos or names).
 
 ### How to test (for Claude)
@@ -461,3 +465,4 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - **2026-11-17: TIMEOUT lives on the play-call screen** (user feedback): a field button before the snap made no sense, since the play-call screen opens after every play anyway. TIMEOUT (n) sits next to CANCEL, lights up only while the clock is running (after a tackle in bounds) and saves the huddle runoff. The field TIMEOUT button is gone.
 - **2026-11-17: Going down on your own = flick forward** (user: a gesture is more intuitive than a button). Dive length 1-3 yd depends on running speed, so timing matters; in Stage 3 it can use ratings.
 - **2026-11-17: Dev note: never rewrite files with PowerShell `Get-Content`/`Set-Content`.** Windows PowerShell 5.1 reads UTF-8 as ANSI and adds a BOM, which corrupted the special characters in `FieldScene.ts` (`·`, `⚙`, `…`). Edit with the Edit tool or Python (`encoding='utf-8'`).
+- **2026-11-17: Checkpoint (end of session).** Done today: 3e (tuning + teammates) and 3f (dive) phone tested, step 4 (clock, quarters, timeouts, 30-second warning) phone tested. Stage 2 steps 5-8 remain. 145 tests passing. The step 5 plan is written in Next up.
