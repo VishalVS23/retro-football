@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYS, ROUTES, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
+import { PLAYS, RB, RB_ROUTES, ROUTES, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
 import type { Vec } from './throw';
 
 const params = { topSpeed: 8, acceleration: 16, cutSpeedRatio: 0.5 };
@@ -133,13 +133,25 @@ describe('hot routes', () => {
     const play = PLAYS[0];
     const before = play.routes.map((r) => r.name);
     const hot = withHotRoute(play, 1, route('Go'));
-    expect(hot.routes.map((r) => r.name)).toEqual([before[0], 'Go', before[2]]);
+    expect(hot.routes.map((r) => r.name)).toEqual([before[0], 'Go', before[2], before[3]]);
     expect(play.routes.map((r) => r.name)).toEqual(before);
   });
 
-  it('every play has three routes and the new plays exist', () => {
-    for (const p of PLAYS) expect(p.routes).toHaveLength(3);
-    expect(PLAYS.map((p) => p.name)).toEqual(expect.arrayContaining(['Hitch Slant', 'Curls']));
-    expect(PLAYS).toHaveLength(6);
+  it('every play has four routes (3 receivers + RB) and the new plays exist', () => {
+    for (const p of PLAYS) expect(p.routes).toHaveLength(4);
+    expect(PLAYS.map((p) => p.name)).toEqual(expect.arrayContaining(['Hitch Slant', 'Curls', 'Dive', 'Toss']));
+    expect(PLAYS).toHaveLength(8);
+    expect(PLAYS.filter((p) => p.run).map((p) => p.name)).toEqual(['Dive', 'Toss']);
+  });
+
+  it('RB hot routes cycle through the RB routes only; run paths never change', () => {
+    let r = RB_ROUTES[0];
+    for (let i = 0; i < RB_ROUTES.length; i++) {
+      expect(RB_ROUTES).toContain(r);
+      r = nextRoute(r);
+    }
+    expect(r).toBe(RB_ROUTES[0]);
+    const dive = PLAYS.find((p) => p.name === 'Dive')!.routes[RB];
+    expect(nextRoute(dive)).toBe(dive);
   });
 });

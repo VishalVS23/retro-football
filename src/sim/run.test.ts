@@ -1,0 +1,110 @@
+import { describe, expect, it } from 'vitest';
+import { feel } from '../config/feel';
+import { formation } from './formation';
+import { PLAYS, RB, routePath, startRunner, stepRunner } from './routes';
+import { canTackle, checkTackles, remember, startCarrier, stepPursuers, type Pursuer } from './carry';
+import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
+import { simulateRun } from './runSim';
+
+const dt = 1 / 60;
+const play = (name: string) => PLAYS.find((p) => p.name === name)!;
+
+describe('running back', () => {
+  it('lines up behind the QB and is the 4th skill player', () => {
+    const f = formation(45);
+    expect(f.skill).toHaveLength(4);
+    expect(f.skill[RB]).toBe(f.rb);
+    expect(f.rb.pos.x).toBeLessThan(f.qb.x - 2);
+  });
+
+  it('gets the handoff at the second point of his run path, right next to the QB', () => {
+    const f = formation(45);
+    const path = routePath(f.rb.pos, play('Dive').routes[RB], f.rb.towardMiddle);
+    let r = startRunner(path);
+    let t = 0;
+    while (!reachedHandoff(r)) {
+      r = stepRunner(r, path, dt, feel.routes);
+      t += dt;
+    }
+    expect(t).toBeGreaterThan(0.3);
+    expect(t).toBeLessThan(1);
+    expect(Math.hypot(r.pos.x - f.qb.x, r.pos.y - f.qb.y)).toBeLessThan(1.5);
+  });
+
+  it('the Toss goes round the outside (bottom side)', () => {
+    const f = formation(45);
+    const path = routePath(f.rb.pos, play('Toss').routes[RB], f.rb.towardMiddle);
+    expect(pathYAt(path, 45)).toBeGreaterThan(f.rush[1].y + 3); // outside the bottom rusher at the line
+  });
+});
+
+describe('lane steering', () => {
+  const path = [{ x: 40, y: 20 }, { x: 44, y: 24 }, { x: 50, y: 24 }];
+  it('reads the path between points', () => {
+    expect(pathYAt(path, 42)).toBeCloseTo(22);
+    expect(pathYAt(path, 30)).toBe(20);
+    expect(pathYAt(path, 60)).toBe(24);
+  });
+  it('steers toward the lane, and lets go once past the end of the path', () => {
+    expect(laneSteer({ x: 42, y: 20 }, path, 2, 1.5)).toBe(1); // lane is well below him
+    expect(laneSteer({ x: 46, y: 24 }, path, 2, 1.5)).toBe(0); // in the lane
+    expect(laneSteer({ x: 47, y: 26 }, path, 2, 1.5)).toBeLessThan(0); // below the lane: steer up
+    expect(laneSteer({ x: 51, y: 10 }, path, 2, 1.5)).toBe(0); // past the end: your thumb only
+  });
+});
+
+describe('run blocking', () => {
+  const p = { driveSpeed: 1.2, freeSpeed: 6 };
+  it('a held lineman is pushed back, then goes after the RB once he sheds the block', () => {
+    const r0 = { pos: { x: 46, y: 24 }, shedAt: 1 };
+    const held = stepRunRusher(r0, { x: 42, y: 27 }, 0.5, 0.5, p);
+    expect(held.pos.x).toBeCloseTo(46.6);
+    expect(held.pos.y).toBeCloseTo(23.4); // pushed away from the RB (he's below)
+    expect(stepRunRusher(r0, { x: 42, y: 24 }, 1.2, 0.5, p).pos.x).toBeCloseTo(43);
+  });
+
+  it('a held defender is pushed along and cannot tackle; a reading one stands still but can', () => {
+    const c = startCarrier({ x: 40, y: 20 });
+    const held: Pursuer = { pos: { x: 40.5, y: 20 }, speed: 6, stunned: 0, held: 0.5 };
+    const reading: Pursuer = { pos: { x: 40.5, y: 20 }, speed: 6, stunned: 0, wait: 0.5 };
+    const tackle = { tackleReachYards: 1.1, brokenTackleChance: 0.15, jukeEvadeChance: 0.6, stunTime: 0.7 };
+    expect(canTackle(held)).toBe(false);
+    expect(checkTackles([held], c, () => 0.5, tackle).tackled).toBe(false);
+    expect(canTackle(reading)).toBe(true);
+    const [h, w] = stepPursuers([held, reading], remember([], 0, c, 1), 0.1, 0.1, {
+      reactionTime: 0.2,
+      leadTime: 0.35,
+      runSpeed: 7,
+      driveSpeed: 1.2,
+    });
+    expect(h.pos.x).toBeCloseTo(40.62);
+    expect(h.held).toBeCloseTo(0.4);
+    expect(w.pos.x).toBe(40.5);
+    expect(w.wait).toBeCloseTo(0.4);
+  });
+});
+
+describe('run play balance (headless, 300 runs each)', () => {
+  const stats = (name: string, jukeYards: number) => {
+    const gains = Array.from({ length: 300 }, (_, i) => simulateRun(play(name), i + 1, feel, jukeYards).yards);
+    return {
+      avg: gains.reduce((a, b) => a + b, 0) / gains.length,
+      stuffed: gains.filter((g) => g <= 0).length / gains.length,
+      long: gains.filter((g) => g >= 10).length / gains.length,
+    };
+  };
+  for (const name of ['Dive', 'Toss']) {
+    it(`${name}: a runner who jukes the first tackler averages about 3-6 yards, with some long runs`, () => {
+      const s = stats(name, 2.2);
+      expect(s.avg).toBeGreaterThan(3);
+      expect(s.avg).toBeLessThan(6.5);
+      expect(s.long).toBeGreaterThan(0.005);
+    });
+    it(`${name}: a runner who never jukes gains less and is sometimes stuffed`, () => {
+      const lazy = stats(name, 0);
+      expect(lazy.avg).toBeGreaterThan(0.5);
+      expect(lazy.avg).toBeLessThan(stats(name, 2.2).avg - 1);
+      expect(lazy.stuffed).toBeGreaterThan(0.05);
+    });
+  }
+});

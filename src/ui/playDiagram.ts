@@ -7,7 +7,7 @@ import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
 import { formation } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
-import { routePath, type PlayDef } from '../sim/routes';
+import { RB, routePath, type PlayDef } from '../sim/routes';
 import type { Vec } from '../sim/throw';
 
 export interface DiagramView {
@@ -19,7 +19,7 @@ export interface DiagramView {
   detailed: boolean;
   /** Receivers whose route was changed (hot route): drawn in the hot colour. */
   hot?: boolean[];
-  /** Audible mode: ring each receiver and make him tappable (`data-wr` = his index). */
+  /** Audible mode: ring each receiver (and the RB on a pass play) and make him tappable (`data-wr` = his index). */
   tappable?: boolean;
 }
 
@@ -116,7 +116,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
 
   // Routes under the players; route names on top of everything.
   let labels = '';
-  f.wrs.forEach((wr, i) => {
+  f.skill.forEach((wr, i) => {
     const route = play.routes[i];
     if (!route) return;
     const color = v.hot?.[i] ? C.hot : C.route;
@@ -128,17 +128,20 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   if (v.detailed) {
     // Defense where it lines up (same spots as on the field).
     f.wrs.forEach((wr) => (s += player({ x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y }, C.defense, 'CB')));
+    s += player({ x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }, C.defense, 'LB');
     s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, 'S');
     f.rush.forEach((r) => (s += player(r, C.defense, null))); // linemen unlabelled: too tightly packed
   }
   f.block.forEach((b) => (s += player(b, C.offense, null)));
   f.wrs.forEach((wr) => (s += player(wr.pos, C.offense, v.detailed ? 'WR' : null)));
+  s += player(f.rb.pos, C.offense, v.detailed ? 'RB' : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null);
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top
     // (thumb-sized on a phone).
-    f.wrs.forEach((wr, i) => {
+    f.skill.forEach((wr, i) => {
+      if (i === RB && play.run) return; // a run play's RB path can't be changed
       s += `<circle class="pc-tap-ring" cx="${n(wr.pos.x)}" cy="${n(wr.pos.y)}" r="2" fill="none" stroke="${C.hot}" stroke-width="0.35"/>`;
       s += `<circle data-wr="${i}" cx="${n(wr.pos.x)}" cy="${n(wr.pos.y)}" r="3.5" fill="transparent" style="cursor:pointer"/>`;
     });

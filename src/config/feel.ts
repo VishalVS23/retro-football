@@ -68,6 +68,35 @@ export const feel = {
     safetyDepthYards: 15,
     /** How fast the safety drifts while reading the play (fraction of his speed). */
     safetyDriftRatio: 0.5,
+    /** Linebacker: lines up this deep, in the middle, and covers the running back. */
+    lbDepthYards: 5,
+    /** On a run play he never comes closer to the line than this before the handoff (he waits for the play). */
+    lbFloorYards: 5,
+    /** On a pass play he drops back to at least this deep until the throw (so the RB checkdown has room). */
+    lbPassDropYards: 8,
+    /** His top speed in coverage as a fraction of a receiver's, and how late he reacts. */
+    lbSpeedRatio: 0.85,
+    lbReactionTime: 0.35,
+    /** His chasing speed once someone has the ball. */
+    lbPursuitSpeed: 6.5,
+  },
+  /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
+  runGame: {
+    /** Running back's speed with the ball (later: his speed rating). */
+    rbRunSpeed: 7,
+    /** Average time our blockers hold a defender on a run, and the random +/- on it (big = more stuffed runs). */
+    shedTime: 1,
+    shedTimeVariance: 0.7,
+    /** How fast our blockers push held defenders back, yards per second. */
+    driveSpeed: 1.2,
+    /** Linebacker pauses this long after the handoff to read the run. */
+    lbReadTime: 0.4,
+    /** Until you steer, the RB follows his lane: aims this far ahead on it... */
+    laneLookAheadYards: 2,
+    /** ...and steers fully once he's this far off it. */
+    laneFullSteerYards: 1.5,
+    /** How long the pitch takes to reach the RB on a Toss (just the picture: he has it on arrival). */
+    pitchFlightTime: 0.15,
   },
   running: {
     /** Ball carrier's forward speed after the catch (later: his speed rating). */

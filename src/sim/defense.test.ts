@@ -286,7 +286,7 @@ describe('passing with three receivers', () => {
     expect(r.result).toBe('interception');
   });
 
-  it('every play has one route per receiver', () => {
-    for (const play of PLAYS) expect(play.routes).toHaveLength(3);
+  it('every play has one route per receiver plus the running back', () => {
+    for (const play of PLAYS) expect(play.routes).toHaveLength(4);
   });
 });

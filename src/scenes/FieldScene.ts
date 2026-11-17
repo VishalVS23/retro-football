@@ -12,7 +12,8 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
-import { PLAYS, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
+import { PLAYS, RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
+import { laneSteer, reachedHandoff, stepRunRusher } from '../sim/run';
 import {
   blockerSpot,
   closestRusher,
@@ -29,17 +30,13 @@ import {
 import {
   GOAL_LINE_X,
   OWN_GOAL_LINE_X,
-  checkTackles,
   evadeSteer,
-  playEnd,
-  remember,
-  startCarrier,
-  stepCarrier,
-  stepPursuers,
+  startChase,
+  stepChase,
   tryJuke,
-  type Carrier,
+  type ChaseParams,
+  type ChaseState,
   type Pursuer,
-  type Sightings,
 } from '../sim/carry';
 import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
@@ -72,12 +69,15 @@ const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
 const PRESSURE_COLOR = 0xff3b3b;
 const RUSHER_COUNT = 2;
-const RECEIVER_COUNT = 3;
+const SKILL_COUNT = 4; // three receivers + the running back (index RB), each with his own man defender
 // Camera height before the throw: a bit above the middle, toward the two-receiver side, which also
 // leaves room under the scoreboard. (Layout, not feel: it follows the formation.)
 const FORMATION_VIEW_Y = FIELD_WIDTH / 2 - 3;
 
-/** One receiver on this play: his route, where he is on it, and the cornerback covering him. */
+/**
+ * One receiver (or the running back) on this play: his route, where he is on it, and the defender
+ * covering him (a cornerback, or the linebacker for the RB).
+ */
 interface Receiver {
   path: Vec[];
   runner: Runner;
@@ -92,28 +92,23 @@ const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juk
 export class FieldScene extends Phaser.Scene {
   private label!: Phaser.GameObjects.Text;
   private qb!: Phaser.GameObjects.Arc;
-  private wrDots: Phaser.GameObjects.Arc[] = [];
-  private cbDots: Phaser.GameObjects.Arc[] = [];
+  private wrDots: Phaser.GameObjects.Arc[] = []; // receivers, then the RB (index RB)
+  private cbDots: Phaser.GameObjects.Arc[] = []; // cornerbacks, then the linebacker (index RB)
   private carrierDot: Phaser.GameObjects.Arc | null = null; // whoever has the ball after a catch
   private safety!: Phaser.GameObjects.Arc;
   private safetyPos: Vec = { x: 0, y: 0 };
-  // After the catch:
-  private carrier: Carrier = startCarrier({ x: 0, y: 0 });
-  private pursuers: Pursuer[] = [];
+  // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
+  private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
-  private sightings: Sightings = [];
-  private runTime = 0;
   private steer = 0;
+  private steered = false; // you've steered the RB yourself (his lane steering switches off)
   private steerTouch: { id: number; x: number; y: number; time: number } | null = null;
   private hitPauseLeft = 0;
   // Interception return: their defender runs at our end zone, our players chase (watch-only).
-  private returner: Carrier = startCarrier({ x: 0, y: 0 });
+  private ret: ChaseState = startChase({ x: 0, y: 0 }, []);
   private returnerDot: Phaser.GameObjects.Arc | null = null;
   private returnStartX = 0;
-  private returnTime = 0;
-  private chasers: Pursuer[] = [];
   private chaserDots: Phaser.GameObjects.Arc[] = [];
-  private returnSightings: Sightings = [];
   private skipBtn: HTMLButtonElement | null = null; // DOM button, shown during returns and result banners
   private playsBtn: HTMLButtonElement | null = null; // DOM button: reopen play calling before the snap
   private banner: Phaser.GameObjects.Text | null = null;
@@ -147,7 +142,7 @@ export class FieldScene extends Phaser.Scene {
   private bulletThrow = false; // the throw being made / in the air is a bullet
   private runAim = false; // aiming behind the QB: releasing = QB scramble
   private qbRun = false; // the ball carrier is the QB (scramble), not a receiver
-  private blockedRushersFrom = Infinity; // pursuers from this index are rushers still held by a blocker
+  private rbRun = false; // the ball carrier is the RB (handoff, pitch, or a pass to him)
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
   private underPressure = false;
@@ -167,8 +162,8 @@ export class FieldScene extends Phaser.Scene {
     this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
     this.qb = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     const dot = (color: number) => this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
-    this.wrDots = Array.from({ length: RECEIVER_COUNT }, () => dot(COLORS.team));
-    this.cbDots = Array.from({ length: RECEIVER_COUNT }, () => dot(COLORS.defense));
+    this.wrDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.team));
+    this.cbDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.defense));
     this.safety = dot(COLORS.defense);
     this.rusherDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.defense));
     this.blockerDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.team));
@@ -264,11 +259,13 @@ export class FieldScene extends Phaser.Scene {
     if (playing) {
       this.playTime += dt;
       this.stepRoutes(dt);
-      this.updateQbDropback();
+      if (!this.calledPlay.run) this.updateQbDropback(); // on a run play the QB stays put to hand off
       this.stepDefense(dt);
     }
 
-    if (this.state === 'live') {
+    if (this.state === 'live' && this.calledPlay.run) {
+      if (reachedHandoff(this.receivers[RB].runner)) this.handoff();
+    } else if (this.state === 'live') {
       if (this.aimDrag) this.updateAim();
       if (this.queuedTarget && this.playTime >= feel.throw.earliestRelease) {
         const t = this.queuedTarget;
@@ -316,6 +313,11 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'presnap') this.snap(); // tap anywhere to snap
+    if (this.state === 'live' && this.calledPlay.run) {
+      // Run play: no throwing. A thumb held down now steers the RB once he has the ball.
+      this.steerTouch = { id: p.id, x: p.x, y: p.y, time: this.time.now };
+      return;
+    }
     // Aim with the right thumb (the same touch that snapped can start aiming straight away).
     if (this.state === 'live' && this.aimPointerId === null && p.x >= this.scale.width / 2) {
       this.aimPointerId = p.id;
@@ -342,9 +344,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private onMove(p: Phaser.Input.Pointer) {
-    if (this.state === 'run' && this.steerTouch && p.id === this.steerTouch.id) {
+    const running = this.state === 'run' || (this.state === 'live' && this.calledPlay.run);
+    if (running && this.steerTouch && p.id === this.steerTouch.id) {
       const full = Math.max(1, this.scale.height * feel.running.steerDragRatio);
       this.steer = Math.max(-1, Math.min(1, (p.y - this.steerTouch.y) / full));
+      if (Math.abs(p.y - this.steerTouch.y) >= MIN_DRAG_PX) this.steered = true;
       return;
     }
     if (this.state !== 'live' || p.id !== this.aimPointerId) return;
@@ -360,7 +364,8 @@ export class FieldScene extends Phaser.Scene {
       const dy = p.y - t.y;
       const quick = (this.time.now - t.time) / 1000 <= feel.running.jukeFlickTime;
       if (this.state === 'run' && quick && Math.abs(dy) >= JUKE_MIN_PX && Math.abs(dy) > Math.abs(p.x - t.x)) {
-        this.carrier = tryJuke(this.carrier, Math.sign(dy), this.carryParams());
+        this.chase = { ...this.chase, carrier: tryJuke(this.chase.carrier, Math.sign(dy), this.carryParams()) };
+        this.steered = true;
       }
       return;
     }
@@ -563,19 +568,16 @@ export class FieldScene extends Phaser.Scene {
   /** The defender who picked it off heads for our end zone; everyone on our team chases him. */
   private startReturn(at: Vec, dot: Phaser.GameObjects.Arc) {
     this.state = 'return';
-    this.returnTime = 0;
     this.returnStartX = at.x;
-    this.returner = startCarrier(at);
     this.returnerDot = dot;
-    this.returnSightings = remember([], 0, this.returner, 1);
     const ic = feel.interception;
     const chase = (d: Phaser.GameObjects.Arc, speed: number): Pursuer => ({ pos: { x: d.x, y: d.y }, speed, stunned: 0 });
     this.chaserDots = [...this.wrDots, this.qb, ...this.blockerDots];
-    this.chasers = [
+    this.ret = startChase(at, [
       ...this.wrDots.map((d) => chase(d, ic.wrChaseSpeed)),
       chase(this.qb, ic.qbChaseSpeed),
       ...this.blockerDots.map((d) => chase(d, ic.olChaseSpeed)),
-    ];
+    ]);
     this.qb.setStrokeStyle(0.2, COLORS.outline);
     this.updateLabel();
   }
@@ -583,56 +585,50 @@ export class FieldScene extends Phaser.Scene {
   /** Returner's running numbers: he builds up to full speed over returnTurnTime after the pick. */
   private returnParams() {
     const ic = feel.interception;
-    const ramp = ic.returnTurnTime > 0 ? Math.min(1, this.returnTime / ic.returnTurnTime) : 1;
+    const ramp = ic.returnTurnTime > 0 ? Math.min(1, this.ret.t / ic.returnTurnTime) : 1;
     return { ...this.carryParams(), runSpeed: ic.returnSpeed * ramp };
   }
 
   private stepReturn(dt: number) {
-    this.returnTime += dt;
-    const steer = evadeSteer(this.returner.pos, this.chasers, -1, feel.interception.evadeLookYards);
-    this.returner = stepCarrier(this.returner, steer, dt, this.returnParams(), -1);
-    const r = this.returner.pos;
-    this.returnerDot?.setPosition(r.x, r.y);
-    this.returnSightings = remember(this.returnSightings, this.returnTime, this.returner, 1);
-    this.chasers = stepPursuers(this.chasers, this.returnSightings, this.returnTime, dt, {
-      reactionTime: feel.tackling.pursuitReactionTime,
-      leadTime: feel.tackling.pursuitLeadTime,
-      runSpeed: feel.interception.returnSpeed,
-      dirX: -1,
-    });
-    this.chasers.forEach((c, i) => this.chaserDots[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.stunned > 0 ? 0.45 : 1));
-    this.cameraFocus = { x: r.x - feel.camera.leadYards, y: r.y };
-
-    const end = playEnd(r, -1);
-    if (end) {
-      this.endReturn(end);
-      return;
-    }
-    if (this.returnTime < feel.tackling.catchGraceTime) return;
+    const steer = evadeSteer(this.ret.carrier.pos, this.ret.pursuers, -1, feel.interception.evadeLookYards);
     const rng = getRngOrFallback();
-    const check = checkTackles(this.chasers, this.returner, () => rng.next(), {
-      tackleReachYards: feel.tackling.tackleReachYards,
-      brokenTackleChance: feel.tackling.brokenTackleChance,
-      jukeEvadeChance: feel.tackling.jukeEvadeChance,
-      stunTime: feel.tackling.stunTime,
-    });
-    if (check.missed) {
-      this.chasers = check.pursuers;
-      this.floatText(r.x, r.y - 2, 'BROKE IT!', '#ff8a8a');
-    }
-    if (check.tackled) this.endReturn('tackled');
+    const step = stepChase(this.ret, steer, dt, this.chaseParams(this.returnParams(), -1), () => rng.next());
+    this.ret = step.state;
+    const r = this.ret.carrier.pos;
+    this.returnerDot?.setPosition(r.x, r.y);
+    this.ret.pursuers.forEach((c, i) => this.chaserDots[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.stunned > 0 ? 0.45 : 1));
+    this.cameraFocus = { x: r.x - feel.camera.leadYards, y: r.y };
+    if (step.missed) this.floatText(r.x, r.y - 2, 'BROKE IT!', '#ff8a8a');
+    if (step.end) this.endReturn(step.end);
+  }
+
+  /** Numbers for one frame of a run: the carrier's running, the chase, and the tackles. */
+  private chaseParams(carry: ReturnType<FieldScene['carryParams']>, dirX: 1 | -1, driveSpeed = 0): ChaseParams {
+    const tk = feel.tackling;
+    return {
+      carry,
+      pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, driveSpeed },
+      tackle: {
+        tackleReachYards: tk.tackleReachYards,
+        brokenTackleChance: tk.brokenTackleChance,
+        jukeEvadeChance: tk.jukeEvadeChance,
+        stunTime: tk.stunTime,
+      },
+      graceTime: tk.catchGraceTime,
+      dirX,
+    };
   }
 
   /** Tap during a return: run the rest of it instantly. */
   private skipReturn() {
     for (let i = 0; i < 60 * 30 && this.state === 'return'; i++) this.stepReturn(1 / 60);
     this.hitPauseLeft = 0;
-    if (this.returnerDot) this.cameras.main.centerOn(this.returner.pos.x, this.returner.pos.y);
+    if (this.returnerDot) this.cameras.main.centerOn(this.ret.carrier.pos.x, this.ret.carrier.pos.y);
   }
 
   private endReturn(how: 'tackled' | 'out' | 'touchdown') {
     this.state = 'result';
-    const r = this.returner.pos;
+    const r = this.ret.carrier.pos;
     const yards = Math.max(0, Math.round(this.returnStartX - (how === 'touchdown' ? OWN_GOAL_LINE_X : r.x)));
     if (how === 'touchdown') {
       this.shakeScreen(feel.juice.touchdownShakeScale);
@@ -725,9 +721,18 @@ export class FieldScene extends Phaser.Scene {
       ballSpeedRatio: feel.defense.cbBallSpeedRatio,
       bodyGapYards: feel.defense.cbBodyGapYards,
     };
-    // Man coverage: each cornerback follows his own receiver, and all of them break on a thrown ball.
+    // The linebacker covers the RB, but holds his ground past the line until the ball is thrown or handed off.
+    const lbCover = {
+      ...cover,
+      topSpeed: feel.routes.topSpeed * feel.defense.lbSpeedRatio,
+      reactionTime: feel.defense.lbReactionTime,
+      cushionYards: 1,
+      // He reads the play: holds near the line against a run, drops into coverage against a pass.
+      minX: this.match.ballX + (this.calledPlay.run ? feel.defense.lbFloorYards : feel.defense.lbPassDropYards),
+    };
+    // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
     this.receivers.forEach((r, i) => {
-      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, cover, ball);
+      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, i === RB ? lbCover : cover, ball);
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
 
@@ -746,12 +751,19 @@ export class FieldScene extends Phaser.Scene {
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
 
     const p = this.rushParams();
-    this.rushers = this.rushers.map((r) => stepRusher(r, this.qbPos, this.playTime, dt, p));
+    const run = this.calledPlay.run;
+    const rbPos = this.receivers[RB].runner.pos;
+    // Pass play: they rush the QB. Run play: our blockers drive them back, and once free they go for the RB.
+    this.rushers = this.rushers.map((r) =>
+      run
+        ? stepRunRusher(r, rbPos, this.playTime, dt, { driveSpeed: feel.runGame.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed })
+        : stepRusher(r, this.qbPos, this.playTime, dt, p),
+    );
     this.rushers.forEach((r, i) => {
       this.rusherDots[i].setPosition(r.pos.x, r.pos.y);
       // Blocker stays in front of his man until beaten, then is left where he was.
       if (!isFree(r, this.playTime)) {
-        const spot = blockerSpot(r, this.qbPos, PLAYER_RADIUS * 2);
+        const spot = blockerSpot(r, run ? { x: r.pos.x - 5, y: r.pos.y } : this.qbPos, PLAYER_RADIUS * 2);
         this.blockerDots[i].setPosition(spot.x, spot.y);
       }
     });
@@ -759,7 +771,7 @@ export class FieldScene extends Phaser.Scene {
 
   private carryParams() {
     return {
-      runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : feel.running.runSpeed,
+      runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : this.rbRun ? feel.runGame.rbRunSpeed : feel.running.runSpeed,
       steerSpeed: feel.running.steerSpeed,
       steerResponse: feel.running.steerResponse,
       jukeSpeed: feel.running.jukeSpeed,
@@ -768,15 +780,33 @@ export class FieldScene extends Phaser.Scene {
     };
   }
 
+  /** Run play: the RB reached the QB (Dive) or the pitch point (Toss), so he has the ball now. */
+  private handoff() {
+    const rb = this.receivers[RB].runner.pos;
+    if (Math.hypot(rb.x - this.qbPos.x, rb.y - this.qbPos.y) > 2) {
+      // A pitch: show the ball flying out to him (he already has it, so nothing waits on this).
+      this.tweens.killTweensOf(this.ball);
+      this.ball.setVisible(true).setAlpha(1).setPosition(this.qbPos.x, this.qbPos.y);
+      this.tweens.add({
+        targets: this.ball,
+        x: rb.x,
+        y: rb.y,
+        duration: Math.max(1, feel.runGame.pitchFlightTime * 1000),
+        ease: 'Quad.easeOut',
+        onComplete: () => this.ball.setVisible(false),
+      });
+    }
+    this.startRun(rb, RB);
+  }
+
   /**
-   * After a catch (`receiver` = his index) or a QB scramble (`receiver` = null): he becomes the
-   * ball carrier and every defender chases him.
+   * After a catch (`receiver` = his index), a handoff (`receiver` = RB on a run play) or a QB
+   * scramble (`receiver` = null): he becomes the ball carrier and every defender chases him.
    */
   private startRun(at: Vec, receiver: number | null) {
     this.state = 'run';
-    this.runTime = 0;
     this.qbRun = receiver === null;
-    this.carrier = startCarrier(at);
+    this.rbRun = receiver === RB;
     this.carrierDot = receiver === null ? this.qb : this.wrDots[receiver];
     this.targetIndex = receiver ?? -1; // -1: every receiver keeps running his route
     if (this.qbRun) {
@@ -784,71 +814,63 @@ export class FieldScene extends Phaser.Scene {
       this.aimG.clear();
       this.qb.setStrokeStyle(0.2, COLORS.outline); // pressure warning off: he's on the move
     }
-    this.sightings = remember([], 0, this.carrier, 1);
     const db = feel.tackling.dbPursuitSpeed;
     const dl = feel.tackling.dlPursuitSpeed;
-    this.pursuers = [
-      ...this.receivers.map((r) => ({ pos: { ...r.coverage.pos }, speed: db, stunned: 0 })),
+    // On a scramble or a run play our line keeps blocking: a rusher is held (can't tackle) until
+    // the moment he beats his blocker.
+    const blocking = this.qbRun || !!this.calledPlay.run;
+    this.chase = startChase(at, [
+      ...this.receivers.map((r, i) => ({
+        pos: { ...r.coverage.pos },
+        speed: i === RB ? feel.defense.lbPursuitSpeed : db,
+        stunned: 0,
+        wait: i === RB && this.calledPlay.run ? feel.runGame.lbReadTime : 0, // the linebacker reads the run first
+      })),
       { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
-      // On a scramble our line keeps blocking: a rusher stays stuck (can't move or tackle) until
-      // the moment he would have beaten his blocker anyway.
-      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: this.qbRun ? Math.max(0, r.shedAt - this.playTime) : 0 })),
-    ];
-    this.blockedRushersFrom = this.qbRun ? this.pursuers.length - this.rushers.length : Infinity;
+      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 })),
+    ]);
     this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
     this.updateLabel();
   }
 
   private stepRun(dt: number) {
-    this.runTime += dt;
-    this.carrier = stepCarrier(this.carrier, this.steer, dt, this.carryParams());
-    this.carrierDot?.setPosition(this.carrier.pos.x, this.carrier.pos.y);
+    // Until you steer him yourself, the RB on a run play follows his lane.
+    const rb = this.receivers[RB];
+    const run = !!this.calledPlay.run;
+    const steer =
+      run && !this.steered
+        ? laneSteer(this.chase.carrier.pos, rb.path, feel.runGame.laneLookAheadYards, feel.runGame.laneFullSteerYards)
+        : this.steer;
+    const rng = getRngOrFallback();
+    const drive = run ? feel.runGame.driveSpeed : 0;
+    const step = stepChase(this.chase, steer, dt, this.chaseParams(this.carryParams(), 1, drive), () => rng.next());
+    this.chase = step.state;
+    const c = this.chase.carrier.pos;
+    this.carrierDot?.setPosition(c.x, c.y);
     // The other receivers just keep running their routes for now (downfield blocking comes later).
     this.stepRoutes(dt);
     this.receivers.forEach((r, i) => {
       if (i !== this.targetIndex) this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y);
     });
-    this.sightings = remember(this.sightings, this.runTime, this.carrier, 1);
-    this.pursuers = stepPursuers(this.pursuers, this.sightings, this.runTime, dt, {
-      reactionTime: feel.tackling.pursuitReactionTime,
-      leadTime: feel.tackling.pursuitLeadTime,
-      runSpeed: this.carryParams().runSpeed,
+    // Faded = on the turf after a missed tackle. A rusher still held keeps his blocker on him.
+    const firstRusher = this.chase.pursuers.length - this.rushers.length;
+    this.chase.pursuers.forEach((d, i) => {
+      this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 ? 0.45 : 1);
+      if (i >= firstRusher && (d.held ?? 0) > 0) {
+        const spot = blockerSpot({ pos: d.pos, shedAt: 0 }, { x: d.pos.x - 5, y: d.pos.y }, PLAYER_RADIUS * 2);
+        this.blockerDots[i - firstRusher].setPosition(spot.x, spot.y);
+      }
     });
-    // Faded = on the turf after a missed tackle (rushers still held by a blocker don't fade).
-    this.pursuers.forEach((d, i) =>
-      this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 && i < this.blockedRushersFrom ? 0.45 : 1),
-    );
-    this.cameraFocus = { x: this.carrier.pos.x + feel.camera.leadYards, y: this.carrier.pos.y };
-
-    if (this.runTime < feel.tackling.catchGraceTime) {
-      const end = playEnd(this.carrier.pos);
-      if (end) this.endRun(end);
-      return;
-    }
-    const rng = getRngOrFallback();
-    const check = checkTackles(this.pursuers, this.carrier, () => rng.next(), {
-      tackleReachYards: feel.tackling.tackleReachYards,
-      brokenTackleChance: feel.tackling.brokenTackleChance,
-      jukeEvadeChance: feel.tackling.jukeEvadeChance,
-      stunTime: feel.tackling.stunTime,
-    });
-    if (check.missed) {
-      this.pursuers = check.pursuers;
-      this.floatText(this.carrier.pos.x, this.carrier.pos.y - 2, check.missed === 'juked' ? 'JUKED!' : 'BROKE IT!', '#7ec8e3');
-    }
-    if (check.tackled) {
-      this.endRun('tackled');
-      return;
-    }
-    const end = playEnd(this.carrier.pos);
-    if (end) this.endRun(end);
+    this.cameraFocus = { x: c.x + feel.camera.leadYards, y: c.y };
+    if (step.missed) this.floatText(c.x, c.y - 2, step.missed === 'juked' ? 'JUKED!' : 'BROKE IT!', '#7ec8e3');
+    if (step.end) this.endRun(step.end);
   }
 
   private endRun(how: 'tackled' | 'out' | 'touchdown') {
     this.state = 'result';
     this.steerTouch = null;
     this.steer = 0;
-    const c = this.carrier.pos;
+    const c = this.chase.carrier.pos;
     const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - this.match.ballX);
     const shake = (mult: number) => this.shakeScreen(mult);
     if (how === 'touchdown') {
@@ -858,8 +880,8 @@ export class FieldScene extends Phaser.Scene {
     } else if (how === 'tackled') {
       this.hitPauseLeft = feel.juice.hitPauseTime; // tiny freeze-frame, then shake
       shake(yards >= feel.juice.bigGainYards ? feel.juice.bigHitShakeScale : 1);
-      // A scrambling QB brought down behind the line is a sack.
-      this.showBanner(this.qbRun && c.x < this.match.ballX ? 'SACKED' : 'TACKLED');
+      // A scrambling QB brought down behind the line is a sack; a run stopped for no gain is stuffed.
+      this.showBanner(this.qbRun && c.x < this.match.ballX ? 'SACKED' : this.calledPlay.run && yards <= 0 ? 'STUFFED!' : 'TACKLED');
     } else {
       this.showBanner('OUT OF BOUNDS');
     }
@@ -913,9 +935,13 @@ export class FieldScene extends Phaser.Scene {
     const qbStart = this.form.qb;
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
     const play = this.calledPlay;
-    this.receivers = this.form.wrs.map((wr, i) => {
+    this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
-      const cbStart = { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
+      // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
+      const cbStart =
+        i === RB
+          ? { x: this.match.ballX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }
+          : { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
       return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos) };
     });
     this.targetIndex = 0;
@@ -929,6 +955,8 @@ export class FieldScene extends Phaser.Scene {
     this.bulletThrow = false;
     this.runAim = false;
     this.qbRun = false;
+    this.rbRun = false;
+    this.steered = false;
     this.aimPointerId = null;
     this.aimDrag = null;
     this.underPressure = false;
@@ -946,9 +974,11 @@ export class FieldScene extends Phaser.Scene {
       this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y).setScale(1);
     });
     const rng = getRngOrFallback();
+    // Run blocking and pass blocking hold their man for different lengths of time.
+    const shed = play.run ? feel.runGame : feel.pocket;
     this.rushers = this.form.rush.map((pos) => ({
       pos: { ...pos },
-      shedAt: feel.pocket.shedTime + (rng.next() * 2 - 1) * feel.pocket.shedTimeVariance,
+      shedAt: shed.shedTime + (rng.next() * 2 - 1) * shed.shedTimeVariance,
     }));
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
     this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
@@ -1063,6 +1093,10 @@ export class FieldScene extends Phaser.Scene {
     }
     if (this.state === 'run') {
       this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag up/down to steer · quick flick = juke`);
+      return;
+    }
+    if (this.state === 'live' && this.calledPlay.run) {
+      this.label.setText(`${this.calledPlay.name}: handing off… hold a thumb down to steer`);
       return;
     }
     if (this.state === 'return') {

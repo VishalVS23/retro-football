@@ -33,26 +33,56 @@ const CURL: RouteDef = { name: 'Curl', points: [{ x: 0, y: 0 }, { x: 13, y: 0 },
 /** Every route, in the order a hot route cycles through them. */
 export const ROUTES: RouteDef[] = [SLANT, OUT, GO, POST, CORNER, DIG, DRAG, HITCH, CURL];
 
-/** A pass play: one route per receiver, in formation order (see FieldScene `formation`). */
+// Running back routes. He starts behind the QB; negative y = toward the bottom sideline.
+// Flat: swing out to the bottom flat. Check: slip past the line and sit (the checkdown). Wheel: flat, then deep.
+const FLAT: RouteDef = { name: 'Flat', points: [{ x: 0, y: 0 }, { x: 1.5, y: -3 }, { x: 6.5, y: -8 }] };
+const CHECK: RouteDef = { name: 'Check', points: [{ x: 0, y: 0 }, { x: 2.5, y: -3 }, { x: 8.5, y: -3 }, { x: 7.5, y: -2.5 }], stop: true };
+const WHEEL: RouteDef = { name: 'Wheel', points: [{ x: 0, y: 0 }, { x: 2, y: -5 }, { x: 6, y: -10 }, { x: 30, y: -10 }] };
+/** Running back routes, in the order a hot route cycles through them. */
+export const RB_ROUTES: RouteDef[] = [FLAT, CHECK, WHEEL];
+
+// Run plays: the RB's path. He gets the ball at the SECOND point (handoff / pitch), then the path
+// is the lane he heads for until you steer. Dive: straight up the middle between our two blockers.
+// Toss: the QB pitches it to him wide, and he runs round the outside (bottom side).
+const DIVE: RouteDef = { name: 'Dive', points: [{ x: 0, y: 0 }, { x: 2.7, y: 1 }, { x: 6, y: 1.5 }, { x: 14, y: 1.5 }] };
+const TOSS: RouteDef = { name: 'Toss', points: [{ x: 0, y: 0 }, { x: 2, y: -4 }, { x: 6, y: -6.5 }, { x: 13.5, y: -7.5 }] };
+
+/** Index of the running back in a play's routes (and in formation `skill`). */
+export const RB = 3;
+
+/**
+ * A play: one route per player in formation `skill` order: [wide top, slot top, wide bottom, RB].
+ * Run play (`run`): the RB's "route" is his run path and he gets the ball; the receivers run their
+ * routes to pull the cornerbacks away (on the Toss the bottom receiver runs a Hitch, staying near the edge).
+ */
 export interface PlayDef {
   name: string;
   routes: RouteDef[];
+  run?: boolean;
 }
 
-/** Starter playbook. Receivers: [wide top, slot top, wide bottom]. Play calling (stage 2) picks from these. */
+/** Starter playbook. Play calling picks from these. */
 export const PLAYS: PlayDef[] = [
-  { name: 'Slants', routes: [SLANT, OUT, SLANT] },
-  { name: 'Verticals', routes: [GO, GO, GO] },
-  { name: 'Post Corner', routes: [POST, CORNER, DIG] },
-  { name: 'Crossers', routes: [DIG, DRAG, POST] },
-  { name: 'Hitch Slant', routes: [HITCH, SLANT, HITCH] },
-  { name: 'Curls', routes: [CURL, DIG, CURL] },
+  { name: 'Slants', routes: [SLANT, OUT, SLANT, CHECK] },
+  { name: 'Verticals', routes: [GO, GO, GO, CHECK] },
+  { name: 'Post Corner', routes: [POST, CORNER, DIG, FLAT] },
+  { name: 'Crossers', routes: [DIG, DRAG, POST, WHEEL] },
+  { name: 'Hitch Slant', routes: [HITCH, SLANT, HITCH, FLAT] },
+  { name: 'Curls', routes: [CURL, DIG, CURL, CHECK] },
+  { name: 'Dive', routes: [GO, GO, GO, DIVE], run: true },
+  { name: 'Toss', routes: [GO, GO, HITCH, TOSS], run: true },
 ];
 
-/** Hot route: the route after `current` in ROUTES (wrapping round to the first). */
+/**
+ * Hot route: the next route in the same list (receiver routes or RB routes), wrapping round.
+ * A run path has no list, so it stays as it is.
+ */
 export function nextRoute(current: RouteDef): RouteDef {
-  const i = ROUTES.findIndex((r) => r.name === current.name);
-  return ROUTES[(i + 1) % ROUTES.length];
+  for (const list of [ROUTES, RB_ROUTES]) {
+    const i = list.findIndex((r) => r.name === current.name);
+    if (i >= 0) return list[(i + 1) % list.length];
+  }
+  return current;
 }
 
 /** A copy of `play` with receiver `wr` running `route` instead. The playbook itself never changes. */

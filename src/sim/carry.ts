@@ -87,6 +87,15 @@ export interface Pursuer {
   speed: number;
   /** Seconds left lying on the turf after a missed tackle. */
   stunned: number;
+  /** Seconds left held by one of our blockers: pushed back and away from the runner at `driveSpeed`, can't tackle. */
+  held?: number;
+  /** Seconds left reading the play (a linebacker on a handoff): stands still, but can still tackle. */
+  wait?: number;
+}
+
+/** Can he make a tackle right now? (Not on the turf, not held by a blocker.) */
+export function canTackle(d: Pursuer) {
+  return d.stunned <= 0 && !((d.held ?? 0) > 0);
 }
 
 export interface PursuitParams {
@@ -97,6 +106,8 @@ export interface PursuitParams {
   runSpeed: number;
   /** Which way the runner is heading (+1 right, -1 left). Defaults to +1. */
   dirX?: 1 | -1;
+  /** How fast our blockers push a held defender back (in the runner's direction). Default 0. */
+  driveSpeed?: number;
 }
 
 /** What the defenders have seen of the runner, so they can react late. */
@@ -114,8 +125,16 @@ function sightingAt(seen: Sightings, t: number) {
 export function stepPursuers(pursuers: Pursuer[], seen: Sightings, t: number, dt: number, p: PursuitParams): Pursuer[] {
   const s = sightingAt(seen, t - p.reactionTime);
   const target = { x: s.pos.x + (p.dirX ?? 1) * p.runSpeed * p.leadTime, y: s.pos.y + s.vy * p.leadTime };
+  const dirX = p.dirX ?? 1;
   return pursuers.map((d) => {
     if (d.stunned > 0) return { ...d, stunned: Math.max(0, d.stunned - dt) };
+    if ((d.held ?? 0) > 0) {
+      // Our blocker drives him back and to the side, away from the runner (opening the hole).
+      const drive = (p.driveSpeed ?? 0) * dt;
+      const away = Math.sign(d.pos.y - s.pos.y);
+      return { ...d, held: Math.max(0, (d.held ?? 0) - dt), pos: { x: d.pos.x + dirX * drive, y: d.pos.y + away * drive } };
+    }
+    if ((d.wait ?? 0) > 0) return { ...d, wait: Math.max(0, (d.wait ?? 0) - dt) };
     const gap = dist(d.pos, target);
     const step = Math.min(gap, d.speed * dt);
     if (gap === 0) return d;
@@ -134,7 +153,7 @@ export function evadeSteer(pos: Vec, chasers: Pursuer[], dirX: 1 | -1, lookYards
   let nearest: Pursuer | null = null;
   let nearestD = Infinity;
   for (const c of chasers) {
-    if (c.stunned > 0) continue;
+    if (!canTackle(c)) continue;
     if ((c.pos.x - pos.x) * dirX < -2) continue; // already behind him: ignore
     const d = dist(c.pos, pos);
     if (d < nearestD) {
@@ -182,7 +201,7 @@ export interface TackleCheck {
 export function checkTackles(pursuers: Pursuer[], c: Carrier, roll: () => number, p: TackleParams): TackleCheck {
   const order = pursuers
     .map((d, i) => ({ i, d: dist(d.pos, c.pos) }))
-    .filter((o) => o.d <= p.tackleReachYards && pursuers[o.i].stunned <= 0)
+    .filter((o) => o.d <= p.tackleReachYards && canTackle(pursuers[o.i]))
     .sort((a, b) => a.d - b.d);
   const out = pursuers.map((d) => ({ ...d }));
   let missed: TackleCheck['missed'] = null;
@@ -195,4 +214,55 @@ export function checkTackles(pursuers: Pursuer[], c: Carrier, roll: () => number
     missed = juked ? 'juked' : 'broken';
   }
   return { tackled: false, by, missed, pursuers: out };
+}
+
+// ---------- One frame of a run (any ball carrier, chased by defenders) ----------
+
+export interface ChaseState {
+  carrier: Carrier;
+  pursuers: Pursuer[];
+  seen: Sightings;
+  /** Seconds since he got the ball. */
+  t: number;
+}
+
+export interface ChaseParams {
+  carry: CarryParams;
+  pursuit: Omit<PursuitParams, 'runSpeed' | 'dirX'>;
+  tackle: TackleParams;
+  /** Nobody can tackle him for this long after he gets the ball. */
+  graceTime: number;
+  dirX: 1 | -1;
+}
+
+export interface ChaseStep {
+  state: ChaseState;
+  /** Someone missed a tackle this frame. */
+  missed: 'broken' | 'juked' | null;
+  /** How the run ended this frame, or null if it goes on. */
+  end: 'tackled' | 'out' | 'touchdown' | null;
+}
+
+export function startChase(at: Vec, pursuers: Pursuer[]): ChaseState {
+  const carrier = startCarrier(at);
+  return { carrier, pursuers, seen: remember([], 0, carrier, 1), t: 0 };
+}
+
+/**
+ * One frame: the carrier moves (`steer` from a thumb or an AI), defenders chase, and anyone in
+ * reach tries to tackle. Used by the game for every run and by tests to simulate runs headless.
+ */
+export function stepChase(s: ChaseState, steer: number, dt: number, p: ChaseParams, roll: () => number): ChaseStep {
+  const t = s.t + dt;
+  const carrier = stepCarrier(s.carrier, steer, dt, p.carry, p.dirX);
+  const seen = remember(s.seen, t, carrier, 1);
+  let pursuers = stepPursuers(s.pursuers, seen, t, dt, { ...p.pursuit, runSpeed: p.carry.runSpeed, dirX: p.dirX });
+  let missed: ChaseStep['missed'] = null;
+  if (t >= p.graceTime) {
+    const check = checkTackles(pursuers, carrier, roll, p.tackle);
+    pursuers = check.pursuers;
+    missed = check.missed;
+    if (check.tackled) return { state: { carrier, pursuers, seen, t }, missed, end: 'tackled' };
+  }
+  return { state: { carrier, pursuers, seen, t }, missed, end: playEnd(carrier.pos, p.dirX) };
 }

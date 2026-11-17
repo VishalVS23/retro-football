@@ -19,7 +19,7 @@ describe('play calling', () => {
   });
 
   it('every play gives each receiver in the formation a route', () => {
-    const wrs = formation(at(25)).wrs.length;
+    const wrs = formation(at(25)).skill.length; // 3 receivers + the running back
     expect(PLAYS.length).toBeGreaterThanOrEqual(4);
     for (const p of PLAYS) {
       expect(p.routes).toHaveLength(wrs);

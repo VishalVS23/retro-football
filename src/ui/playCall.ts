@@ -59,9 +59,9 @@ export function openPlayCall(o: PlayCallOptions) {
     <div class="pc-top">
       <div class="pc-chip">PLAY CALL: <b>${downText(match)}</b></div>
       <div class="pc-chip">ZONE: <b>${fieldZone(match.ballX)}</b></div>
-      <div class="pc-chip pc-chip-off">OFFENSE: <b>PASS</b></div>
+      <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
     </div>
-    <div class="pc-field pc-panel"><div class="pc-field-svg"></div><div class="pc-hint">TAP A RECEIVER TO CHANGE HIS ROUTE</div></div>
+    <div class="pc-field pc-panel"><div class="pc-field-svg"></div><div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
       <div class="pc-cards">
@@ -122,6 +122,7 @@ export function openPlayCall(o: PlayCallOptions) {
     selected = i;
     if (resetRoutes) routes = [...plays[i].routes];
     root.querySelectorAll<HTMLButtonElement>('.pc-card').forEach((c) => c.classList.toggle('sel', Number(c.dataset.i) === i));
+    root.querySelector('.pc-kind')!.textContent = plays[i].run ? 'RUN' : 'PASS';
     drawBig();
   };
 

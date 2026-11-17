@@ -30,6 +30,11 @@ export interface CoverParams {
    * him). Together with `shieldedContestRatio` this is what gets stop routes (Hitch, Curl) open.
    */
   bodyGapYards?: number;
+  /**
+   * Before the ball is thrown he never comes closer to our side than this x (a linebacker holds
+   * his ground past the line instead of running into our backfield after the running back).
+   */
+  minX?: number;
   /** After the throw, how long before he breaks on the ball. */
   ballReactionTime: number;
   /** Fraction of his top speed when breaking on the ball (he has to read it in the air). */
@@ -77,7 +82,7 @@ export function stepCoverage(
   } else {
     const seen = delayedPos(history, t - p.reactionTime);
     const cushion = p.cushionYards * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
-    target = { x: seen.x + cushion, y: seen.y };
+    target = { x: Math.max(seen.x + cushion, p.minX ?? -Infinity), y: seen.y };
   }
   // He can't run through the receiver: he stops short, on his own side of him.
   const gap = p.bodyGapYards ?? 0;
