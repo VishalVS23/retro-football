@@ -264,3 +264,11 @@
   filter: none;
   opacity: 0.75;
 }
+/* FIELD GOAL / KICK XP: kicking tee orange. */
+.pc-kick {
+  background: #f4a259;
+}
+/* TEAM (greyed until stage 3) makes way for the kick button on small screens. */
+.pc-team.pc-hide {
+  display: none;
+}

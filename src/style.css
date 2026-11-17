@@ -213,3 +213,67 @@ body {
   display: block;
 }
 
+
+/* Kick meter (field goals, extra points): a marker sweeps the bar, tap in the green.
+   pointer-events: none so a tap anywhere, even on the meter, reaches the field and kicks. */
+#kick-meter {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
+  transform: translateX(-50%);
+  width: min(60vw, 440px);
+  z-index: 3;
+  display: none;
+  pointer-events: none;
+  padding: 8px 10px 9px;
+  border: 3px solid #0d1b2a;
+  border-radius: 6px;
+  background: #14202bee;
+  color: #f4efe1;
+  font-family: 'Press Start 2P', monospace;
+  text-align: center;
+}
+#kick-meter.show {
+  display: block;
+}
+#kick-meter .km-title {
+  font-size: 11px;
+  color: #ffd166;
+  margin-bottom: 7px;
+}
+#kick-meter .km-bar {
+  position: relative;
+  height: 22px;
+  border: 3px solid #0d1b2a;
+  background: #d64545;
+}
+#kick-meter .km-green {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #3fae5a;
+}
+#kick-meter .km-centre {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: #f4efe1aa;
+}
+#kick-meter .km-marker {
+  position: absolute;
+  top: -7px;
+  bottom: -7px;
+  width: 6px;
+  margin-left: -3px;
+  background: #f4efe1;
+  border: 2px solid #0d1b2a;
+}
+#kick-meter .km-hint {
+  font-size: 9px;
+  margin-top: 7px;
+}
+#kick-meter.done .km-hint {
+  visibility: hidden;
+}

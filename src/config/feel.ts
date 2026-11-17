@@ -262,6 +262,28 @@ export const feel = {
     /** END OF Q1 / HALFTIME / FINAL banners stay up longer than play banners. */
     breakBannerTime: 1.8,
   },
+  /** Field goals and extra points: the one-tap kick meter (later: kicker ratings). */
+  kicking: {
+    /** Longest field goal a perfect tap makes; FIELD GOAL is offered within this many yards. */
+    maxRangeYards: 55,
+    /** Kicks this short (extra points are 19 yd) get the easiest meter. */
+    nearYards: 20,
+    /** Green zone half-width, as a fraction of half the bar: short kick, max-range kick. */
+    nearGreen: 0.4,
+    farGreen: 0.1,
+    /** Seconds for the marker to cross the bar once: short kick, max-range kick. */
+    nearSweepTime: 1.1,
+    farSweepTime: 0.55,
+    /** Range lost by a tap at the very end of the bar (so long kicks need a centred tap). */
+    powerLossRatio: 0.15,
+    /** Ball flight time: short kick, max-range kick. */
+    nearFlightTime: 0.9,
+    farFlightTime: 1.5,
+    /** Peak height of the kick, yards. */
+    arcHeightYards: 7,
+    /** Game seconds a field goal takes off the clock (extra points are untimed). */
+    clockRunoff: 5,
+  },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */
     quarterLength: 120,

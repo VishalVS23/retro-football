@@ -43,7 +43,28 @@ import {
 } from '../sim/carry';
 import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
-import { OPP_GOAL_X, applyPlay, downText, newGame, spotText, startDrive, type GameState, type PlayOutcome } from '../sim/drive';
+import {
+  HOLD_YARDS,
+  OPP_GOAL_X,
+  applyKick,
+  applyPlay,
+  downText,
+  newGame,
+  spotText,
+  startDrive,
+  type DriveEvent,
+  type GameState,
+  type PlayOutcome,
+} from '../sim/drive';
+import {
+  POST_HALF_WIDTH,
+  fieldGoalDistance,
+  inFieldGoalRange,
+  kickDifficulty,
+  meterPosition,
+  resolveKick,
+  type KickResult,
+} from '../sim/kicking';
 import {
   beforeSnap,
   callTimeout,
@@ -77,6 +98,7 @@ const COLORS = {
   firstDown: 0xffd23f,
   route: 0xffd166,
   routeOutline: 0x0d1b2a,
+  goalPost: 0xffd23f,
 };
 
 // Formation (football layout, not feel), lined up on the current line of scrimmage.
@@ -100,7 +122,7 @@ interface Receiver {
   coverage: Coverage;
 }
 
-type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'result';
+type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'kickAim' | 'kickFlight' | 'result';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
@@ -149,6 +171,13 @@ export class FieldScene extends Phaser.Scene {
   private finishBreak: (() => void) | null = null; // what happens when that banner is done (new half, new game)
   private nextClock: ClockState | null = null; // next quarter's clock; the scoreboard shows 0:00 until the break
   private markersG!: Phaser.GameObjects.Graphics;
+  // Field goals and extra points (rules in sim/kicking.ts): the meter is a DOM overlay.
+  private kickMeter: HTMLDivElement | null = null;
+  private kickKind: 'fieldGoal' | 'extraPoint' = 'fieldGoal';
+  private kickDistance = 0;
+  private kickSweep = 1; // seconds per sweep of the marker
+  private kickTime = 0; // seconds the meter has been running
+  private kickFlight: { from: Vec; to: Vec; t: number; duration: number; result: KickResult } | null = null;
 
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
@@ -251,14 +280,26 @@ export class FieldScene extends Phaser.Scene {
     });
     document.body.appendChild(plays);
     this.playsBtn = plays;
+
+    // Kick meter: taps go straight through it to the field (any tap kicks).
+    const meter = document.createElement('div');
+    meter.id = 'kick-meter';
+    meter.innerHTML = `
+      <div class="km-title"></div>
+      <div class="km-bar"><div class="km-green"></div><div class="km-centre"></div><div class="km-marker"></div></div>
+      <div class="km-hint">TAP IN THE GREEN</div>`;
+    document.body.appendChild(meter);
+    this.kickMeter = meter;
     this.events.once('shutdown', () => {
       skip.remove();
       plays.remove();
+      meter.remove();
       closePlayCall();
     });
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
-    this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => this.toggleBullet());
+    // SPACE also kicks when the kick meter is up.
+    this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => (this.state === 'kickAim' ? this.kick() : this.toggleBullet()));
     // D while running: dive (QB: slide), like a forward flick on the phone.
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.D).on('down', () => this.goDown());
 
@@ -277,12 +318,15 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     // The clock runs while the ball is live (a play in progress always finishes, even at 0:00).
-    if (['live', 'windup', 'flight', 'run', 'return'].includes(this.state)) {
+    // The try after a touchdown is untimed.
+    if (['live', 'windup', 'flight', 'run', 'return'].includes(this.state) && !this.match.tryPending) {
       this.clock = tickPlay(this.clock, dt);
       this.updateScoreboard();
     }
     if (this.state === 'run') this.stepRun(dt);
     if (this.state === 'return') this.stepReturn(dt);
+    if (this.state === 'kickAim') this.stepMeter(dt);
+    if (this.state === 'kickFlight') this.stepKick(dt);
 
     const playing = this.state === 'live' || this.state === 'windup' || this.state === 'flight';
     if (playing) {
@@ -336,7 +380,11 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     // Returns and result banners are skipped with the SKIP button only (stray taps did it by accident).
-    if (this.state === 'return' || this.state === 'result' || this.state === 'calling') return;
+    if (this.state === 'kickAim') {
+      this.kick(); // any tap kicks
+      return;
+    }
+    if (this.state === 'return' || this.state === 'result' || this.state === 'calling' || this.state === 'kickFlight') return;
     if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
       this.toggleBullet(); // other thumb taps while aiming
       return;
@@ -730,13 +778,141 @@ export class FieldScene extends Phaser.Scene {
    */
   private recordPlay(outcome: PlayOutcome, outOfBounds = false) {
     const { state, event } = applyPlay(this.match, outcome);
+    this.finishPlay(state, event, playStopsClock(outcome, event, outOfBounds));
+  }
+
+  /** New game state after a play or a kick, then the clock (`stops` = this play stops it). */
+  private finishPlay(state: GameState, event: DriveEvent, stops: boolean) {
     this.match = state;
-    const clock = endPlay(this.clock, playStopsClock(outcome, event, outOfBounds), feel.clock);
-    this.setClock(clock.clock, clock.event);
-    this.pendingBreak = clock.event;
-    const banner = { firstDown: 'FIRST DOWN!', turnoverOnDowns: 'TURNOVER ON DOWNS', safety: 'SAFETY' } as const;
-    if (event === 'firstDown' || event === 'turnoverOnDowns' || event === 'safety') this.showBanner(banner[event]);
+    if (state.tryPending) {
+      // Touchdown: the try comes first and is untimed. An end of quarter waits until it's over.
+      this.clock = { ...this.clock, running: false };
+      this.pendingBreak = null;
+    } else {
+      const clock = endPlay(this.clock, stops, feel.clock);
+      this.setClock(clock.clock, clock.event);
+      this.pendingBreak = clock.event;
+    }
+    const banner: Partial<Record<NonNullable<DriveEvent>, string>> = {
+      firstDown: 'FIRST DOWN!',
+      turnoverOnDowns: 'TURNOVER ON DOWNS',
+      safety: 'SAFETY',
+      twoPointGood: '2-PT GOOD!',
+      twoPointFailed: 'NO GOOD',
+    };
+    const text = event ? banner[event] : undefined;
+    if (text) this.showBanner(text);
     this.updateScoreboard();
+  }
+
+  // ---------- Kicking (field goals, extra points) ----------
+
+  /** FIELD GOAL / KICK XP on the play calling screen: line up the kick and start the meter. */
+  private startKick() {
+    // A kick is a snap: a running clock loses the huddle runoff first (that can end the quarter).
+    const r = beforeSnap(this.clock, feel.clock);
+    this.setClock(r.clock, r.event);
+    this.updateScoreboard();
+    if (!r.snap && r.event !== 'warning') {
+      if (r.event) this.showBreak(r.event);
+      return;
+    }
+    if (r.event === 'warning') this.showBanner(this.warningText());
+    this.kickKind = this.match.tryPending ? 'extraPoint' : 'fieldGoal';
+    this.kickDistance = fieldGoalDistance(this.match.ballX);
+    const diff = kickDifficulty(this.kickDistance, feel.kicking);
+    this.kickSweep = diff.sweepTime;
+    this.kickTime = 0;
+    this.state = 'kickAim';
+    // The holder's spot, 7 yd behind the line; the QB stands in as the kicker for now.
+    const spot = this.kickSpot();
+    this.routeG.clear();
+    this.qb.setPosition(spot.x - 1.5, spot.y + 1.2);
+    this.tweens.killTweensOf([this.ball, this.shadow]);
+    this.ball.setVisible(true).setAlpha(1);
+    this.shadow.setVisible(true).setAlpha(1);
+    this.sizeBall();
+    this.drawBall(spot.x, spot.y, 0);
+    this.cameraFocus = { x: spot.x + this.kickDistance / 2, y: FIELD_WIDTH / 2 };
+    // Meter: green zone centred, as wide as this kick allows.
+    const m = this.kickMeter;
+    if (m) {
+      const what = this.kickKind === 'extraPoint' ? 'EXTRA POINT' : 'FIELD GOAL';
+      m.querySelector('.km-title')!.textContent = `${what} · ${this.kickDistance} YD`;
+      const green = m.querySelector<HTMLDivElement>('.km-green')!;
+      green.style.left = `${((1 - diff.green) / 2) * 100}%`;
+      green.style.width = `${diff.green * 100}%`;
+      m.classList.remove('done');
+      m.classList.add('show');
+    }
+    this.stepMeter(0);
+    this.updateLabel();
+  }
+
+  private kickSpot(): Vec {
+    return { x: this.match.ballX - HOLD_YARDS, y: FIELD_WIDTH / 2 };
+  }
+
+  private stepMeter(dt: number) {
+    this.kickTime += dt;
+    const pos = meterPosition(this.kickTime, this.kickSweep);
+    const marker = this.kickMeter?.querySelector<HTMLDivElement>('.km-marker');
+    if (marker) marker.style.left = `${((pos + 1) / 2) * 100}%`;
+  }
+
+  /** The tap: the marker freezes where it is and that decides the kick. */
+  private kick() {
+    if (this.state !== 'kickAim') return;
+    const k = resolveKick(this.kickDistance, meterPosition(this.kickTime, this.kickSweep), feel.kicking);
+    if (this.kickKind === 'fieldGoal') {
+      this.clock = tickPlay(this.clock, feel.kicking.clockRunoff); // extra points are untimed
+      this.updateScoreboard();
+    }
+    this.kickMeter?.classList.add('done');
+    // The ball heads for the posts at the back of the end zone, crossing that line `aim` of the
+    // way to an upright; a short kick comes down before it gets there.
+    const from = this.kickSpot();
+    const postY = FIELD_WIDTH / 2 + k.aim * POST_HALF_WIDTH;
+    const endX = k.result === 'short' ? from.x + k.carry : TOTAL_LENGTH + 3;
+    const u = (endX - from.x) / Math.max(1, TOTAL_LENGTH - from.x);
+    const to = { x: endX, y: from.y + (postY - from.y) * u };
+    const kc = feel.kicking;
+    const far = Math.max(0, Math.min(1, (this.kickDistance - kc.nearYards) / Math.max(1, kc.maxRangeYards - kc.nearYards)));
+    const duration = kc.nearFlightTime + (kc.farFlightTime - kc.nearFlightTime) * far;
+    this.kickFlight = { from, to, t: 0, duration: Math.max(0.1, duration), result: k.result };
+    this.state = 'kickFlight';
+    // Kicker's swing: a quick squash.
+    const sq = feel.throw.windupSquashRatio;
+    this.tweens.add({ targets: this.qb, scaleX: 1 + sq, scaleY: 1 - sq, duration: Math.max(1, feel.throw.windupTime * 1000), yoyo: true });
+    this.updateLabel();
+  }
+
+  private stepKick(dt: number) {
+    const f = this.kickFlight;
+    if (!f) return;
+    f.t += dt;
+    const u = Math.min(1, f.t / f.duration);
+    const x = f.from.x + (f.to.x - f.from.x) * u;
+    const y = f.from.y + (f.to.y - f.from.y) * u;
+    this.drawBall(x, y, 4 * feel.kicking.arcHeightYards * u * (1 - u));
+    this.cameraFocus = { x: x + feel.camera.leadYards, y: FIELD_WIDTH / 2 };
+    if (u >= 1) this.endKick();
+  }
+
+  private endKick() {
+    const f = this.kickFlight!;
+    this.kickFlight = null;
+    this.state = 'result';
+    this.kickMeter?.classList.remove('show');
+    const good = f.result === 'good';
+    const text = { good: 'GOOD!', wideLeft: 'WIDE LEFT', wideRight: 'WIDE RIGHT', short: 'SHORT' }[f.result];
+    if (good) this.shakeScreen();
+    this.tweens.add({ targets: [this.ball, this.shadow], alpha: 0, duration: feel.pacing.bannerTime * 1000 });
+    this.showBanner(text);
+    this.floatText(Math.min(f.to.x, TOTAL_LENGTH - 6), FIELD_WIDTH / 2 - 6, `${this.kickDistance} YD`, good ? '#ffd166' : '#ff8a8a');
+    const { state, event } = applyKick(this.match, this.kickKind, good);
+    this.finishPlay(state, event, true);
+    this.scheduleReset();
   }
 
   /**
@@ -1080,6 +1256,8 @@ export class FieldScene extends Phaser.Scene {
     });
     this.targetIndex = 0;
     this.carrierDot = null;
+    this.kickFlight = null;
+    this.kickMeter?.classList.remove('show');
     this.state = 'presnap';
     this.playTime = 0;
     this.currentThrow = null;
@@ -1158,6 +1336,12 @@ export class FieldScene extends Phaser.Scene {
         this.state = 'presnap';
         this.updateLabel();
       },
+      kickLabel: this.match.tryPending
+        ? 'KICK XP'
+        : inFieldGoalRange(this.match.ballX, feel.kicking)
+          ? `FIELD GOAL (${fieldGoalDistance(this.match.ballX)} YD)`
+          : null,
+      onKick: () => this.startKick(),
     });
   }
 
@@ -1237,7 +1421,16 @@ export class FieldScene extends Phaser.Scene {
     if (this.state === 'calling') return;
     if (this.state === 'presnap') {
       const run = this.clock.running ? ` (clock running: -${Math.round(feel.clock.huddleRunoff)}s)` : '';
-      this.label.setText(`${PLAYS[this.playIndex].name} · TAP to snap${run} · ⚙ = feel`);
+      const tryText = this.match.tryPending ? '2-PT TRY: ' : '';
+      this.label.setText(`${tryText}${PLAYS[this.playIndex].name} · TAP to snap${run} · ⚙ = feel`);
+      return;
+    }
+    if (this.state === 'kickAim') {
+      this.label.setText('SPACE also kicks'); // the meter itself says TAP IN THE GREEN
+      return;
+    }
+    if (this.state === 'kickFlight') {
+      this.label.setText('Kick is up…');
       return;
     }
     if (this.state === 'run') {
@@ -1414,6 +1607,15 @@ export class FieldScene extends Phaser.Scene {
     }
     g.lineStyle(0.3, COLORS.line, 1);
     g.strokeRect(0, 0, TOTAL_LENGTH, FIELD_WIDTH);
+
+    // Goalposts on each end line, seen from above: the crossbar with an upright at each end.
+    g.fillStyle(COLORS.goalPost, 1);
+    const mid = FIELD_WIDTH / 2;
+    for (const x of [0, TOTAL_LENGTH]) {
+      g.fillRect(x - 0.2, mid - POST_HALF_WIDTH, 0.4, POST_HALF_WIDTH * 2);
+      g.fillCircle(x, mid - POST_HALF_WIDTH, 0.45);
+      g.fillCircle(x, mid + POST_HALF_WIDTH, 0.45);
+    }
 
     // Yard numbers, drawn big and then shrunk down so they stay sharp.
     for (let x = 0; x <= TOTAL_LENGTH; x += 10) {

@@ -27,6 +27,12 @@ export interface PlayCallOptions {
   /** The chosen play's index, and the play itself with any hot routes. */
   onExecute: (playIndex: number, play: PlayDef) => void;
   onCancel: () => void;
+  /**
+   * Kick button: "FIELD GOAL (37 YD)" when in range, "KICK XP" on a try, or null for none.
+   * On a try, EXECUTE PLAY becomes GO FOR 2.
+   */
+  kickLabel: string | null;
+  onKick: () => void;
 }
 
 let close: (() => void) | null = null;
@@ -86,11 +92,12 @@ export function openPlayCall(o: PlayCallOptions) {
       </div>
     </div>
     <div class="pc-btns">
-      <button class="pc-btn pc-go" data-act="go">EXECUTE PLAY</button>
+      <button class="pc-btn pc-go" data-act="go">${match.tryPending ? 'GO FOR 2' : 'EXECUTE PLAY'}</button>
+      ${o.kickLabel ? `<button class="pc-btn pc-kick" data-act="kick">${o.kickLabel}</button>` : ''}
       <button class="pc-btn pc-audible" data-act="audible" title="Change a receiver's route for this play">AUDIBLE</button>
       <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock: no huddle time comes off at the snap">TIMEOUT (${o.timeoutsLeft})</button>
       <button class="pc-btn pc-cancel" data-act="cancel">CANCEL</button>
-      <button class="pc-btn pc-team" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
+      <button class="pc-btn pc-team${o.kickLabel ? ' pc-hide' : ''}" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
     </div>
   `;
   document.body.appendChild(root);
@@ -153,6 +160,7 @@ export function openPlayCall(o: PlayCallOptions) {
   root.querySelector('.pc-btns')!.addEventListener('click', (e) => {
     const act = (e.target as HTMLElement).closest<HTMLButtonElement>('.pc-btn')?.dataset.act;
     if (act === 'go') finish(() => o.onExecute(selected, calledPlay()));
+    if (act === 'kick') finish(o.onKick);
     if (act === 'audible') setAudible(!audible);
     if (act === 'timeout' && !timeoutBtn.disabled) {
       timeoutBtn.textContent = `TIMEOUT (${o.onTimeout()})`;
