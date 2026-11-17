@@ -471,13 +471,15 @@ export class FieldScene extends Phaser.Scene {
     } else if (r.event) this.showBreak(r.event);
   }
 
-  /** TIMEOUT button: the clock stops, so no huddle runoff at the next snap. */
+  /**
+   * TIMEOUT button: the clock stops (no huddle runoff at the next snap) and the play calling
+   * screen opens, so you can pick the next play with the clock stopped (user's request).
+   */
   private timeout() {
     if (this.state !== 'presnap' || !canCallTimeout(this.clock)) return;
     this.clock = callTimeout(this.clock);
-    this.showBanner('TIMEOUT');
     this.updateScoreboard();
-    this.updateLabel();
+    this.openCall();
   }
 
   /** A new quarter's clock waits (scoreboard shows 0:00) until its END OF / HALFTIME banner is done. */
