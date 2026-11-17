@@ -1301,7 +1301,7 @@ export class FieldScene extends Phaser.Scene {
     this.sizeBall();
     this.drawMarkers();
     this.routeG.clear();
-    for (const r of this.receivers) this.drawRoute(r.path);
+    this.receivers.forEach((r, i) => this.drawRoute(r.path, play.routes[i].stop));
     this.cameraFocus = { x: qbStart.x + 12, y: FORMATION_VIEW_Y };
     this.updateLabel();
     this.updateScoreboard();
@@ -1377,8 +1377,11 @@ export class FieldScene extends Phaser.Scene {
    * Pre-snap route art (placeholder style until the stage-13 art pass): a thick bright line with
    * a dark pixel-style outline and a chunky arrowhead. Static (user didn't like animated chevrons).
    */
-  private drawRoute(path: Vec[]) {
+  private drawRoute(fullPath: Vec[], stop = false) {
     const g = this.routeG;
+    // Stop routes (Hitch, Curl, Check): drawn up to the turn, ending in a flat "stop" bar
+    // (the short step back toward the QB is too small to draw).
+    const path = stop && fullPath.length >= 3 ? fullPath.slice(0, -1) : fullPath;
     if (path.length < 2) return;
     const OUTLINE = 0.75;
     const LINE = 0.42;
@@ -1387,9 +1390,12 @@ export class FieldScene extends Phaser.Scene {
     const end = path[path.length - 1];
     const prev = path[path.length - 2];
     const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
-    const HEAD = 2.0;
+    // Stop routes end in a short comeback: smaller head. Never longer than the last leg, or the
+    // line would poke out backwards past it.
+    const HEAD = Math.min(2.0 * (stop ? 0.6 : 1), Math.hypot(end.x - prev.x, end.y - prev.y) * 0.9);
     const lineEnd = { x: end.x - Math.cos(ang) * HEAD * 0.6, y: end.y - Math.sin(ang) * HEAD * 0.6 };
-    const pts = [...path.slice(0, -1), lineEnd];
+    // Stop routes (Hitch, Curl, Check) end in a flat bar: "stop here and wait" (playbook style).
+    const pts = stop ? path : [...path.slice(0, -1), lineEnd];
 
     const stroke = (width: number, color: number) => {
       g.lineStyle(width, color, 1);
@@ -1398,6 +1404,16 @@ export class FieldScene extends Phaser.Scene {
       for (const pt of pts) g.fillCircle(pt.x, pt.y, width / 2); // round the corners
     };
     stroke(OUTLINE, COLORS.routeOutline);
+    if (stop) {
+      const bx = -Math.sin(ang) * 1.1;
+      const by = Math.cos(ang) * 1.1;
+      g.lineStyle(OUTLINE + 0.25, COLORS.routeOutline, 1);
+      g.lineBetween(end.x - bx * 1.15, end.y - by * 1.15, end.x + bx * 1.15, end.y + by * 1.15);
+      stroke(LINE, COLORS.route);
+      g.lineStyle(LINE + 0.15, COLORS.route, 1);
+      g.lineBetween(end.x - bx, end.y - by, end.x + bx, end.y + by);
+      return;
+    }
 
     // Arrowhead: outline triangle, then the bright one inside it.
     const tri = (len: number, half: number, back: number) => {

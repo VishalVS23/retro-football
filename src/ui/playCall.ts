@@ -7,6 +7,7 @@ import '@fontsource/press-start-2p/latin-400.css';
 import './playCall.css';
 import type { GameState } from '../sim/drive';
 import { downText } from '../sim/drive';
+import { TOTAL_LENGTH } from '../sim/field';
 import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
 import { playDiagramSvg } from './playDiagram';
@@ -111,10 +112,13 @@ export function openPlayCall(o: PlayCallOptions) {
   const drawInto = (el: HTMLElement, play: PlayDef, win: DiagramWindow, detailed: boolean, extra: { hot?: boolean[]; tappable?: boolean } = {}) => {
     const r = el.getBoundingClientRect();
     const aspect = r.height > 0 ? r.width / r.height : 1.8;
+    const w = win.w ?? win.h * aspect;
+    // Near their goal line, slide the window back so it ends just past the back of the end zone.
+    const x0 = Math.min(match.ballX - win.behind, TOTAL_LENGTH + 2 - w);
     el.innerHTML = playDiagramSvg(play, match.ballX, match.firstDownX, {
-      x0: match.ballX - win.behind,
+      x0,
       y0: win.y0,
-      w: win.w ?? win.h * aspect,
+      w,
       h: win.h,
       detailed,
       ...extra,

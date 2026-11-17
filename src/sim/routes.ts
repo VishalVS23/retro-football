@@ -3,7 +3,7 @@
  * Route shapes are football (not feel); speeds and cut sharpness are feel values passed in.
  * Units: yards and seconds. x = downfield, y = across the field.
  */
-import { FIELD_WIDTH } from './field';
+import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import type { Vec } from './throw';
 
 export interface RouteDef {
@@ -90,12 +90,20 @@ export function withHotRoute(play: PlayDef, wr: number, route: RouteDef): PlayDe
   return { ...play, routes: play.routes.map((r, i) => (i === wr ? route : r)) };
 }
 
+/** Deepest a route goes: this far inside the back line of their end zone (football layout). */
+export const BACK_LINE_MARGIN = 1.5;
+export const ROUTE_MAX_X = TOTAL_LENGTH - BACK_LINE_MARGIN;
+
 /**
  * Turns a route into field positions. `towardMiddle` is +1 if the middle of the field
  * is at larger y than the receiver (he lines up near the top sideline), else -1.
+ * Near the goal line routes get shorter: no point goes deeper than ROUTE_MAX_X (a Go becomes
+ * "run to the back of the end zone", a Post flattens out along it).
  */
 export function routePath(start: Vec, route: RouteDef, towardMiddle: 1 | -1): Vec[] {
-  return route.points.map((p) => ({ x: start.x + p.x, y: start.y + p.y * towardMiddle }));
+  const pts = route.points.map((p) => ({ x: Math.min(ROUTE_MAX_X, start.x + p.x), y: start.y + p.y * towardMiddle }));
+  // Two points squashed onto the same spot would make a zero-length leg: drop the repeat.
+  return pts.filter((p, i) => i === 0 || Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) > 1e-6);
 }
 
 export interface RunParams {
@@ -128,11 +136,12 @@ export function startRunner(path: Vec[], stop = false): Runner {
   return { pos: { ...path[0] }, speed: 0, seg: 0, dir: path.length > 1 ? unit(path[0], path[1]) : { x: 1, y: 0 }, stop };
 }
 
-const EDGE = 0.5; // stay just inside the sidelines
+const EDGE = 0.5; // stay just inside the sidelines and the back line
 
 /**
  * Advances the runner by `dt` seconds along the path: speeds up, slows at each cut,
- * and keeps running straight once the route is finished (stopping at the sideline), unless it's
+ * and keeps running straight once the route is finished (stopping at the sideline or the back of
+ * the end zone), unless it's
  * a stop route: then he plants on the last point and waits.
  */
 export function stepRunner(r: Runner, path: Vec[], dt: number, p: RunParams): Runner {
@@ -167,6 +176,10 @@ export function stepRunner(r: Runner, path: Vec[], dt: number, p: RunParams): Ru
   if (pos.y < EDGE || pos.y > FIELD_WIDTH - EDGE) {
     pos.y = Math.min(FIELD_WIDTH - EDGE, Math.max(EDGE, pos.y));
     speed = 0; // ran into the sideline
+  }
+  if (pos.x > TOTAL_LENGTH - EDGE) {
+    pos.x = TOTAL_LENGTH - EDGE;
+    speed = 0; // ran into the back of the end zone
   }
   return { pos, speed, seg, dir, stop: r.stop };
 }

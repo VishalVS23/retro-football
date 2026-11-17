@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYS, RB, RB_ROUTES, ROUTES, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
+import { PLAYS, RB, RB_ROUTES, ROUTES, ROUTE_MAX_X, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
 import type { Vec } from './throw';
+import { TOTAL_LENGTH } from './field';
 
 const params = { topSpeed: 8, acceleration: 16, cutSpeedRatio: 0.5 };
 const start = { x: 35, y: 15 };
@@ -54,7 +55,25 @@ describe('routes', () => {
     expect(r.speed).toBe(0);
   });
 
-  it('predicts where the runner will be later', () => {
+  it('near their goal line routes get shorter and stop at the back of the end zone', () => {
+    const atTheir2 = { x: 107.5, y: 10 };
+    const go = routePath(atTheir2, route('Go'), 1);
+    expect(go[go.length - 1].x).toBe(ROUTE_MAX_X); // not 40 yd downfield
+    const post = routePath(atTheir2, route('Post'), 1);
+    expect(Math.max(...post.map((p) => p.x))).toBeLessThanOrEqual(ROUTE_MAX_X);
+    expect(post[post.length - 1].y).toBe(20); // still breaks to the middle, flattened along the back line
+    // He runs to the back line and stays inside it.
+    const r = run(go, 10);
+    expect(r.pos.x).toBeLessThanOrEqual(TOTAL_LENGTH);
+    expect(r.speed).toBe(0);
+  });
+
+  it('routes away from the goal line are unchanged', () => {
+    const at25 = { x: 35, y: 10 };
+    expect(routePath(at25, route('Go'), 1)).toEqual([at25, { x: 75, y: 10 }]);
+  });
+
+    it('predicts where the runner will be later', () => {
     const path = routePath(start, route('Slant'), 1);
     const now = run(path, 0.5);
     const later = runnerAfter(now, path, 1, params);

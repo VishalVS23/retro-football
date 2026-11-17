@@ -7,6 +7,7 @@ import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
 import { formation } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
+import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, routePath, type PlayDef } from '../sim/routes';
 import type { Vec } from '../sim/throw';
 
@@ -33,6 +34,8 @@ const C = {
   route: '#ffd166',
   hot: '#ff7ad9',
   outline: '#0d1b2a',
+  outOfBounds: '#14202b',
+  goalPost: '#ffd23f',
   offense: '#e76f51',
   defense: '#3a6ea5',
 };
@@ -40,15 +43,20 @@ const FONT = `'Press Start 2P', monospace`;
 const n = (v: number) => Math.round(v * 100) / 100;
 
 /** Route line + arrowhead, and (detailed) its name label separately so labels can go on top. */
-function routeSvg(path: Vec[], name: string, detailed: boolean, color = C.route, stop = false): { line: string; label: string } {
+function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.route, stop = false): { line: string; label: string } {
+  // Stop routes (Hitch, Curl, Check): drawn up to the turn, ending in a flat "stop" bar
+  // (the short step back toward the QB is too small to draw).
+  const path = stop && fullPath.length >= 3 ? fullPath.slice(0, -1) : fullPath;
   if (path.length < 2) return { line: '', label: '' };
   const end = path[path.length - 1];
   const prev = path[path.length - 2];
   const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
   // Stop routes end in a short comeback, so they get a smaller arrowhead.
-  const head = (detailed ? 2 : 2.6) * (stop ? 0.6 : 1);
+  // Never longer than the last leg, or the line would poke out backwards past it.
+  const head = Math.min((detailed ? 2 : 2.6) * (stop ? 0.6 : 1), Math.hypot(end.x - prev.x, end.y - prev.y) * 0.9);
   const lineEnd = { x: end.x - Math.cos(ang) * head * 0.6, y: end.y - Math.sin(ang) * head * 0.6 };
-  const pts = [...path.slice(0, -1), lineEnd].map((p) => `${n(p.x)},${n(p.y)}`).join(' ');
+  // Stop routes (Hitch, Curl, Check) end in a flat bar: "stop here and wait" (playbook style).
+  const pts = (stop ? path : [...path.slice(0, -1), lineEnd]).map((p) => `${n(p.x)},${n(p.y)}`).join(' ');
   const tri = (len: number, half: number, back: number) => {
     const bx = end.x - Math.cos(ang) * back;
     const by = end.y - Math.sin(ang) * back;
@@ -57,15 +65,27 @@ function routeSvg(path: Vec[], name: string, detailed: boolean, color = C.route,
     return [bx + Math.cos(ang) * len, by + Math.sin(ang) * len, bx + nx, by + ny, bx - nx, by - ny].map(n).join(',');
   };
   const w = detailed ? 1 : 1.4;
+  const line = (stroke: string, width: number) =>
+    `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round"/>`;
   let s = '';
-  s += `<polyline points="${pts}" fill="none" stroke="${C.outline}" stroke-width="${0.85 * w}" stroke-linejoin="round" stroke-linecap="round"/>`;
-  s += `<polygon points="${tri(head + 0.5, 1.35 * (w > 1 ? 1.2 : 1), head * 0.8)}" fill="${C.outline}"/>`;
-  s += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="${0.45 * w}" stroke-linejoin="round" stroke-linecap="round"/>`;
-  s += `<polygon points="${tri(head, 0.95 * (w > 1 ? 1.2 : 1), head * 0.6)}" fill="${color}"/>`;
+  if (stop) {
+    const bx = -Math.sin(ang) * 1.1 * w;
+    const by = Math.cos(ang) * 1.1 * w;
+    const bar = (k: number) => `x1="${n(end.x - bx * k)}" y1="${n(end.y - by * k)}" x2="${n(end.x + bx * k)}" y2="${n(end.y + by * k)}"`;
+    s += line(C.outline, 0.85 * w);
+    s += `<line ${bar(1.15)} stroke="${C.outline}" stroke-width="${1.05 * w}"/>`;
+    s += line(color, 0.45 * w);
+    s += `<line ${bar(1)} stroke="${color}" stroke-width="${0.6 * w}"/>`;
+  } else {
+    s += line(C.outline, 0.85 * w);
+    s += `<polygon points="${tri(head + 0.5, 1.35 * (w > 1 ? 1.2 : 1), head * 0.8)}" fill="${C.outline}"/>`;
+    s += line(color, 0.45 * w);
+    s += `<polygon points="${tri(head, 0.95 * (w > 1 ? 1.2 : 1), head * 0.6)}" fill="${color}"/>`;
+  }
   let label = '';
   if (detailed && stop) {
     // Stop route: name just downfield of the turn, clear of the receiver and his cornerback.
-    const turn = path[path.length - 2];
+    const turn = path[path.length - 1];
     label = `<text x="${n(turn.x + 1.2)}" y="${n(turn.y + 0.55)}" font-size="1.5" text-anchor="start" fill="${color}" stroke="${C.outline}" stroke-width="0.45" paint-order="stroke" font-family="${FONT}">${name.toUpperCase()}</text>`;
   } else if (detailed) {
     // Route name just past the arrow tip, nudged away from the line's direction.
@@ -92,7 +112,8 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   // Turf stripes every 5 yards, end zones.
   for (let x = Math.floor(v.x0 / 5) * 5; x < x1; x += 5) {
     const inEndZone = x < END_ZONE_DEPTH || x >= TOTAL_LENGTH - END_ZONE_DEPTH;
-    const color = inEndZone ? C.endZone : (x / 5) % 2 === 0 ? C.turf : C.turfAlt;
+    const out = x >= TOTAL_LENGTH || x < 0; // past the back of an end zone
+    const color = out ? C.outOfBounds : inEndZone ? C.endZone : (x / 5) % 2 === 0 ? C.turf : C.turfAlt;
     s += `<rect x="${x}" y="${n(v.y0)}" width="5.05" height="${n(v.h)}" fill="${color}"/>`;
   }
   if (v.detailed) {
@@ -107,6 +128,12 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
         }
       }
     }
+  }
+  // Back lines of the end zones, with the goalposts on them.
+  for (const x of [0, TOTAL_LENGTH]) {
+    if (x < v.x0 || x > x1) continue;
+    s += `<line x1="${x}" y1="0" x2="${x}" y2="${n(FIELD_WIDTH)}" stroke="${C.line}" stroke-width="${v.detailed ? 0.35 : 0.5}"/>`;
+    s += `<line x1="${x}" y1="${n(FIELD_WIDTH / 2 - POST_HALF_WIDTH)}" x2="${x}" y2="${n(FIELD_WIDTH / 2 + POST_HALF_WIDTH)}" stroke="${C.goalPost}" stroke-width="${v.detailed ? 0.6 : 0.9}"/>`;
   }
   // Line of scrimmage and first-down line.
   s += `<line x1="${losX}" y1="0" x2="${losX}" y2="${n(FIELD_WIDTH)}" stroke="${C.los}" stroke-width="${v.detailed ? 0.3 : 0.5}"/>`;
