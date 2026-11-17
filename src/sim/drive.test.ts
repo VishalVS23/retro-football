@@ -68,6 +68,14 @@ describe('drive rules', () => {
     expect(applyPlay(at(100, 1, 110), { kind: 'spot', x: 110 }).event).toBe('touchdown');
   });
 
+  it('brought down behind the line (sack or scramble) loses yards: next down, longer to go', () => {
+    const { state, event } = applyPlay(at(40, 1, 50), { kind: 'spot', x: 34.6 });
+    expect(event).toBe(null);
+    expect(state.down).toBe(2);
+    expect(state.ballX).toBe(35);
+    expect(state.firstDownX).toBe(50); // now 2nd & 15
+  });
+
   it('down in our own end zone is a safety: 2 points to them', () => {
     const { state, event } = applyPlay(at(12, 2, 22), { kind: 'spot', x: 8 });
     expect(event).toBe('safety');

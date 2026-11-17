@@ -7,6 +7,7 @@ import {
   arcPoints,
   ballAt,
   clampDistance,
+  isRunAim,
   makeThrow,
   type Throw,
   type Vec,
@@ -59,6 +60,7 @@ const COLORS = {
   shadow: 0x000000,
   aim: 0xffd166,
   bullet: 0x9be7ff, // bullet-pass aim preview
+  run: 0x7dff9b, // QB scramble preview (aiming behind the QB)
   scrimmage: 0x7ec8e3,
   firstDown: 0xffd23f,
   route: 0xffd166,
@@ -143,6 +145,9 @@ export class FieldScene extends Phaser.Scene {
   private queuedTarget: Vec | null = null; // released before the earliest throw time
   private bulletAim = false; // aiming a bullet (other thumb tapped while aiming)
   private bulletThrow = false; // the throw being made / in the air is a bullet
+  private runAim = false; // aiming behind the QB: releasing = QB scramble
+  private qbRun = false; // the ball carrier is the QB (scramble), not a receiver
+  private blockedRushersFrom = Infinity; // pursuers from this index are rushers still held by a blocker
   private currentThrow: Throw | null = null;
   private flightElapsed = 0;
   private underPressure = false;
@@ -364,10 +369,21 @@ export class FieldScene extends Phaser.Scene {
     this.aimDrag = null;
     this.aimG.clear();
     this.updateLabel();
+    if (this.state === 'live' && this.runAim) {
+      this.runAim = false;
+      this.startRun(this.qbPos, null); // aimed behind him: tuck it and run
+      return;
+    }
     if (this.state !== 'live' || !this.target) return; // just a tap: nothing thrown
     this.bulletThrow = this.bulletAim;
     if (this.playTime < feel.throw.earliestRelease) this.queuedTarget = this.target;
     else this.startWindup(this.target);
+  }
+
+  private setRunAim(on: boolean) {
+    if (on === this.runAim) return;
+    this.runAim = on;
+    this.updateLabel();
   }
 
   /** Recomputes the target from the current drag (the QB keeps moving while you aim). */
@@ -375,6 +391,7 @@ export class FieldScene extends Phaser.Scene {
     const d = this.aimDrag;
     if (!d || Math.hypot(d.x, d.y) < MIN_DRAG_PX) {
       this.target = null;
+      this.setRunAim(false);
       this.aimG.clear();
       return;
     }
@@ -383,6 +400,13 @@ export class FieldScene extends Phaser.Scene {
       dragForMaxRatio: feel.throw.aimDragForMaxRatio,
       maxDistanceYards: feel.throw.maxDistanceYards,
     });
+    // Aiming behind the QB = scramble: show a RUN arrow instead of a throw arc.
+    this.setRunAim(isRunAim(this.qbPos, this.target, feel.scramble.runAimAngle));
+    if (this.runAim) {
+      this.target = null;
+      this.drawRunPreview();
+      return;
+    }
     // A bullet can't go as far: same direction, cut down to its max distance.
     if (this.bulletAim) this.target = clampDistance(this.qbPos, this.target, feel.bullet.maxDistanceYards);
     this.drawAimPreview(this.target, this.bulletAim);
@@ -735,7 +759,7 @@ export class FieldScene extends Phaser.Scene {
 
   private carryParams() {
     return {
-      runSpeed: feel.running.runSpeed,
+      runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : feel.running.runSpeed,
       steerSpeed: feel.running.steerSpeed,
       steerResponse: feel.running.steerResponse,
       jukeSpeed: feel.running.jukeSpeed,
@@ -744,21 +768,33 @@ export class FieldScene extends Phaser.Scene {
     };
   }
 
-  /** After the catch: the receiver becomes the ball carrier and every defender chases him. */
-  private startRun(at: Vec, receiver: number) {
+  /**
+   * After a catch (`receiver` = his index) or a QB scramble (`receiver` = null): he becomes the
+   * ball carrier and every defender chases him.
+   */
+  private startRun(at: Vec, receiver: number | null) {
     this.state = 'run';
     this.runTime = 0;
+    this.qbRun = receiver === null;
     this.carrier = startCarrier(at);
-    this.carrierDot = this.wrDots[receiver];
-    this.targetIndex = receiver;
+    this.carrierDot = receiver === null ? this.qb : this.wrDots[receiver];
+    this.targetIndex = receiver ?? -1; // -1: every receiver keeps running his route
+    if (this.qbRun) {
+      this.queuedTarget = null;
+      this.aimG.clear();
+      this.qb.setStrokeStyle(0.2, COLORS.outline); // pressure warning off: he's on the move
+    }
     this.sightings = remember([], 0, this.carrier, 1);
     const db = feel.tackling.dbPursuitSpeed;
     const dl = feel.tackling.dlPursuitSpeed;
     this.pursuers = [
       ...this.receivers.map((r) => ({ pos: { ...r.coverage.pos }, speed: db, stunned: 0 })),
       { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
-      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0 })),
+      // On a scramble our line keeps blocking: a rusher stays stuck (can't move or tackle) until
+      // the moment he would have beaten his blocker anyway.
+      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: this.qbRun ? Math.max(0, r.shedAt - this.playTime) : 0 })),
     ];
+    this.blockedRushersFrom = this.qbRun ? this.pursuers.length - this.rushers.length : Infinity;
     this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
     this.updateLabel();
   }
@@ -776,9 +812,12 @@ export class FieldScene extends Phaser.Scene {
     this.pursuers = stepPursuers(this.pursuers, this.sightings, this.runTime, dt, {
       reactionTime: feel.tackling.pursuitReactionTime,
       leadTime: feel.tackling.pursuitLeadTime,
-      runSpeed: feel.running.runSpeed,
+      runSpeed: this.carryParams().runSpeed,
     });
-    this.pursuers.forEach((d, i) => this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 ? 0.45 : 1));
+    // Faded = on the turf after a missed tackle (rushers still held by a blocker don't fade).
+    this.pursuers.forEach((d, i) =>
+      this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 && i < this.blockedRushersFrom ? 0.45 : 1),
+    );
     this.cameraFocus = { x: this.carrier.pos.x + feel.camera.leadYards, y: this.carrier.pos.y };
 
     if (this.runTime < feel.tackling.catchGraceTime) {
@@ -819,11 +858,12 @@ export class FieldScene extends Phaser.Scene {
     } else if (how === 'tackled') {
       this.hitPauseLeft = feel.juice.hitPauseTime; // tiny freeze-frame, then shake
       shake(yards >= feel.juice.bigGainYards ? feel.juice.bigHitShakeScale : 1);
-      this.showBanner('TACKLED');
+      // A scrambling QB brought down behind the line is a sack.
+      this.showBanner(this.qbRun && c.x < this.match.ballX ? 'SACKED' : 'TACKLED');
     } else {
       this.showBanner('OUT OF BOUNDS');
     }
-    this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, '#ffd166');
+    this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, yards < 0 ? '#ff8a8a' : '#ffd166');
     this.recordPlay(how === 'touchdown' ? { kind: 'touchdown' } : { kind: 'spot', x: c.x });
     this.scheduleReset();
   }
@@ -887,6 +927,8 @@ export class FieldScene extends Phaser.Scene {
     this.queuedTarget = null;
     this.bulletAim = false;
     this.bulletThrow = false;
+    this.runAim = false;
+    this.qbRun = false;
     this.aimPointerId = null;
     this.aimDrag = null;
     this.underPressure = false;
@@ -1020,11 +1062,15 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'run') {
-      this.label.setText('RUN! Drag up/down to steer · quick flick = juke');
+      this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag up/down to steer · quick flick = juke`);
       return;
     }
     if (this.state === 'return') {
       this.label.setText('Interception return');
+      return;
+    }
+    if (this.aimPointerId !== null && this.runAim) {
+      this.label.setText('Release to RUN with the QB · aim forward again to pass');
       return;
     }
     if (this.aimPointerId !== null) {
@@ -1066,6 +1112,22 @@ export class FieldScene extends Phaser.Scene {
     const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - this.qbPos.x, target.y - this.qbPos.y) / 1.5)));
     for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
     this.drawLandingMarker(target, 1, bullet);
+  }
+
+  /** Scramble preview: a chunky green arrow from the QB straight upfield, with RUN on it. */
+  private drawRunPreview() {
+    const g = this.aimG;
+    g.clear();
+    const { x, y } = this.qbPos;
+    const len = 6;
+    g.fillStyle(COLORS.routeOutline, 0.9);
+    g.fillRect(x + 0.6, y - 0.55, len, 1.1);
+    g.fillTriangle(x + len + 0.3, y - 1.6, x + len + 0.3, y + 1.6, x + len + 2.6, y);
+    g.fillStyle(COLORS.run, 1);
+    g.fillRect(x + 0.8, y - 0.3, len - 0.2, 0.6);
+    g.fillTriangle(x + len + 0.6, y - 1.15, x + len + 0.6, y + 1.15, x + len + 2.1, y);
+    g.lineStyle(0.22, COLORS.run, 1);
+    g.strokeCircle(x, y, 1.3);
   }
 
   /** Landing marker; its circle is the catch zone (smaller for a bullet). */

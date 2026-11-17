@@ -85,6 +85,13 @@ export const feel = {
     /** A drag shorter than this (seconds) counts as a flick = juke. */
     jukeFlickTime: 0.25,
   },
+  /** QB scramble: aim behind the QB and release to tuck the ball and run. */
+  scramble: {
+    /** Aiming within this many degrees of straight back counts as "run" (90 = anything behind him). */
+    runAimAngle: 60,
+    /** QB's running speed (slower than a receiver's runSpeed; later: his speed rating). */
+    qbRunSpeed: 6.5,
+  },
   tackling: {
     /** A defender this close can try to tackle. */
     tackleReachYards: 1.1,

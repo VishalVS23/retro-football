@@ -9,6 +9,7 @@ import {
   clampDistance,
   flightTime,
   isCatch,
+  isRunAim,
   makeThrow,
 } from './throw';
 
@@ -123,5 +124,26 @@ describe('bullet pass', () => {
     const t = clampDistance(from, { x: 30, y: 60 }, 25);
     expect(t).toEqual({ x: 30, y: 45 });
     expect(clampDistance(from, to, 25)).toEqual(to); // short enough: unchanged
+  });
+});
+
+describe('QB scramble aim', () => {
+  const qb = { x: 30, y: 26 };
+
+  it('aiming straight back (or close to it) means run', () => {
+    expect(isRunAim(qb, { x: 20, y: 26 }, 60)).toBe(true);
+    expect(isRunAim(qb, { x: 25, y: 30 }, 60)).toBe(true); // ~39 degrees off straight back
+  });
+
+  it('aiming forward or sideways is a normal throw', () => {
+    expect(isRunAim(qb, { x: 45, y: 20 }, 60)).toBe(false);
+    expect(isRunAim(qb, { x: 30, y: 40 }, 60)).toBe(false); // straight sideways
+    expect(isRunAim(qb, { x: 29, y: 40 }, 60)).toBe(false); // slightly back but mostly sideways
+  });
+
+  it('the angle setting widens or narrows the run zone', () => {
+    const backAndSide = { x: 27, y: 32 }; // ~63 degrees off straight back
+    expect(isRunAim(qb, backAndSide, 60)).toBe(false);
+    expect(isRunAim(qb, backAndSide, 90)).toBe(true);
   });
 });

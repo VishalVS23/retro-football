@@ -65,6 +65,17 @@ export function aimTarget(from: Vec, dragX: number, dragY: number, screenHeight:
   };
 }
 
+/**
+ * QB scramble: aiming BEHIND the QB means "tuck it and run" (a backward pass would be useless).
+ * True when the aim points within `maxAngleDeg` of straight back (toward our own end zone).
+ */
+export function isRunAim(from: Vec, target: Vec, maxAngleDeg: number): boolean {
+  const back = from.x - target.x; // how far behind him the aim points
+  if (back <= 0) return false;
+  const angle = (Math.atan2(Math.abs(target.y - from.y), back) * 180) / Math.PI;
+  return angle <= maxAngleDeg;
+}
+
 export interface Throw {
   from: Vec;
   to: Vec;
