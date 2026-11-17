@@ -118,6 +118,16 @@ export const feel = {
     /** A drag shorter than this (seconds) counts as a flick = juke. */
     jukeFlickTime: 0.25,
   },
+  /** Going down on your own: flick FORWARD while running (D on a keyboard). */
+  dive: {
+    /** Dive length: minYards just after a juke, up to maxYards at full speed. */
+    minYards: 1,
+    maxYards: 3,
+    /** How long the dive takes (nobody can tackle him during it). */
+    time: 0.3,
+    /** A scrambling QB slides feet-first instead: no extra yards, this long to go down. */
+    qbSlideTime: 0.3,
+  },
   /** Teammates without the ball once someone has it (after a catch, handoff or scramble). */
   teammates: {
     /** Seconds to pull up out of his route. */

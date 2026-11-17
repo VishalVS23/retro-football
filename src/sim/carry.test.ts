@@ -3,6 +3,10 @@ import {
   GOAL_LINE_X,
   OWN_GOAL_LINE_X,
   checkTackles,
+  diveYards,
+  startChase,
+  startDive,
+  stepChase,
   evadeSteer,
   playEnd,
   remember,
@@ -12,6 +16,7 @@ import {
   stepPursuers,
   tryJuke,
   type Carrier,
+  type ChaseState,
   type Pursuer,
   type Sightings,
 } from './carry';
@@ -185,5 +190,50 @@ describe('teammates without the ball', () => {
     for (let i = 0; i < 60 * 6; i++) t = stepTrailer(t, carrier, 1 + i * dt, dt, p);
     expect(t.pos.x).toBeCloseTo(47, 0); // 3 yd behind him
     expect(t.pos.y).toBeCloseTo(17, 0); // no more than 8 yd to the side
+  });
+});
+
+describe('going down on his own (dive / QB slide)', () => {
+  const costly = { ...carry, jukeForwardRatio: 0.8, jukeRecoverTime: 0.2 };
+  const dive = { minYards: 1, maxYards: 3, time: 0.3 };
+  const chase = {
+    carry: costly,
+    pursuit: { reactionTime: 0.2, leadTime: 0.35 },
+    tackle: { ...tackle, brokenTackleChance: 0 },
+    graceTime: 0,
+    dirX: 1 as const,
+  };
+  const diveUntilEnd = (s: ChaseState) => {
+    for (let i = 0; i < 120; i++) {
+      const step = stepChase(s, 0, dt, chase, () => 0.99);
+      s = step.state;
+      if (step.end) return { s, end: step.end };
+    }
+    return { s, end: null };
+  };
+
+  it('dives further at full speed than just after a juke', () => {
+    const full = startCarrier({ x: 40, y: 20 });
+    expect(diveYards(full, costly, dive)).toBeCloseTo(3);
+    expect(diveYards(tryJuke(full, 1, costly), costly, dive)).toBeCloseTo(1);
+  });
+
+  it('goes down at the dive spot, and nobody can tackle him on the way', () => {
+    // A defender right on top of him would tackle him on the next frame without the dive.
+    const s = startDive(startChase({ x: 40, y: 20 }, [{ pos: { x: 40.5, y: 20 }, speed: 7, stunned: 0 }]), costly, dive);
+    const r = diveUntilEnd(s);
+    expect(r.end).toBe('down');
+    expect(r.s.carrier.pos.x).toBeCloseTo(43);
+  });
+
+  it('a QB slide (0 yards) goes down on the spot', () => {
+    const r = diveUntilEnd(startDive(startChase({ x: 40, y: 20 }, []), costly, { minYards: 0, maxYards: 0, time: 0.3 }));
+    expect(r.end).toBe('down');
+    expect(r.s.carrier.pos.x).toBeCloseTo(40);
+  });
+
+  it('diving across the goal line is a touchdown', () => {
+    const r = diveUntilEnd(startDive(startChase({ x: GOAL_LINE_X - 2, y: 20 }, []), costly, dive));
+    expect(r.end).toBe('touchdown');
   });
 });

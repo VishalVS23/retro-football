@@ -55,23 +55,30 @@ export function tryJuke(c: Carrier, dir: number, p: CarryParams): Carrier {
   return { ...c, jukeLeft: p.jukeTime, jukeDir: Math.sign(dir), cooldown: p.jukeTime + p.jukeCooldown, recover: p.jukeRecoverTime ?? 0 };
 }
 
+/**
+ * His forward speed right now as a fraction of full speed: a juke costs speed (slow during it,
+ * then back up to full speed over jukeRecoverTime).
+ */
+export function forwardRatio(c: Carrier, p: CarryParams): number {
+  const slowest = p.jukeForwardRatio ?? 1;
+  if (c.jukeLeft > 0) return slowest;
+  const total = p.jukeRecoverTime ?? 0;
+  const recover = c.recover ?? 0;
+  return recover > 0 && total > 0 ? 1 - (1 - slowest) * (recover / total) : 1;
+}
+
 /** `steer` is -1 (up) .. +1 (down) from the player's thumb (or the returner's AI). */
 export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParams, dirX: 1 | -1 = 1): Carrier {
   let vy: number;
   let jukeLeft = c.jukeLeft;
   let recover = c.recover ?? 0;
-  // A juke costs forward speed: slow during it, then back up to full speed over jukeRecoverTime.
-  const slowest = p.jukeForwardRatio ?? 1;
-  let forward = 1;
+  const forward = forwardRatio(c, p);
   if (jukeLeft > 0) {
     vy = c.jukeDir * p.jukeSpeed;
     jukeLeft = Math.max(0, jukeLeft - dt);
-    forward = slowest;
   } else {
     const want = Math.max(-1, Math.min(1, steer)) * p.steerSpeed;
     vy = c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt); // eases in and out
-    const total = p.jukeRecoverTime ?? 0;
-    if (recover > 0 && total > 0) forward = 1 - (1 - slowest) * (recover / total);
     recover = Math.max(0, recover - dt);
   }
   return {
@@ -239,6 +246,39 @@ export interface ChaseState {
   seen: Sightings;
   /** Seconds since he got the ball. */
   t: number;
+  /** He's going down on his own (dive / QB slide): nobody can tackle him any more. */
+  dive?: Dive;
+}
+
+export interface Dive {
+  from: Vec;
+  to: Vec;
+  /** Seconds since the dive started, and how long it takes. */
+  t: number;
+  time: number;
+}
+
+export interface DiveParams {
+  /** Dive length from a slow start (just after a juke) up to full speed. 0 and 0 = QB slide. */
+  minYards: number;
+  maxYards: number;
+  /** How long the dive (or slide) takes. */
+  time: number;
+}
+
+/** How far he dives: longer the faster he's running (full speed = maxYards). */
+export function diveYards(c: Carrier, p: CarryParams, d: DiveParams): number {
+  const slowest = p.jukeForwardRatio ?? 1;
+  const u = slowest >= 1 ? 1 : Math.max(0, Math.min(1, (forwardRatio(c, p) - slowest) / (1 - slowest)));
+  return d.minYards + (d.maxYards - d.minYards) * u;
+}
+
+/** Starts a dive (or slide) straight ahead. Already diving: no change. */
+export function startDive(s: ChaseState, p: CarryParams, d: DiveParams, dirX: 1 | -1 = 1): ChaseState {
+  if (s.dive) return s;
+  const from = { ...s.carrier.pos };
+  const to = { x: from.x + dirX * diveYards(s.carrier, p, d), y: from.y };
+  return { ...s, dive: { from, to, t: 0, time: Math.max(0.01, d.time) } };
 }
 
 export interface ChaseParams {
@@ -254,8 +294,8 @@ export interface ChaseStep {
   state: ChaseState;
   /** Someone missed a tackle this frame. */
   missed: 'broken' | 'juked' | null;
-  /** How the run ended this frame, or null if it goes on. */
-  end: 'tackled' | 'out' | 'touchdown' | null;
+  /** How the run ended this frame, or null if it goes on. 'down' = he went down on his own. */
+  end: 'tackled' | 'out' | 'touchdown' | 'down' | null;
 }
 
 export function startChase(at: Vec, pursuers: Pursuer[]): ChaseState {
@@ -269,6 +309,19 @@ export function startChase(at: Vec, pursuers: Pursuer[]): ChaseState {
  */
 export function stepChase(s: ChaseState, steer: number, dt: number, p: ChaseParams, roll: () => number): ChaseStep {
   const t = s.t + dt;
+  if (s.dive) {
+    // Diving: he glides to his spot (easing out); defenders keep coming but can't hit him.
+    const dive = { ...s.dive, t: Math.min(s.dive.time, s.dive.t + dt) };
+    const u = dive.t / dive.time;
+    const ease = 1 - (1 - u) * (1 - u);
+    const pos = { x: dive.from.x + (dive.to.x - dive.from.x) * ease, y: dive.from.y };
+    const carrier = { ...s.carrier, pos, vy: 0, jukeLeft: 0 };
+    const seen = remember(s.seen, t, carrier, 1);
+    const pursuers = stepPursuers(s.pursuers, seen, t, dt, { ...p.pursuit, runSpeed: 0, dirX: p.dirX });
+    const state = { carrier, pursuers, seen, t, dive };
+    const scored = playEnd(pos, p.dirX) === 'touchdown';
+    return { state, missed: null, end: scored ? 'touchdown' : u >= 1 ? 'down' : null };
+  }
   const carrier = stepCarrier(s.carrier, steer, dt, p.carry, p.dirX);
   const seen = remember(s.seen, t, carrier, 1);
   let pursuers = stepPursuers(s.pursuers, seen, t, dt, { ...p.pursuit, runSpeed: p.carry.runSpeed, dirX: p.dirX });

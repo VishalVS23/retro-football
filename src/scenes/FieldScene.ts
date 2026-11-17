@@ -34,6 +34,7 @@ import {
   startChase,
   stepChase,
   tryJuke,
+  startDive,
   stepTrailer,
   type ChaseParams,
   type ChaseState,
@@ -258,6 +259,8 @@ export class FieldScene extends Phaser.Scene {
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => this.toggleBullet());
+    // D while running: dive (QB: slide), like a forward flick on the phone.
+    this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.D).on('down', () => this.goDown());
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
@@ -389,9 +392,12 @@ export class FieldScene extends Phaser.Scene {
       this.steer = 0;
       const dy = p.y - t.y;
       const quick = (this.time.now - t.time) / 1000 <= feel.running.jukeFlickTime;
-      if (this.state === 'run' && quick && Math.abs(dy) >= JUKE_MIN_PX && Math.abs(dy) > Math.abs(p.x - t.x)) {
+      const dx = p.x - t.x;
+      if (this.state === 'run' && quick && Math.abs(dy) >= JUKE_MIN_PX && Math.abs(dy) > Math.abs(dx)) {
         this.chase = { ...this.chase, carrier: tryJuke(this.chase.carrier, Math.sign(dy), this.carryParams()) };
         this.steered = true;
+      } else if (this.state === 'run' && quick && dx >= JUKE_MIN_PX && dx > Math.abs(dy)) {
+        this.goDown(); // quick flick FORWARD (toward their end zone) = dive / slide
       }
       return;
     }
@@ -409,6 +415,23 @@ export class FieldScene extends Phaser.Scene {
     this.bulletThrow = this.bulletAim;
     if (this.playTime < feel.throw.earliestRelease) this.queuedTarget = this.target;
     else this.startWindup(this.target);
+  }
+
+  /** Go down on your own terms: a dive forward (1-3 yd, longer at full speed), or a QB slide. */
+  private goDown() {
+    if (this.state !== 'run' || this.chase.dive) return;
+    const d = feel.dive;
+    const params = this.qbRun ? { minYards: 0, maxYards: 0, time: d.qbSlideTime } : d;
+    this.chase = startDive(this.chase, this.carryParams(), params);
+    this.steerTouch = null;
+    this.steer = 0;
+    const dot = this.carrierDot;
+    if (dot) {
+      // Dive: stretched out flat toward the end zone. Slide: squashed low.
+      const look = this.qbRun ? { scaleX: 1.2, scaleY: 0.7 } : { scaleX: 1.6, scaleY: 0.65 };
+      this.tweens.add({ targets: dot, ...look, duration: params.time * 500, ease: 'Quad.easeOut' });
+    }
+    this.updateLabel();
   }
 
   private setRunAim(on: boolean) {
@@ -651,7 +674,7 @@ export class FieldScene extends Phaser.Scene {
     this.ret.pursuers.forEach((c, i) => this.chaserDots[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.stunned > 0 ? 0.45 : 1));
     this.cameraFocus = { x: r.x - feel.camera.leadYards, y: r.y };
     if (step.missed) this.floatText(r.x, r.y - 2, 'BROKE IT!', '#ff8a8a');
-    if (step.end) this.endReturn(step.end);
+    if (step.end) this.endReturn(step.end === 'down' ? 'tackled' : step.end); // returners never dive
   }
 
   /** Numbers for one frame of a run: the carrier's running, the chase, and the tackles. */
@@ -927,7 +950,7 @@ export class FieldScene extends Phaser.Scene {
     if (step.end) this.endRun(step.end);
   }
 
-  private endRun(how: 'tackled' | 'out' | 'touchdown') {
+  private endRun(how: 'tackled' | 'out' | 'touchdown' | 'down') {
     this.state = 'result';
     this.steerTouch = null;
     this.steer = 0;
@@ -943,6 +966,8 @@ export class FieldScene extends Phaser.Scene {
       shake(yards >= feel.juice.bigGainYards ? feel.juice.bigHitShakeScale : 1);
       // A scrambling QB brought down behind the line is a sack; a run stopped for no gain is stuffed.
       this.showBanner(this.qbRun && c.x < this.match.ballX ? 'SACKED' : this.calledPlay.run && yards <= 0 ? 'STUFFED!' : 'TACKLED');
+    } else if (how === 'down') {
+      this.showBanner(this.qbRun ? 'SLIDE' : 'DOWN'); // went down on his own: in bounds, clock keeps running
     } else {
       this.showBanner('OUT OF BOUNDS');
     }
@@ -1216,7 +1241,8 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'run') {
-      this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag up/down to steer · quick flick = juke`);
+      if (this.chase.dive) this.label.setText(this.qbRun ? 'Sliding…' : 'Diving…');
+      else this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag = steer · flick up/down = juke · flick → = ${this.qbRun ? 'slide' : 'dive'}`);
       return;
     }
     if (this.state === 'live' && this.calledPlay.run) {
