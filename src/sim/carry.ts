@@ -281,3 +281,47 @@ export function stepChase(s: ChaseState, steer: number, dt: number, p: ChasePara
   }
   return { state: { carrier, pursuers, seen, t }, missed, end: playEnd(carrier.pos, p.dirX) };
 }
+
+// ---------- Teammates once someone else has the ball ----------
+
+/** A teammate who isn't carrying the ball (he stops his route and follows the play). */
+export interface Trailer {
+  pos: Vec;
+  speed: number;
+  /** Direction he's moving (unit vector). */
+  dir: Vec;
+}
+
+export interface TrailParams {
+  /** Seconds to pull up from his route speed to a stop. */
+  stopTime: number;
+  /** Speed he jogs after the play at. */
+  jogSpeed: number;
+  /** How quickly he gets up to that jog, yards per second per second. */
+  jogAcceleration: number;
+  /** He stays this far behind the ball carrier (never ahead of him)... */
+  trailYards: number;
+  /** ...and at most this far off to the side of him. */
+  maxSideYards: number;
+}
+
+/**
+ * One frame for a teammate once someone else has the ball (`sinceBall` seconds ago): first he
+ * pulls up out of his route, then he jogs after the play, behind and to the side of the carrier.
+ * `dirX` = the way the carrier is running (+1 toward their end zone).
+ */
+export function stepTrailer(t: Trailer, carrier: Vec, sinceBall: number, dt: number, p: TrailParams, dirX: 1 | -1 = 1): Trailer {
+  if (sinceBall < p.stopTime) {
+    // Pulling up: lose speed evenly over stopTime, still heading the way he was.
+    const speed = Math.max(0, t.speed - (t.speed / Math.max(dt, p.stopTime - sinceBall)) * dt);
+    return { ...t, speed, pos: { x: t.pos.x + t.dir.x * speed * dt, y: t.pos.y + t.dir.y * speed * dt } };
+  }
+  const side = Math.max(-p.maxSideYards, Math.min(p.maxSideYards, t.pos.y - carrier.y));
+  const target = { x: carrier.x - dirX * p.trailYards, y: carrier.y + side };
+  const gap = dist(t.pos, target);
+  if (gap < 0.3) return { ...t, speed: 0 };
+  const dir = { x: (target.x - t.pos.x) / gap, y: (target.y - t.pos.y) / gap };
+  const speed = Math.min(p.jogSpeed, t.speed + p.jogAcceleration * dt);
+  const step = Math.min(gap, speed * dt);
+  return { pos: { x: t.pos.x + dir.x * step, y: t.pos.y + dir.y * step }, speed, dir };
+}

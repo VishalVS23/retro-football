@@ -34,9 +34,11 @@ import {
   startChase,
   stepChase,
   tryJuke,
+  stepTrailer,
   type ChaseParams,
   type ChaseState,
   type Pursuer,
+  type Trailer,
 } from '../sim/carry';
 import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
@@ -100,6 +102,7 @@ export class FieldScene extends Phaser.Scene {
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
+  private trailers: Trailer[] = []; // receivers / RB without the ball: they pull up and follow the play
   private steer = 0;
   private steered = false; // you've steered the RB yourself (his lane steering switches off)
   private steerTouch: { id: number; x: number; y: number; time: number } | null = null;
@@ -832,6 +835,8 @@ export class FieldScene extends Phaser.Scene {
       ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 })),
     ]);
     this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
+    // Everyone else stops his route and follows the play (the carrier's own entry is ignored).
+    this.trailers = this.receivers.map((r) => ({ pos: { ...r.runner.pos }, speed: r.runner.speed, dir: { ...r.runner.dir } }));
     this.updateLabel();
   }
 
@@ -849,10 +854,12 @@ export class FieldScene extends Phaser.Scene {
     this.chase = step.state;
     const c = this.chase.carrier.pos;
     this.carrierDot?.setPosition(c.x, c.y);
-    // The other receivers just keep running their routes for now (downfield blocking comes later).
-    this.stepRoutes(dt);
-    this.receivers.forEach((r, i) => {
-      if (i !== this.targetIndex) this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y);
+    // Teammates without the ball pull up and jog after the play (downfield blocking comes later).
+    this.trailers = this.trailers.map((t, i) => {
+      if (i === this.targetIndex) return t;
+      const next = stepTrailer(t, c, this.chase.t, dt, feel.teammates);
+      this.wrDots[i].setPosition(next.pos.x, next.pos.y);
+      return next;
     });
     // Faded = on the turf after a missed tackle. A rusher still held keeps his blocker on him.
     const firstRusher = this.chase.pursuers.length - this.rushers.length;

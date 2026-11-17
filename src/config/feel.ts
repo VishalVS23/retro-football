@@ -118,6 +118,17 @@ export const feel = {
     /** A drag shorter than this (seconds) counts as a flick = juke. */
     jukeFlickTime: 0.25,
   },
+  /** Teammates without the ball once someone has it (after a catch, handoff or scramble). */
+  teammates: {
+    /** Seconds to pull up out of his route. */
+    stopTime: 0.5,
+    /** Then he jogs after the play at this speed... */
+    jogSpeed: 4.5,
+    jogAcceleration: 8,
+    /** ...staying this far behind the ball carrier, and at most this far to the side. */
+    trailYards: 3,
+    maxSideYards: 8,
+  },
   /** QB scramble: aim behind the QB and release to tuck the ball and run. */
   scramble: {
     /** Aiming within this many degrees of straight back counts as "run" (90 = anything behind him). */

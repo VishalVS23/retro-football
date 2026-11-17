@@ -6,6 +6,7 @@ import {
   evadeSteer,
   playEnd,
   remember,
+  stepTrailer,
   startCarrier,
   stepCarrier,
   stepPursuers,
@@ -161,5 +162,28 @@ describe('interception returns (running the other way)', () => {
   it('turns back in near a sideline', () => {
     expect(evadeSteer({ x: 60, y: 1 }, [], -1, 8)).toBeGreaterThan(0.5);
     expect(evadeSteer({ x: 60, y: 52.5 }, [], -1, 8)).toBeLessThan(-0.5);
+  });
+});
+
+describe('teammates without the ball', () => {
+  const p = { stopTime: 0.5, jogSpeed: 4.5, jogAcceleration: 8, trailYards: 3, maxSideYards: 8 };
+  const carrier = { x: 50, y: 25 };
+
+  it('pull up out of their route over stopTime', () => {
+    let t = { pos: { x: 70, y: 10 }, speed: 8, dir: { x: 1, y: 0 } };
+    let time = 0;
+    for (let i = 0; i < 30; i++) {
+      t = stepTrailer(t, carrier, time, dt, p);
+      time += dt;
+    }
+    expect(t.speed).toBeLessThan(0.5);
+    expect(t.pos.x - 70).toBeLessThan(8 * 0.5); // slowed down, didn't keep sprinting
+  });
+
+  it('then jog after the play: behind the carrier, never running off ahead', () => {
+    let t = { pos: { x: 70, y: 10 }, speed: 0, dir: { x: 1, y: 0 } };
+    for (let i = 0; i < 60 * 6; i++) t = stepTrailer(t, carrier, 1 + i * dt, dt, p);
+    expect(t.pos.x).toBeCloseTo(47, 0); // 3 yd behind him
+    expect(t.pos.y).toBeCloseTo(17, 0); // no more than 8 yd to the side
   });
 });
