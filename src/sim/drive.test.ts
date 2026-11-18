@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { NEW_DRIVE_X, OPP_GOAL_X, OWN_GOAL_X, TOUCHBACK_X, TRY_X, applyKick, applyPlay, downText, newGame, spotText, type GameState } from './drive';
+import {
+  KICKOFF_X,
+  NEW_DRIVE_X,
+  OPP_GOAL_X,
+  OWN_GOAL_X,
+  SAFETY_KICK_X,
+  TOUCHBACK_X,
+  TRY_X,
+  applyKick,
+  applyOppDrive,
+  applyPlay,
+  downText,
+  newGame,
+  secondHalf,
+  spotText,
+  type GameState,
+} from './drive';
 
 const at = (ballX: number, down: GameState['down'], firstDownX: number, us = 0, them = 0, oppStartX: number | null = null): GameState => ({
   ballX,
@@ -68,7 +84,8 @@ describe('drive rules', () => {
   });
 
   const tryAt = (us = 6, them = 0): GameState => ({ ...at(TRY_X, 1, OPP_GOAL_X, us, them), tryPending: true });
-  const nextDrive = (us: number, them: number) => at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, us, them);
+  // After our score they take over at their 25.
+  const nextDrive = (us: number, them: number) => at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, us, them, KICKOFF_X);
 
   it('2-point try: into the end zone = 2 points, then a new drive', () => {
     expect(applyPlay(tryAt(), { kind: 'touchdown' })).toEqual({ state: nextDrive(8, 0), event: 'twoPointGood' });
@@ -118,7 +135,22 @@ describe('drive rules', () => {
     const { state, event } = applyPlay(at(12, 2, 22), { kind: 'spot', x: 8 });
     expect(event).toBe('safety');
     expect(state.them).toBe(2);
-    expect(state.ballX).toBe(NEW_DRIVE_X);
+    expect(state.oppStartX).toBe(SAFETY_KICK_X); // we free-kick to them
+  });
+
+  it('they get the ball after our score; we get it at our 25 after theirs', () => {
+    expect(KICKOFF_X).toBe(OPP_GOAL_X - 25);
+    expect(applyPlay(at(90, 1, 100), { kind: 'pickSix' }).state).toMatchObject({ ballX: NEW_DRIVE_X, them: 6, oppStartX: null });
+  });
+
+  it('second half: they get the ball at their 25', () => {
+    expect(secondHalf(at(60, 3, 64, 7, 3)).oppStartX).toBe(KICKOFF_X);
+  });
+
+  it('after their drive: their points added, our ball 1st & 10 where it ended', () => {
+    const s = at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 7, 0, KICKOFF_X);
+    expect(applyOppDrive(s, { points: 7, ourStartX: NEW_DRIVE_X })).toEqual(at(NEW_DRIVE_X, 1, NEW_DRIVE_X + 10, 7, 7));
+    expect(applyOppDrive(s, { points: 0, ourStartX: 105 })).toEqual(at(105, 1, OPP_GOAL_X, 7, 0)); // 1st & Goal
   });
 
   it('never spots the ball on a goal line', () => {

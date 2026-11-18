@@ -43,10 +43,14 @@ import {
 } from '../sim/carry';
 import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
+import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
+import { simulateOppDrive } from '../sim/oppDrive';
 import {
   HOLD_YARDS,
   OPP_GOAL_X,
   applyKick,
+  applyOppDrive,
+  secondHalf,
   applyPlay,
   applyMuffedPunt,
   applyPunt,
@@ -54,7 +58,6 @@ import {
   downText,
   newGame,
   spotText,
-  startDrive,
   type DriveEvent,
   type GameState,
   type PlayOutcome,
@@ -79,6 +82,7 @@ import {
   endPlay,
   newClock,
   playStopsClock,
+  runOff,
   tickPlay,
   type ClockEvent,
   type ClockState,
@@ -128,7 +132,7 @@ interface Receiver {
   coverage: Coverage;
 }
 
-type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'kickAim' | 'kickFlight' | 'result';
+type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'kickAim' | 'kickFlight' | 'result' | 'oppDrive';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
@@ -304,6 +308,7 @@ export class FieldScene extends Phaser.Scene {
       plays.remove();
       meter.remove();
       closePlayCall();
+      closeDriveSummary();
     });
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
@@ -394,7 +399,7 @@ export class FieldScene extends Phaser.Scene {
       this.kick(); // any tap kicks
       return;
     }
-    if (this.state === 'return' || this.state === 'result' || this.state === 'calling' || this.state === 'kickFlight') return;
+    if (this.state === 'return' || this.state === 'result' || this.state === 'calling' || this.state === 'kickFlight' || this.state === 'oppDrive') return;
     if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
       this.toggleBullet(); // other thumb taps while aiming
       return;
@@ -1330,7 +1335,45 @@ export class FieldScene extends Phaser.Scene {
     const finish = this.finishBreak;
     this.finishBreak = null;
     finish?.();
+    // Our possession is over (score, punt, turnover, second-half kickoff): their drive comes first.
+    if (this.match.oppStartX !== null) {
+      this.runOppDrive(this.match.oppStartX);
+      return;
+    }
     this.resetPlay();
+  }
+
+  /**
+   * A simulated CPU drive: dice-sim it, take its time off the clock, then show the summary.
+   * CONTINUE (or a few seconds) moves on: any clock break (END OF Q1 / HALFTIME / FINAL), then our play.
+   */
+  private runOppDrive(startX: number) {
+    this.state = 'oppDrive';
+    const c = this.clock;
+    const drive = simulateOppDrive(
+      startX,
+      { quarter: c.quarter, timeLeft: c.timeLeft, quarterLength: feel.clock.quarterLength, us: this.match.us, them: this.match.them },
+      feel.oppDrive,
+      getRngOrFallback(),
+    );
+    const lastQuarter = c.quarter === 4;
+    const r = runOff(c, drive.seconds, feel.clock);
+    this.setClock(r.clock, r.event);
+    this.pendingBreak = r.event;
+    this.match = applyOppDrive(this.match, drive);
+    this.updateScoreboard();
+    this.updateLabel();
+    let done = false;
+    const next = () => {
+      if (done) return;
+      done = true;
+      this.resetTimer?.remove();
+      this.resetTimer = null;
+      closeDriveSummary();
+      this.afterPlay();
+    };
+    openDriveSummary({ drive, us: this.match.us, them: this.match.them, lastQuarter, onContinue: next });
+    this.resetTimer = this.time.delayedCall(feel.oppDrive.summaryTime * 1000, next);
   }
 
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
@@ -1344,14 +1387,14 @@ export class FieldScene extends Phaser.Scene {
     }[ev];
     const hold = ev === 'warning' ? feel.pacing.bannerTime : feel.pacing.breakBannerTime;
     this.showBanner(text, hold);
-    // Until kickoffs and opponent drives exist: the second half starts at our 25; FINAL starts a new game.
+    // The second half starts with their drive (we had the ball first); FINAL starts a new game.
     const next = this.nextClock;
     this.nextClock = null;
     if (next) this.finishBreak = () => (this.clock = next);
     if (ev === 'halftime') {
       this.finishBreak = () => {
         this.clock = next ?? this.clock;
-        this.match = startDrive(this.match);
+        this.match = secondHalf(this.match);
       };
     }
     if (ev === 'final') {
@@ -1602,6 +1645,10 @@ export class FieldScene extends Phaser.Scene {
     }
     if (this.state === 'return') {
       this.label.setText('Interception return');
+      return;
+    }
+    if (this.state === 'oppDrive') {
+      this.label.setText('CPU drive');
       return;
     }
     if (this.aimPointerId !== null && this.runAim) {

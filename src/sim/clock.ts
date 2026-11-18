@@ -94,6 +94,22 @@ export function callTimeout(c: ClockState): ClockState {
   return { ...c, running: false, timeouts: c.timeouts - 1 };
 }
 
+/**
+ * A simulated opponent drive used `seconds`. The clock is stopped after it (change of possession).
+ * In Q1/Q3 the drive can carry on into the next quarter (event 'endQuarter', the new quarter
+ * already has the rest taken off); in Q2/Q4 it ends the half or the game at 0:00. A drive that
+ * passes the late-quarter warning uses it up (no warning on our next snap).
+ */
+export function runOff(c: ClockState, seconds: number, r: ClockRules): { clock: ClockState; event: ClockEvent } {
+  const left = c.timeLeft - Math.max(0, seconds);
+  const pastWarning = (q: Quarter, t: number) => hasWarning(q) && t <= r.warningTime;
+  if (left > 0) return { clock: { ...c, timeLeft: left, running: false, warned: c.warned || pastWarning(c.quarter, left) }, event: null };
+  const end = endOfQuarter({ ...c, timeLeft: 0 }, r);
+  if (end.event !== 'endQuarter') return end;
+  const t = Math.max(1, end.clock.timeLeft + left);
+  return { clock: { ...end.clock, timeLeft: t, warned: pastWarning(end.clock.quarter, t) }, event: 'endQuarter' };
+}
+
 function endOfQuarter(c: ClockState, r: ClockRules): { clock: ClockState; event: ClockEvent } {
   if (c.quarter === 4) return { clock: { ...c, timeLeft: 0, running: false }, event: 'final' };
   const quarter = (c.quarter + 1) as Quarter;

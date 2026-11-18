@@ -8,8 +8,12 @@ import { END_ZONE_DEPTH, FIELD_LENGTH } from './field';
 export const OWN_GOAL_X = END_ZONE_DEPTH; // 10
 export const OPP_GOAL_X = END_ZONE_DEPTH + FIELD_LENGTH; // 110
 export const YARDS_FOR_FIRST_DOWN = 10;
-/** Where a new drive starts until kickoffs and opponent drives exist (our 25). */
+/** Where our drive starts after they score (no kickoffs yet: always a touchback at our 25). */
 export const NEW_DRIVE_X = OWN_GOAL_X + 25;
+/** After we score they take over at their 25 (the same kickoff touchback). */
+export const KICKOFF_X = OPP_GOAL_X - 25;
+/** After a safety we free-kick to them from our 20: they start at their 35. */
+export const SAFETY_KICK_X = OPP_GOAL_X - 35;
 export const TD_POINTS = 6;
 export const SAFETY_POINTS = 2;
 export const FIELD_GOAL_POINTS = 3;
@@ -31,8 +35,8 @@ export interface GameState {
   us: number; // our score
   them: number; // their score
   /**
-   * Where the opponent takes over after our last turnover (x, our coordinates), or null.
-   * Opponent drives (Stage 2 step 6) start here; until then our next drive starts at our 25.
+   * Our possession is over: the opponent takes over here (x, our coordinates) for a simulated
+   * drive (oppDrive.ts). null = we have the ball. ballX/down are then only placeholders.
    */
   oppStartX: number | null;
   /** We just scored a touchdown: the next snap is the try (kick the extra point or go for 2). */
@@ -96,7 +100,7 @@ export function applyPlay(s: GameState, o: PlayOutcome): { state: GameState; eve
   if (o.kind === 'spot') {
     // Down in our own end zone (behind the goal line) = safety.
     if (o.x < OWN_GOAL_X) {
-      return next({ ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + SAFETY_POINTS, oppStartX: null }, 'safety');
+      return next({ ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + SAFETY_POINTS, oppStartX: SAFETY_KICK_X }, 'safety');
     }
     if (o.x >= OPP_GOAL_X) {
       return applyPlay(s, { kind: 'touchdown' });
@@ -112,7 +116,7 @@ export function applyPlay(s: GameState, o: PlayOutcome): { state: GameState; eve
 
 /** A 2-point try run as a play: into the end zone = 2 points; anything else and it's over. */
 function applyTryPlay(s: GameState, o: PlayOutcome): { state: GameState; event: DriveEvent } {
-  const after: GameState = { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: null, tryPending: false };
+  const after: GameState = { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: KICKOFF_X, tryPending: false };
   const scored = o.kind === 'touchdown' || (o.kind === 'spot' && o.x >= OPP_GOAL_X);
   if (scored) return { state: { ...after, us: s.us + TWO_POINT_POINTS }, event: 'twoPointGood' };
   // Picked off and returned all the way: the defense scores 2.
@@ -122,11 +126,11 @@ function applyTryPlay(s: GameState, o: PlayOutcome): { state: GameState; event: 
 
 /**
  * A field goal or extra point. Made: points, and the drive is over. A missed field goal gives
- * them the ball at the spot of the kick (or their 20 if that's further from their goal).
- * Until kickoffs and opponent drives exist, our next drive starts at our 25 either way.
+ * them the ball at the spot of the kick (or their 20 if that's further from their goal); after any
+ * score they start at their 25.
  */
 export function applyKick(s: GameState, kind: 'fieldGoal' | 'extraPoint', good: boolean): { state: GameState; event: DriveEvent } {
-  const after: GameState = { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: null, tryPending: false };
+  const after: GameState = { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: KICKOFF_X, tryPending: false };
   if (kind === 'extraPoint') {
     return good
       ? { state: { ...after, us: s.us + EXTRA_POINT_POINTS }, event: 'extraPoint' }
@@ -138,7 +142,6 @@ export function applyKick(s: GameState, kind: 'fieldGoal' | 'extraPoint', good: 
 
 /**
  * A punt: they take over at `spotX` (from punting.ts: touchback, out of bounds or where it stopped).
- * Until opponent drives exist, our next drive starts at our 25.
  */
 export function applyPunt(s: GameState, spotX: number): { state: GameState; event: DriveEvent } {
   return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: spotX, tryPending: false }, event: 'punt' };
@@ -170,7 +173,17 @@ export function spotText(x: number): string {
   return fromOurGoal < 50 ? `OWN ${fromOurGoal}` : `OPP ${FIELD_LENGTH - fromOurGoal}`;
 }
 
-/** A fresh drive from our 25, score kept (second-half start until kickoffs exist). */
+/** A fresh drive from our 25, score kept. */
 export function startDrive(s: GameState): GameState {
   return { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: null, tryPending: false };
+}
+
+/** Second half: we had the ball first, so they get it to start the half (at their 25). */
+export function secondHalf(s: GameState): GameState {
+  return { ...startDrive(s), oppStartX: KICKOFF_X };
+}
+
+/** Their drive is over: add their points; our ball, 1st & 10, where it says. */
+export function applyOppDrive(s: GameState, d: { points: number; ourStartX: number }): GameState {
+  return { ...s, ...firstDownAt(d.ourStartX), them: s.them + d.points, oppStartX: null, tryPending: false };
 }

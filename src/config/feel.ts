@@ -352,6 +352,44 @@ export const feel = {
     returnTeamJogSpeed: 4,
     returnTeamGapYards: 6,
   },
+  oppDrive: {
+    /** Seconds the CPU drive summary stays up before play moves on (CONTINUE skips). */
+    summaryTime: 3.5,
+    /** 1 = average CPU offense; higher gains more yards every play (Stage 3: their ratings). */
+    strength: 1,
+    /** Share of their plays that are runs. */
+    runShare: 0.45,
+    /** Ordinary run: from a loss of runLossYards up to a gain of runMaxYards; a breakaway (bigRunChance) adds a big chunk. */
+    runLossYards: 1,
+    runMaxYards: 8,
+    bigRunChance: 0.04,
+    /** Pass attempts: incomplete, sacked, else a catch for passMinYards..passMaxYards; big plays add a chunk. */
+    incompleteChance: 0.35,
+    sackChance: 0.06,
+    sackMinYards: 5,
+    sackMaxYards: 9,
+    passMinYards: 3,
+    passMaxYards: 16,
+    bigPassChance: 0.09,
+    /** Extra yards on a breakaway run or big pass play. */
+    bigPlayMinYards: 10,
+    bigPlayMaxYards: 40,
+    /** Their turnovers: a pick per pass attempt, a lost fumble per run or catch. */
+    interceptionChance: 0.02,
+    fumbleChance: 0.008,
+    /** Game seconds per play: tackled in bounds (clock runs through the huddle) / incomplete. */
+    playSeconds: 8,
+    incompleteSeconds: 4,
+    /** Their kicker: longest try, sure-thing distance and make chances (sure / at max range). */
+    fgRangeYards: 52,
+    fgSureYards: 30,
+    fgSureChance: 0.95,
+    fgLongChance: 0.6,
+    extraPointChance: 0.95,
+    /** Their net punt, yards (after coverage and our return). */
+    puntNetMinYards: 34,
+    puntNetMaxYards: 46,
+  },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */
     quarterLength: 120,

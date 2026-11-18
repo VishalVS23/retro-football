@@ -1,0 +1,134 @@
+/* CPU drive summary: one panel over the field, same pixel UI-kit style as the play calling screen. */
+#drive-summary {
+  --ds-navy: #0d1b2a;
+  --ds-panel: #102a52;
+  --ds-border: #2f6fd6;
+  --ds-gold: #ffd166;
+  --ds-text: #f4efe1;
+  --ds-bad: #ff6b6b;
+  --ds-good: #6ee7a0;
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 16px) calc(env(safe-area-inset-bottom) + 8px)
+    calc(env(safe-area-inset-left) + 16px);
+  background: #0b1d3acc;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--ds-text);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ds-panel {
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--ds-panel);
+  border: 3px solid var(--ds-border);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--ds-navy), inset 0 0 0 2px var(--ds-navy);
+}
+
+.ds-head {
+  font-size: 10px;
+  color: var(--ds-gold);
+  letter-spacing: 1px;
+}
+.ds-stats {
+  font-size: 9px;
+  line-height: 1.6;
+}
+.ds-big {
+  font-size: 8px;
+  color: #9ec5ff;
+}
+.ds-result {
+  font-size: clamp(14px, 3.2vw, 20px);
+  line-height: 1.3;
+}
+.ds-result.bad {
+  color: var(--ds-bad);
+}
+.ds-result.good {
+  color: var(--ds-good);
+}
+.ds-sub {
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+/* Mini field: end zones at both ends, a bar from where they started to where the drive ended. */
+.ds-field {
+  position: relative;
+  height: 18px;
+  background: #2f6b4f;
+  border: 2px solid var(--ds-navy);
+}
+.ds-ez {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8.333%; /* 10 of 120 yards */
+  background: #24543e;
+}
+.ds-ez.left {
+  left: 0;
+}
+.ds-ez.right {
+  right: 0;
+}
+.ds-mid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #ffffff55;
+}
+.ds-bar {
+  position: absolute;
+  top: 5px;
+  height: 4px;
+  background: var(--ds-bad);
+}
+.ds-start,
+.ds-end {
+  position: absolute;
+  top: 2px;
+  width: 4px;
+  height: 10px;
+  margin-left: -2px;
+}
+.ds-start {
+  background: var(--ds-text);
+}
+.ds-end {
+  background: var(--ds-gold);
+}
+
+.ds-btn {
+  align-self: flex-end;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--ds-navy);
+  background: #3ddc84;
+  border: 3px solid var(--ds-navy);
+  border-radius: 3px;
+  box-shadow: 0 3px 0 var(--ds-navy);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.ds-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ds-navy);
+}
