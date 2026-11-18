@@ -62,6 +62,8 @@ export type DriveEvent =
   | 'extraPoint'
   | 'missedExtraPoint'
   | 'punt'
+  | 'puntReturnTD'
+  | 'muffedPunt'
   | null;
 
 export function newGame(): GameState {
@@ -140,6 +142,16 @@ export function applyKick(s: GameState, kind: 'fieldGoal' | 'extraPoint', good: 
  */
 export function applyPunt(s: GameState, spotX: number): { state: GameState; event: DriveEvent } {
   return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX: spotX, tryPending: false }, event: 'punt' };
+}
+
+/** Punt returned all the way: 6 to them. */
+export function applyPuntReturnTD(s: GameState): { state: GameState; event: DriveEvent } {
+  return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + TD_POINTS, oppStartX: null, tryPending: false }, event: 'puntReturnTD' };
+}
+
+/** Their returner dropped the punt and we fell on it: our ball, 1st & 10 at that spot. */
+export function applyMuffedPunt(s: GameState, spotX: number): { state: GameState; event: DriveEvent } {
+  return { state: { ...s, ...firstDownAt(spotX), oppStartX: null, tryPending: false }, event: 'muffedPunt' };
 }
 
 const ORDINAL = ['', '1st', '2nd', '3rd', '4th'];

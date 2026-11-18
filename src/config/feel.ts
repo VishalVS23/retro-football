@@ -290,8 +290,8 @@ export const feel = {
     /** Seconds for the marker to cross the bar once. */
     sweepTime: 0.85,
     /** Yards in the air: centred tap, tap at the edge of the green. */
-    centreYards: 50,
-    edgeYards: 38,
+    centreYards: 60,
+    edgeYards: 46,
     /** Sideways drift of a good punt tapped at the edge of the green, yards. */
     spreadYards: 6,
     /** Shank: yards in the air just outside the green / at the end of the bar. */
@@ -303,13 +303,54 @@ export const feel = {
     rollYards: 5,
     shankRollYards: 2,
     /** Hang time (seconds in the air) of a full punt; shorter punts hang a bit less. */
-    hangTime: 1.8,
+    hangTime: 2.8,
     /** Peak height of a full punt, yards. */
     arcHeightYards: 14,
     /** Rolling speed after landing, yards per second. */
     rollSpeed: 7,
     /** Game seconds a punt takes off the clock. */
     clockRunoff: 6,
+  },
+  puntReturn: {
+    /** Their returner waits this far past the punter (where a good punt comes down). */
+    returnerDepthYards: 57,
+    /** His speed while getting under the ball, yards per second. */
+    returnerSpeed: 6,
+    /** He can catch it if he's this close to where it comes down; otherwise it bounces. */
+    catchReachYards: 1.5,
+    /** Inside his own 10 he lets it bounce (hoping for a touchback). */
+    letBounceYards: 10,
+    /** Our nearest cover man this close when it comes down = FAIR CATCH; further off it gets less likely, never past fairCatchMaxYards. */
+    fairCatchYards: 12,
+    fairCatchMaxYards: 20,
+    /** Chance he drops a punt he tries to return (we recover). */
+    muffChance: 0.04,
+    /** Return running speed (later: his speed rating) and seconds to get up to it after the catch. */
+    returnSpeed: 7.6,
+    returnStartTime: 0.4,
+    /** He dodges a chaser this close in front of him. */
+    evadeLookYards: 8,
+    /** Coverage speeds: gunners (our two wide receivers), other cover men, linemen, the punter. */
+    gunnerSpeed: 10,
+    coverSpeed: 7.2,
+    lineSpeed: 5.5,
+    punterSpeed: 5,
+    /** Seconds after the kick before everyone but the gunners starts running downfield. */
+    coverReleaseTime: 0.3,
+    /** Each cover man is slowed by up to this share at random each punt (held up by blockers). */
+    coverSpeedVariance: 0.2,
+    /** Cover men keep this share of their side-to-side spacing (0 = all run at the ball). */
+    laneSpreadRatio: 0.4,
+    /** Their blockers: speed heading for a cover man, reach, chance to hold him up, and for how long. */
+    blockerSpeed: 6,
+    blockReachYards: 1.2,
+    blockChance: 0.4,
+    blockHoldTime: 1.3,
+    /** A blocker only goes after cover men no more than this far past him (toward the returner side). */
+    blockLookYards: 4,
+    /** After their try, blockers jog after the returner at this speed, staying this far off him. */
+    returnTeamJogSpeed: 4,
+    returnTeamGapYards: 6,
   },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */

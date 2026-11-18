@@ -48,7 +48,9 @@ import {
   OPP_GOAL_X,
   applyKick,
   applyPlay,
+  applyMuffedPunt,
   applyPunt,
+  applyPuntReturnTD,
   downText,
   newGame,
   spotText,
@@ -66,7 +68,8 @@ import {
   resolveKick,
   type KickResult,
 } from '../sim/kicking';
-import { PUNTER_DEPTH, insideTwenty, puntPath, resolvePunt, type PuntPath } from '../sim/punting';
+import { PUNTER_DEPTH, insideTwenty } from '../sim/punting';
+import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, type PuntPlay } from '../sim/puntReturn';
 import { coachTip } from '../sim/fourthDown';
 import {
   beforeSnap,
@@ -181,8 +184,9 @@ export class FieldScene extends Phaser.Scene {
   private kickSweep = 1; // seconds per sweep of the marker
   private kickTime = 0; // seconds the meter has been running
   private kickFlight: { from: Vec; to: Vec; t: number; duration: number; result: KickResult } | null = null;
-  // A punt in the air, then rolling (rules in sim/punting.ts).
-  private puntFlight: { from: Vec; path: PuntPath; shank: boolean; airTime: number; rollTime: number; height: number; t: number } | null = null;
+  // A punt play after the tap: flight, returner, coverage, return (rules in sim/puntReturn.ts).
+  // Coverage dots = [...wrDots, ...blockerDots, qb]; their blockers = [...cbDots, ...rusherDots]; returner = safety.
+  private puntPlay: PuntPlay | null = null;
 
   private state: State = 'presnap';
   private playTime = 0; // seconds since the snap
@@ -316,7 +320,8 @@ export class FieldScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number) {
     const dt = Math.min(deltaMs / 1000, 0.1); // avoid huge jumps after a pause
-    this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result');
+    const punting = this.state === 'kickFlight' && this.puntPlay !== null;
+    this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result' || punting);
     this.playsBtn?.classList.toggle('show', this.state === 'presnap');
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
@@ -422,6 +427,7 @@ export class FieldScene extends Phaser.Scene {
   /** SKIP button: finish a return instantly, or go straight to the next play. */
   private skip() {
     if (this.state === 'return') this.skipReturn();
+    else if (this.state === 'kickFlight' && this.puntPlay) this.skipPunt();
     else if (this.state === 'result') this.afterPlay();
   }
 
@@ -839,6 +845,11 @@ export class FieldScene extends Phaser.Scene {
     this.sizeBall();
     this.drawBall(spot.x, spot.y, 0);
     this.cameraFocus = { x: spot.x + this.kickDistance / 2, y: FIELD_WIDTH / 2 };
+    if (punt) {
+      // Their deep safety drops back to field it.
+      const r = returnerStart(spot, feel.puntReturn);
+      this.safety.setPosition(r.x, r.y);
+    }
     // Meter: green zone centred, as wide as this kick allows.
     const m = this.kickMeter;
     if (m) {
@@ -897,81 +908,119 @@ export class FieldScene extends Phaser.Scene {
     this.updateLabel();
   }
 
-  /** The punt tap: where it goes (punting.ts), then the ball's flight and roll. */
+  private coverageDots() {
+    return [...this.wrDots, ...this.blockerDots, this.qb];
+  }
+
+  private returnTeamDots() {
+    return [...this.cbDots, ...this.rusherDots];
+  }
+
+  /** The punt tap: the punt play starts (flight, returner, coverage; rules in sim/puntReturn.ts). */
   private punt() {
-    const p = feel.punting;
-    const k = resolvePunt(meterPosition(this.kickTime, this.kickSweep), p);
-    this.clock = tickPlay(this.clock, p.clockRunoff);
+    const rng = getRngOrFallback();
+    const roll = () => rng.next();
+    this.clock = tickPlay(this.clock, feel.punting.clockRunoff);
     this.updateScoreboard();
     this.kickMeter?.classList.add('done');
-    const from = this.kickSpot();
-    const path = puntPath(from, k);
-    // Shorter punts hang a bit less and don't go as high.
-    const airLen = Math.hypot(path.land.x - from.x, path.land.y - from.y);
-    const full = Math.max(1, p.centreYards);
-    const rollLen = Math.hypot(path.stop.x - path.land.x, path.stop.y - path.land.y);
-    this.puntFlight = {
-      from,
-      path,
-      shank: k.shank,
-      airTime: Math.max(0.2, p.hangTime * (0.6 + (0.4 * airLen) / full)),
-      rollTime: rollLen / Math.max(0.5, p.rollSpeed),
-      height: p.arcHeightYards * Math.min(1, airLen / full),
-      t: 0,
-    };
+    // Everyone starts from where they stand now.
+    const at = (d: Phaser.GameObjects.Arc) => ({ x: d.x, y: d.y });
+    const cover = coverageAt(this.match.ballX, this.kickSpot(), feel.puntReturn).map((c, i) => ({ ...c, pos: at(this.coverageDots()[i]) }));
+    const team = this.returnTeamDots().map((d) => ({ pos: at(d), used: false }));
+    this.puntPlay = startPuntPlay(this.match.ballX, meterPosition(this.kickTime, this.kickSweep), feel, roll, cover, team);
+    this.puntPlay.returner = at(this.safety);
     this.state = 'kickFlight';
+    this.qb.setStrokeStyle(0.2, COLORS.outline);
     const sq = feel.throw.windupSquashRatio;
     this.tweens.add({ targets: this.qb, scaleX: 1 + sq, scaleY: 1 - sq, duration: Math.max(1, feel.throw.windupTime * 1000), yoyo: true });
     this.updateLabel();
   }
 
   private stepPunt(dt: number) {
-    const f = this.puntFlight!;
-    f.t += dt;
-    const { land, stop } = f.path;
-    if (f.t < f.airTime) {
-      const u = f.t / f.airTime;
-      this.drawBall(f.from.x + (land.x - f.from.x) * u, f.from.y + (land.y - f.from.y) * u, 4 * f.height * u * (1 - u));
-    } else {
-      const u = f.rollTime > 0 ? Math.min(1, (f.t - f.airTime) / f.rollTime) : 1;
-      const e = 1 - (1 - u) * (1 - u); // rolls to a stop
-      this.drawBall(land.x + (stop.x - land.x) * e, land.y + (stop.y - land.y) * e, 0);
-      if (u >= 1) {
-        this.endPunt();
-        return;
-      }
+    const rng = getRngOrFallback();
+    const { play, events } = stepPuntPlay(this.puntPlay!, dt, feel, () => rng.next());
+    this.puntPlay = play;
+    this.drawBall(play.ball.x, play.ball.y, play.ballHeight);
+    this.safety.setPosition(play.returner.x, play.returner.y);
+    const cover = this.coverageDots();
+    play.coverage.forEach((c, i) => cover[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.held > 0 ? 0.45 : 1));
+    const team = this.returnTeamDots();
+    play.returnTeam.forEach((b, i) => team[i].setPosition(b.pos.x, b.pos.y));
+    if (play.chase) play.chase.pursuers.forEach((q, i) => cover[i].setAlpha(q.stunned > 0 || (q.held ?? 0) > 0 ? 0.45 : 1));
+    if (events.decided) this.kickMeter?.classList.remove('show'); // the ball is down: clear the view
+    if (events.decided === 'return') {
+      this.popPlayer(this.safety);
+      this.updateLabel();
     }
-    this.cameraFocus = { x: this.shadow.x + feel.camera.leadYards, y: FIELD_WIDTH / 2 };
+    if (events.missed) this.floatText(play.returner.x, play.returner.y - 2, 'BROKE IT!', '#ff8a8a');
+    if (play.phase === 'return') this.cameraFocus = { x: play.returner.x - feel.camera.leadYards, y: play.returner.y };
+    else this.cameraFocus = { x: play.ball.x + feel.camera.leadYards, y: FIELD_WIDTH / 2 };
+    if (play.end) this.endPunt(play, play.end);
   }
 
-  private endPunt() {
-    const f = this.puntFlight!;
-    this.puntFlight = null;
+  /** SKIP during a punt: run the rest of it instantly. */
+  private skipPunt() {
+    for (let i = 0; i < 60 * 30 && this.state === 'kickFlight' && this.puntPlay; i++) this.stepPunt(1 / 60);
+    this.hitPauseLeft = 0;
+    if (this.puntPlay) this.cameras.main.centerOn(this.puntPlay.ball.x, this.puntPlay.ball.y);
+  }
+
+  private endPunt(play: PuntPlay, end: PuntEnd) {
     this.state = 'result';
     this.kickMeter?.classList.remove('show');
-    const { path } = f;
-    const pinned = insideTwenty(path);
-    const text = f.shank
-      ? 'SHANK!'
-      : path.result === 'touchback'
-        ? 'TOUCHBACK'
-        : pinned
-          ? 'INSIDE THE 20!'
-          : path.result === 'outOfBounds'
-            ? 'OUT OF BOUNDS'
-            : 'PUNT';
-    this.showBanner(text);
-    const net = Math.round(path.spotX - this.match.ballX);
-    const colour = f.shank ? '#ff8a8a' : pinned ? '#ffd166' : '#ffffff';
-    this.floatText(Math.min(path.stop.x, TOTAL_LENGTH - 6), FIELD_WIDTH / 2 - 6, `${net} YD · ${spotText(path.spotX)}`, colour);
+    const losX = this.match.ballX;
+    const r = play.returner;
+    const textX = Math.min(Math.max(play.ball.x, 6), TOTAL_LENGTH - 6);
+    let result: { state: GameState; event: DriveEvent };
+    if (end.kind === 'returnTD') {
+      this.shakeScreen(feel.juice.touchdownShakeScale);
+      this.popPlayer(this.safety);
+      this.showBanner('PUNT RETURN TD');
+      this.floatText(textX, r.y - 2, `${end.yards} YD RETURN`, '#ff8a8a');
+      result = applyPuntReturnTD(this.match);
+    } else if (end.kind === 'muff') {
+      this.shakeScreen();
+      this.showBanner('MUFFED!');
+      this.floatText(textX, FIELD_WIDTH / 2 - 6, `OUR BALL · ${spotText(end.spotX)}`, '#ffd166');
+      result = applyMuffedPunt(this.match, end.spotX);
+    } else {
+      const net = Math.round(end.spotX - losX);
+      if (end.kind === 'return') {
+        if (end.how === 'tackled') {
+          this.hitPauseLeft = feel.juice.hitPauseTime;
+          this.shakeScreen();
+          this.showBanner('STOPPED!');
+        } else this.showBanner('OUT OF BOUNDS');
+        this.floatText(textX, Math.min(r.y + 8, FIELD_WIDTH - 2), `${end.yards} YD RETURN · ${spotText(end.spotX)}`, '#ff8a8a'); // below him, clear of the banner
+      } else if (end.kind === 'fairCatch') {
+        this.showBanner('FAIR CATCH');
+        this.floatText(textX, FIELD_WIDTH / 2 - 6, `${net} YD · ${spotText(end.spotX)}`, end.spotX >= OPP_GOAL_X - 20 ? '#ffd166' : '#ffffff');
+      } else {
+        const { path } = end;
+        const pinned = insideTwenty(path);
+        const text = play.kick.shank
+          ? 'SHANK!'
+          : path.result === 'touchback'
+            ? 'TOUCHBACK'
+            : pinned
+              ? 'INSIDE THE 20!'
+              : path.result === 'outOfBounds'
+                ? 'OUT OF BOUNDS'
+                : 'PUNT';
+        this.showBanner(text);
+        const colour = play.kick.shank ? '#ff8a8a' : pinned ? '#ffd166' : '#ffffff';
+        this.floatText(textX, FIELD_WIDTH / 2 - 6, `${net} YD · ${spotText(end.spotX)}`, colour);
+      }
+      result = applyPunt(this.match, end.spotX);
+    }
+    this.puntPlay = null;
     this.tweens.add({ targets: [this.ball, this.shadow], alpha: 0, duration: feel.pacing.bannerTime * 1000 });
-    const { state, event } = applyPunt(this.match, path.spotX);
-    this.finishPlay(state, event, true);
+    this.finishPlay(result.state, result.event, true);
     this.scheduleReset();
   }
 
   private stepKick(dt: number) {
-    if (this.puntFlight) {
+    if (this.puntPlay) {
       this.stepPunt(dt);
       return;
     }
@@ -1344,7 +1393,7 @@ export class FieldScene extends Phaser.Scene {
     this.targetIndex = 0;
     this.carrierDot = null;
     this.kickFlight = null;
-    this.puntFlight = null;
+    this.puntPlay = null;
     this.kickMeter?.classList.remove('show');
     this.state = 'presnap';
     this.playTime = 0;
@@ -1539,7 +1588,7 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'kickFlight') {
-      this.label.setText(this.puntFlight ? 'Punt is up…' : 'Kick is up…');
+      this.label.setText(!this.puntPlay ? 'Kick is up…' : this.puntPlay.phase === 'return' ? 'Punt return' : 'Punt is up…');
       return;
     }
     if (this.state === 'run') {
