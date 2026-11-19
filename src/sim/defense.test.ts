@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ballBreakRatio,
+  rollCornerSpeed,
   blockerSpot,
   closestIndex,
   isShielded,
@@ -93,6 +95,52 @@ describe('balance', () => {
     let catches = 0;
     for (let k = 0; k < 100; k++) if (resolvePass(wr.pos, cb.pos, landing, (k + 0.5) / 100, contest) === 'catch') catches++;
     expect(catches).toBeGreaterThanOrEqual(60);
+  });
+});
+
+describe('balance: deep balls (go route)', () => {
+  /** A go route led perfectly, thrown `throwAt` s after the snap, vs a corner at `scale` of the cover speed. Catches out of 100. */
+  function goCatches(scale: number, throwAt: number, flight: number) {
+    const wrStart = { x: 34.5, y: 14.7 };
+    const path = routePath(wrStart, ROUTES.find((r) => r.name === 'Go')!, 1);
+    let wr = startRunner(path);
+    let cb: Coverage = startCoverage({ x: wrStart.x + 5, y: wrStart.y }, wrStart, scale);
+    const c = { ...cover, topSpeed: run.topSpeed }; // scale 1 = exactly as fast as the receiver
+    for (let t = 0; t < throwAt; t += dt) {
+      wr = stepRunner(wr, path, dt, run);
+      cb = stepCoverage(cb, wr.pos, dt, c);
+    }
+    const landing = runnerAfter(wr, path, flight, run).pos;
+    for (let t = 0; t < flight; t += dt) {
+      wr = stepRunner(wr, path, dt, run);
+      cb = stepCoverage(cb, wr.pos, dt, c, { landing, sinceThrow: t + dt });
+    }
+    let n = 0;
+    for (let k = 0; k < 100; k++) if (resolvePass(wr.pos, cb.pos, landing, (k + 0.5) / 100, contest, QB) === 'catch') n++;
+    return n;
+  }
+
+  it('is a race: a slower corner loses it, an equal or faster one can contest it', () => {
+    expect(goCatches(0.89, 1.0, 1.6)).toBeGreaterThanOrEqual(90);
+    expect(goCatches(1.0, 1.0, 1.6)).toBeLessThan(80);
+    expect(goCatches(1.05, 1.0, 1.6)).toBeLessThan(goCatches(1.0, 1.0, 1.6) + 1);
+  });
+
+  it('waiting lets even an equal corner fall behind', () => {
+    expect(goCatches(1.0, 2.0, 1.6)).toBeGreaterThan(goCatches(1.0, 1.0, 1.6));
+  });
+
+  it('a corner keeps full speed breaking on a ball where he is already running, slows when he has to turn', () => {
+    expect(ballBreakRatio({ x: 1, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }, 0.6)).toBeCloseTo(1);
+    expect(ballBreakRatio({ x: 1, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 10 }, 0.6)).toBeCloseTo(0.6);
+    expect(ballBreakRatio({ x: 1, y: 0 }, { x: 0, y: 0 }, { x: -10, y: 0 }, 0.6)).toBeCloseTo(0.6);
+    expect(ballBreakRatio(null, { x: 0, y: 0 }, { x: 10, y: 0 }, 0.6)).toBeCloseTo(0.6);
+  });
+
+  it('corner speed per snap stays within the variance', () => {
+    expect(rollCornerSpeed(1, 0.08, 0)).toBeCloseTo(0.92);
+    expect(rollCornerSpeed(1, 0.08, 0.5)).toBeCloseTo(1);
+    expect(rollCornerSpeed(1, 0.08, 0.999999)).toBeCloseTo(1.08);
   });
 });
 

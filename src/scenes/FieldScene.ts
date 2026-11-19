@@ -21,6 +21,7 @@ import {
   reachedQb,
   closestIndex,
   resolveTargetedPass,
+  rollCornerSpeed,
   startCoverage,
   stepCoverage,
   stepRusher,
@@ -1422,6 +1423,7 @@ export class FieldScene extends Phaser.Scene {
     const qbStart = this.form.qb;
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
     const play = this.calledPlay;
+    const rng = getRngOrFallback();
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
@@ -1429,7 +1431,9 @@ export class FieldScene extends Phaser.Scene {
         i === RB
           ? { x: this.match.ballX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }
           : { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
-      return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos) };
+      // Each corner's speed is rolled per snap (the linebacker's isn't).
+      const speed = i === RB ? 1 : rollCornerSpeed(1, feel.defense.cbSpeedVariance, rng.next());
+      return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos, speed) };
     });
     this.targetIndex = 0;
     this.carrierDot = null;
@@ -1463,7 +1467,6 @@ export class FieldScene extends Phaser.Scene {
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y).setScale(1);
       this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y).setScale(1);
     });
-    const rng = getRngOrFallback();
     // Run blocking and pass blocking hold their man for different lengths of time.
     const shed = play.run ? feel.runGame : feel.pocket;
     this.rushers = this.form.rush.map((pos) => ({

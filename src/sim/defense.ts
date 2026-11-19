@@ -48,10 +48,30 @@ export interface Coverage {
   t: number;
   /** Where the receiver has been (for the reaction delay). */
   history: Array<{ t: number; pos: Vec }>;
+  /** This defender's speed this snap, as a share of `CoverParams.topSpeed` (random per snap; Stage 3: ratings). */
+  speedScale: number;
+  /** Direction he was last running (unit vector), or null while standing still. */
+  dir: Vec | null;
 }
 
-export function startCoverage(cbStart: Vec, wrStart: Vec): Coverage {
-  return { pos: { ...cbStart }, speed: 0, t: 0, history: [{ t: 0, pos: { ...wrStart } }] };
+export function startCoverage(cbStart: Vec, wrStart: Vec, speedScale = 1): Coverage {
+  return { pos: { ...cbStart }, speed: 0, t: 0, history: [{ t: 0, pos: { ...wrStart } }], speedScale, dir: null };
+}
+
+/** A cornerback's speed for this snap: `ratio` of a receiver's, give or take up to `variance`. */
+export function rollCornerSpeed(ratio: number, variance: number, roll: number): number {
+  return ratio + variance * (roll * 2 - 1);
+}
+
+/**
+ * His speed share when breaking on the ball: full speed if the ball is where he's already running
+ * (trailing a go route), down to `ballSpeedRatio` once he has to turn 90 degrees or more.
+ */
+export function ballBreakRatio(dir: Vec | null, from: Vec, landing: Vec, ballSpeedRatio: number): number {
+  const d = dist(from, landing);
+  if (!dir || d < 1e-6) return ballSpeedRatio;
+  const cos = (dir.x * (landing.x - from.x) + dir.y * (landing.y - from.y)) / d;
+  return ballSpeedRatio + (1 - ballSpeedRatio) * Math.max(0, cos);
 }
 
 /** Where the receiver was `delay` seconds ago. */
@@ -75,10 +95,10 @@ export function stepCoverage(
   const t = c.t + dt;
   const history = [...c.history, { t, pos: { ...wrPos } }].filter((h) => h.t >= t - p.reactionTime - 0.5);
   let target: Vec;
-  let top = p.topSpeed;
+  let top = p.topSpeed * c.speedScale;
   if (ball && ball.sinceThrow >= p.ballReactionTime) {
     target = ball.landing;
-    top = p.topSpeed * p.ballSpeedRatio;
+    top *= ballBreakRatio(c.dir, c.pos, ball.landing, p.ballSpeedRatio);
   } else {
     const seen = delayedPos(history, t - p.reactionTime);
     const cushion = p.cushionYards * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
@@ -92,7 +112,10 @@ export function stepCoverage(
     target = { x: wrPos.x + (from.x - wrPos.x) * k, y: wrPos.y + (from.y - wrPos.y) * k };
   }
   const speed = Math.min(top, c.speed + p.acceleration * dt);
-  return { pos: moveToward(c.pos, target, speed * dt), speed, t, history };
+  const pos = moveToward(c.pos, target, speed * dt);
+  const moved = dist(c.pos, pos);
+  const dir = moved > 1e-6 ? { x: (pos.x - c.pos.x) / moved, y: (pos.y - c.pos.y) / moved } : c.dir;
+  return { ...c, pos, speed, t, history, dir };
 }
 
 // ---------- Pass rush ----------

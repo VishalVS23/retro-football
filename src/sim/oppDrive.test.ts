@@ -103,6 +103,59 @@ describe('simulateOppDrive', () => {
   });
 });
 
+describe('clock smarts', () => {
+  const q4 = (timeLeft: number, us: number, them: number): OppDriveSituation => ({ quarter: 4, timeLeft, quarterLength: 120, us, them });
+
+  it('behind late in Q4: hurry-up, quicker plays than a normal drive', () => {
+    const hurry = many(THEIR_25, 1000, q4(60, 14, 7)); // CPU down 7
+    expect(hurry.every((d) => d.note === 'hurryUp')).toBe(true);
+    const normal = many(THEIR_25, 1000);
+    expect(avg(hurry, (d) => d.seconds / d.plays)).toBeLessThan(avg(normal, (d) => d.seconds / d.plays) - 1);
+  });
+
+  it('ahead in Q4: they run the clock down (longer plays)', () => {
+    const milk = many(THEIR_25, 1000, q4(120, 7, 14));
+    expect(milk.some((d) => d.note === 'runClock')).toBe(true);
+    const normal = many(THEIR_25, 1000);
+    expect(avg(milk, (d) => d.seconds / d.plays)).toBeGreaterThan(avg(normal, (d) => d.seconds / d.plays) + 1);
+  });
+
+  it('ahead with little time left: they kneel it out (game over, no points)', () => {
+    for (const d of many(THEIR_25, 200, q4(30, 7, 14))) {
+      expect(d.result).toBe('endOfHalf');
+      expect(d.note).toBe('kneel');
+      expect(d.seconds).toBe(30);
+      expect(d.points).toBe(0);
+    }
+  });
+
+  it('nothing doing at the end of Q2 from deep: they kneel out the half', () => {
+    const d = simulateOppDrive(THEIR_25, { ...early, quarter: 2, timeLeft: 15 }, r, createRng(3));
+    expect(d).toMatchObject({ result: 'endOfHalf', note: 'kneel', seconds: 15 });
+  });
+
+  it('in range on the last snap of the half: they kick the field goal', () => {
+    // Our 20 (35-yard try), 5 seconds before halftime.
+    const ds = many(OWN_GOAL_X + 20, 300, { ...early, quarter: 2, timeLeft: 5 });
+    for (const d of ds) expect(['fieldGoal', 'missedFieldGoal']).toContain(d.result);
+    expect(share(ds, 'fieldGoal')).toBeGreaterThan(0.8);
+  });
+
+  it('down 7 on the last snap of the game: no field goal, they go for the end zone', () => {
+    const ds = many(OWN_GOAL_X + 20, 300, q4(5, 14, 7));
+    expect(ds.some((d) => d.result === 'fieldGoal' || d.result === 'missedFieldGoal')).toBe(false);
+  });
+
+  it('balance across all situations stays sensible (1000 drives each)', () => {
+    for (const sit of [early, q4(120, 0, 0), q4(60, 14, 7), q4(120, 7, 14)]) {
+      const ds = many(THEIR_25, 1000, sit);
+      const pts = avg(ds, (d) => d.points);
+      expect(pts).toBeGreaterThan(0.8);
+      expect(pts).toBeLessThan(3);
+    }
+  });
+});
+
 describe('oppFieldGoalChance', () => {
   it('sure from close in, harder further out, none past range', () => {
     expect(oppFieldGoalChance(25, r)).toBe(r.fgSureChance);

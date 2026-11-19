@@ -43,11 +43,13 @@ export const feel = {
     cbCushionCloseTime: 1.5,
     /** How late he reacts to the receiver's moves (bigger = more open after cuts). */
     cbReactionTime: 0.25,
-    /** His top speed as a fraction of the receiver's. */
-    cbSpeedRatio: 0.95,
+    /** His top speed as a fraction of the receiver's, on average... */
+    cbSpeedRatio: 0.97,
+    /** ...give or take up to this share, rolled per corner per snap (so some snaps he can run with a go route; Stage 3: speed ratings). */
+    cbSpeedVariance: 0.08,
     /** How long after the throw before he breaks on the ball. */
     cbBallReactionTime: 0.2,
-    /** Fraction of his speed when breaking on the ball (lower = harder for him to contest). */
+    /** Fraction of his speed when he has to turn to break on the ball (lower = harder to contest); running the ball's way he keeps full speed. */
     cbBallSpeedRatio: 0.6,
     /** Closest a defender gets to the receiver's body when breaking on the ball (can't run through him). */
     cbBodyGapYards: 0.8,
@@ -387,6 +389,21 @@ export const feel = {
     /** Their net punt, yards (after coverage and our return). */
     puntNetMinYards: 34,
     puntNetMaxYards: 46,
+    /** Hurry-up when behind with this many seconds or fewer left in Q4 (two-minute drill: halfHurryTime in Q2): quicker plays, mostly passes. */
+    hurryTime: 60,
+    halfHurryTime: 30,
+    hurryPlaySeconds: 6,
+    hurryRunShare: 0.15,
+    /** Ahead in Q4: they run the clock down (slower plays, mostly runs). */
+    milkPlaySeconds: 11,
+    milkRunShare: 0.55,
+    /** End of the half/game with this many seconds or fewer left and in range: they kick the field goal now. */
+    lastSnapSeconds: 8,
+    /** Ahead in Q4: they take a knee once the kneel-downs left (this long each) can run out the clock. */
+    kneelSeconds: 12,
+    /** End of Q2 with this many seconds or fewer left and further than halfKneelYards from our goal: they kneel out the half. */
+    halfKneelTime: 20,
+    halfKneelYards: 60,
   },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */

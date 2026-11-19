@@ -48,7 +48,25 @@ export interface OppDriveRules {
   /** Net punt (after their coverage and our return), yards. */
   puntNetMinYards: number;
   puntNetMaxYards: number;
+  /** Hurry-up: behind with this many seconds or fewer left in Q4 (or `halfHurryTime` in Q2), quicker plays, more passes. */
+  hurryTime: number;
+  halfHurryTime: number;
+  hurryPlaySeconds: number;
+  hurryRunShare: number;
+  /** Ahead in Q4: run the clock down (slower plays, more runs). */
+  milkPlaySeconds: number;
+  milkRunShare: number;
+  /** At the end of the half/game with this many seconds or fewer left: kick the field goal now if in range. */
+  lastSnapSeconds: number;
+  /** Ahead in Q4 and the kneel-downs left can run out the clock: take a knee (each takes this long). */
+  kneelSeconds: number;
+  /** In Q2 with this many seconds or fewer left and further than `halfKneelYards` from our goal: kneel out the half. */
+  halfKneelTime: number;
+  halfKneelYards: number;
 }
+
+/** How they managed the clock on this drive (shown on the summary). */
+export type OppDriveNote = 'hurryUp' | 'runClock' | 'kneel' | null;
 
 export type OppDriveResult = 'touchdown' | 'fieldGoal' | 'missedFieldGoal' | 'punt' | 'interception' | 'fumble' | 'downs' | 'endOfHalf';
 
@@ -70,6 +88,7 @@ export interface OppDrive {
   extraPointGood: boolean | null;
   /** Their longest gain, if it was a big one. */
   bigPlay: { kind: 'run' | 'pass'; yards: number } | null;
+  note: OppDriveNote;
 }
 
 /** The game situation the drive starts in. Scores are from OUR side (us / them). */
@@ -115,8 +134,16 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   let plays = 0;
   let seconds = 0;
   let bigPlay: OppDrive['bigPlay'] = null;
+  let note: OppDriveNote = null;
   const halfLeft = halfSecondsLeft(sit);
   const strength = Math.max(0.1, r.strength);
+  /** Their lead (negative = behind). The score can't change during the drive. */
+  const margin = sit.them - sit.us;
+  /** Quarter and time left right now (a drive can run from Q1 into Q2, or Q3 into Q4). */
+  const now = () => {
+    const left = sit.timeLeft - seconds;
+    return left > 0 || sit.quarter % 2 === 0 ? { quarter: sit.quarter, timeLeft: Math.max(0, left) } : { quarter: sit.quarter + 1, timeLeft: left + sit.quarterLength };
+  };
 
   const done = (result: OppDriveResult, endT: number, ourStartT: number, points = 0, extraPointGood: boolean | null = null): OppDrive => ({
     result,
@@ -129,27 +156,46 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     points,
     extraPointGood,
     bigPlay,
+    note,
   });
   // Our ball after they give it up at their-frame spot `t2` (in our end zone = touchback at our 20).
   const ourBallAt = (t2: number) => (t2 >= OPP_GOAL_X ? OPP_GOAL_X - 20 : clampSpot(t2));
   const kickoffToUs = OPP_GOAL_X - KICKOFF_START_YARDS; // our 25, in their frame
 
+  const kickFieldGoal = () => {
+    plays++;
+    seconds += r.incompleteSeconds;
+    if (rng.chance(oppFieldGoalChance(fieldGoalDistance(t), r))) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
+    // Missed: our ball at the spot of the kick, or our 20 if that's further out.
+    return done('missedFieldGoal', t, Math.min(t - 7, OPP_GOAL_X - 20));
+  };
+
   for (;;) {
     if (seconds >= halfLeft) return done('endOfHalf', t, ourBallAt(t));
+    const clock = now();
+    const left = halfLeft - seconds; // seconds left in the half (or the game)
+    const fgDist = fieldGoalDistance(t);
+    const inRange = fgDist <= r.fgRangeYards;
+
+    // Take a knee: ahead in Q4 with enough kneel-downs left to run out the game, or nothing doing at the end of Q2.
+    const kneelsLeft = 4 - down;
+    const kneelOutGame = clock.quarter === 4 && margin > 0 && left <= kneelsLeft * r.kneelSeconds;
+    const kneelOutHalf = clock.quarter === 2 && left <= r.halfKneelTime && OPP_GOAL_X - t > r.halfKneelYards;
+    if (kneelOutGame || kneelOutHalf) {
+      note = 'kneel';
+      plays += Math.max(1, Math.min(kneelsLeft, Math.ceil(left / Math.max(1, r.kneelSeconds))));
+      seconds = halfLeft;
+      return done('endOfHalf', t, ourBallAt(t));
+    }
+
+    // Last snap of the half (or the game, when 3 points are enough to matter): kick it now.
+    if (left <= r.lastSnapSeconds && inRange && (clock.quarter === 2 || margin >= -FIELD_GOAL_POINTS)) return kickFieldGoal();
 
     // 4th down: the same rules of thumb as our coach (seen from their side of the field).
     if (down === 4) {
-      const timeNow = sit.timeLeft - seconds;
       const asIfOurs: GameState = { ballX: t, down: 4, firstDownX: firstDownT, us: sit.them, them: sit.us, oppStartX: null, tryPending: false };
-      const fgDist = fieldGoalDistance(t);
-      const tip = coachTip({ match: asIfOurs, quarter: timeNow > 0 ? sit.quarter : sit.quarter + 1, timeLeft: timeNow > 0 ? timeNow : timeNow + sit.quarterLength, fgRange: fgDist <= r.fgRangeYards });
-      if (tip?.choice === 'fieldGoal') {
-        plays++;
-        seconds += r.incompleteSeconds;
-        if (rng.chance(oppFieldGoalChance(fgDist, r))) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
-        // Missed: our ball at the spot of the kick, or our 20 if that's further out.
-        return done('missedFieldGoal', t, Math.min(t - 7, OPP_GOAL_X - 20));
-      }
+      const tip = coachTip({ match: asIfOurs, quarter: clock.quarter, timeLeft: clock.timeLeft, fgRange: inRange });
+      if (tip?.choice === 'fieldGoal') return kickFieldGoal();
       if (tip?.choice === 'punt') {
         plays++;
         seconds += r.incompleteSeconds;
@@ -157,16 +203,21 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       }
     }
 
-    // A play.
+    // A play. Behind late: hurry-up (and the two-minute drill before halftime). Ahead in Q4: run the clock.
+    const hurry = (clock.quarter === 4 && margin < 0 && clock.timeLeft <= r.hurryTime) || (clock.quarter === 2 && clock.timeLeft <= r.halfHurryTime);
+    const milk = clock.quarter === 4 && margin > 0;
+    if (hurry) note = 'hurryUp';
+    else if (milk) note = 'runClock';
+    const playSeconds = hurry ? r.hurryPlaySeconds : milk ? r.milkPlaySeconds : r.playSeconds;
     plays++;
-    const run = rng.chance(r.runShare);
+    const run = rng.chance(hurry ? r.hurryRunShare : milk ? r.milkRunShare : r.runShare);
     let gain: number;
     let stops = false;
     if (run) {
       gain = rng.range(-r.runLossYards, r.runMaxYards) * strength;
       if (rng.chance(r.bigRunChance)) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance)) {
-        seconds += r.playSeconds;
+        seconds += playSeconds;
         return done('fumble', t, ourBallAt(t + Math.max(0, gain)));
       }
     } else if (rng.chance(r.interceptionChance)) {
@@ -182,11 +233,11 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       gain = rng.range(r.passMinYards, r.passMaxYards) * strength;
       if (rng.chance(r.bigPassChance)) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance)) {
-        seconds += r.playSeconds;
+        seconds += playSeconds;
         return done('fumble', t, ourBallAt(t + gain));
       }
     }
-    seconds += stops ? r.incompleteSeconds : r.playSeconds;
+    seconds += stops ? r.incompleteSeconds : playSeconds;
     const counted = Math.round(Math.min(gain, OPP_GOAL_X - t)); // a gain only counts up to the goal line
     if (counted >= BIG_PLAY_YARDS && (!bigPlay || counted > bigPlay.yards)) bigPlay = { kind: run ? 'run' : 'pass', yards: counted };
 

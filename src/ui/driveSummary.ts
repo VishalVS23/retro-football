@@ -52,6 +52,7 @@ function resultLine(d: OppDrive, lastQuarter: boolean): { text: string; tone: ''
     case 'downs':
       return { text: 'TURNOVER ON DOWNS', tone: 'good' };
     case 'endOfHalf':
+      if (d.note === 'kneel' && lastQuarter) return { text: 'RAN OUT THE CLOCK', tone: 'bad' };
       return { text: lastQuarter ? 'END OF GAME' : 'END OF HALF', tone: '' };
   }
 }
@@ -66,7 +67,11 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   const pct = (x: number) => `${(x / TOTAL_LENGTH) * 100}%`;
   const lo = Math.min(d.startX, d.endX);
   const hi = Math.max(d.startX, d.endX);
-  const big = d.bigPlay ? `<div class="ds-big">BIG PLAY: ${d.bigPlay.yards} YD ${d.bigPlay.kind === 'run' ? 'RUN' : 'PASS'}</div>` : '';
+  const notes = [
+    d.note ? { hurryUp: 'HURRY-UP OFFENSE', runClock: 'RUNNING DOWN THE CLOCK', kneel: 'TOOK A KNEE' }[d.note] : '',
+    d.bigPlay ? `BIG PLAY: ${d.bigPlay.yards} YD ${d.bigPlay.kind === 'run' ? 'RUN' : 'PASS'}` : '',
+  ].filter(Boolean);
+  const big = notes.length ? `<div class="ds-big">${notes.join('<br>')}</div>` : '';
 
   const el = document.createElement('div');
   el.id = 'drive-summary';
