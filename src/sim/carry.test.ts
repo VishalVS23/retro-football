@@ -66,7 +66,20 @@ describe('ball carrier', () => {
     expect(recovering).toBeLessThan(7.5 * 0.3);
     const x1 = c.pos.x;
     c = stepCarrier(c, 0, dt, p);
-    expect((c.pos.x - x1) / dt).toBeCloseTo(7.5); // full speed again
+    expect((c.pos.x - x1) / dt).toBeCloseTo(7.5, 1); // full speed again (minus a little leftover sideways slide)
+  });
+
+  it('steering sideways costs forward speed: never faster overall than running straight', () => {
+    const straight = runFor(startCarrier({ x: 40, y: 20 }), 2, 0);
+    const start = { x: 40, y: 20 };
+    const diagonal = runFor(startCarrier(start), 2, 1);
+    expect(diagonal.pos.x).toBeLessThan(straight.pos.x - 2); // gave up ground going forward
+    let c = startCarrier(start);
+    for (let i = 0; i < 120; i++) {
+      const before = c.pos;
+      c = stepCarrier(c, i < 60 ? 1 : -1, dt, carry);
+      expect(Math.hypot(c.pos.x - before.x, c.pos.y - before.y) / dt).toBeLessThanOrEqual(7.5 + 1e-9);
+    }
   });
 
   it('knows touchdowns and out of bounds', () => {

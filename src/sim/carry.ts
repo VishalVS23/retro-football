@@ -81,8 +81,13 @@ export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParam
     vy = c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt); // eases in and out
     recover = Math.max(0, recover - dt);
   }
+  // Cutting sideways costs forward speed: steering never makes him faster overall than running
+  // straight. Not during a juke or its recovery: those already cost forward speed (forwardRatio).
+  const top = p.runSpeed * forward;
+  const side = Math.min(Math.abs(vy), top);
+  const ahead = c.jukeLeft > 0 || (c.recover ?? 0) > 0 ? top : Math.sqrt(top * top - side * side);
   return {
-    pos: { x: c.pos.x + dirX * p.runSpeed * forward * dt, y: c.pos.y + vy * dt },
+    pos: { x: c.pos.x + dirX * ahead * dt, y: c.pos.y + vy * dt },
     vy,
     jukeLeft,
     jukeDir: c.jukeDir,
