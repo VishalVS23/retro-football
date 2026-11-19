@@ -353,8 +353,6 @@ export const feel = {
     returnTeamGapYards: 6,
   },
   oppDrive: {
-    /** Seconds the CPU drive summary stays up before play moves on (CONTINUE skips). */
-    summaryTime: 3.5,
     /** 1 = average CPU offense; higher gains more yards every play (Stage 3: their ratings). */
     strength: 1,
     /** Share of their plays that are runs. */

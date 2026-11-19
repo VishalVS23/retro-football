@@ -1345,7 +1345,7 @@ export class FieldScene extends Phaser.Scene {
 
   /**
    * A simulated CPU drive: dice-sim it, take its time off the clock, then show the summary.
-   * CONTINUE (or a few seconds) moves on: any clock break (END OF Q1 / HALFTIME / FINAL), then our play.
+   * CONTINUE moves on: any clock break (END OF Q1 / HALFTIME / FINAL), then our play.
    */
   private runOppDrive(startX: number) {
     this.state = 'oppDrive';
@@ -1363,17 +1363,15 @@ export class FieldScene extends Phaser.Scene {
     this.match = applyOppDrive(this.match, drive);
     this.updateScoreboard();
     this.updateLabel();
+    // Stays up until CONTINUE (user: no auto-advance, there's a lot to read).
     let done = false;
     const next = () => {
       if (done) return;
       done = true;
-      this.resetTimer?.remove();
-      this.resetTimer = null;
       closeDriveSummary();
       this.afterPlay();
     };
     openDriveSummary({ drive, us: this.match.us, them: this.match.them, lastQuarter, onContinue: next });
-    this.resetTimer = this.time.delayedCall(feel.oppDrive.summaryTime * 1000, next);
   }
 
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
