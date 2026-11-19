@@ -88,7 +88,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
       </div>
       <div class="ds-result ${res.tone}">${res.text}</div>
       <div class="ds-sub">${[...lines, `YOU ${o.us} - ${o.them} CPU`].join('<br>')}</div>
-      <button class="ds-btn" type="button">CONTINUE ▸</button>
+      <button class="ds-btn" type="button">CONTINUE &gt;</button>
     </div>`;
   // Taps on the panel never reach the field underneath.
   el.addEventListener('pointerdown', (e) => e.stopPropagation());

@@ -275,7 +275,7 @@ export class FieldScene extends Phaser.Scene {
     // SKIP button (a DOM button, so taps on it never reach the field). Taps elsewhere don't skip.
     const skip = document.createElement('button');
     skip.id = 'skip-btn';
-    skip.textContent = 'SKIP ▸';
+    skip.textContent = 'SKIP >';
     skip.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
