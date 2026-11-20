@@ -3,8 +3,10 @@
  * happens when the ball arrives. Pure functions (no Phaser); feel values are passed in.
  * Units: yards and seconds.
  */
+import { FIELD_WIDTH } from './field';
 import type { Vec } from './throw';
 
+const FIELD_MID = FIELD_WIDTH / 2;
 const dist = (a: Vec, b: Vec) => Math.hypot(b.x - a.x, b.y - a.y);
 
 /** Moves `from` toward `to` by at most `step` yards. */
@@ -39,6 +41,23 @@ export interface CoverParams {
   ballReactionTime: number;
   /** Fraction of his top speed when breaking on the ball (he has to read it in the air). */
   ballSpeedRatio: number;
+  /**
+   * Help defender (the ball isn't going to HIS man): how long after the throw before he breaks on
+   * it. He was watching his own man, so he's later. Default: same as `ballReactionTime`.
+   */
+  helpBallReactionTime?: number;
+  /**
+   * Momentum: how fast he can change his velocity (speed up, brake or turn), yards/s². With it he
+   * turns and brakes gradually, so a sharp cut wins the receiver a step and a ball thrown at the
+   * break can carry him past the spot. Leave it out for the old instant-turn behaviour.
+   */
+  turnAcceleration?: number;
+  /**
+   * How much he guesses ahead: 1 = he assumes the receiver keeps going the way he was going for the
+   * whole reaction delay (even on a straight route, a cut fools him); 0 = he follows where the
+   * receiver was. Default 0.
+   */
+  anticipation?: number;
 }
 
 export interface Coverage {
@@ -52,10 +71,12 @@ export interface Coverage {
   speedScale: number;
   /** Direction he was last running (unit vector), or null while standing still. */
   dir: Vec | null;
+  /** His velocity (only used with `CoverParams.turnAcceleration`). */
+  vel: Vec;
 }
 
 export function startCoverage(cbStart: Vec, wrStart: Vec, speedScale = 1): Coverage {
-  return { pos: { ...cbStart }, speed: 0, t: 0, history: [{ t: 0, pos: { ...wrStart } }], speedScale, dir: null };
+  return { pos: { ...cbStart }, speed: 0, t: 0, history: [{ t: 0, pos: { ...wrStart } }], speedScale, dir: null, vel: { x: 0, y: 0 } };
 }
 
 /** A cornerback's speed for this snap: `ratio` of a receiver's, give or take up to `variance`. */
@@ -90,19 +111,26 @@ export function stepCoverage(
   wrPos: Vec,
   dt: number,
   p: CoverParams,
-  ball?: { landing: Vec; sinceThrow: number },
+  ball?: { landing: Vec; sinceThrow: number; help?: boolean },
 ): Coverage {
   const t = c.t + dt;
   const history = [...c.history, { t, pos: { ...wrPos } }].filter((h) => h.t >= t - p.reactionTime - 0.5);
   let target: Vec;
+  let targetVel: Vec = { x: 0, y: 0 }; // how the target itself is moving (for momentum: he matches it)
   let top = p.topSpeed * c.speedScale;
-  if (ball && ball.sinceThrow >= p.ballReactionTime) {
+  const react = ball?.help ? (p.helpBallReactionTime ?? p.ballReactionTime) : p.ballReactionTime;
+  if (ball && ball.sinceThrow >= react) {
     target = ball.landing;
     top *= ballBreakRatio(c.dir, c.pos, ball.landing, p.ballSpeedRatio);
   } else {
     const seen = delayedPos(history, t - p.reactionTime);
     const cushion = p.cushionYards * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
-    target = { x: Math.max(seen.x + cushion, p.minX ?? -Infinity), y: seen.y };
+    const before = delayedPos(history, t - p.reactionTime - 0.1);
+    const seenVel = { x: (seen.x - before.x) / 0.1, y: (seen.y - before.y) / 0.1 };
+    const ahead = (p.anticipation ?? 0) * p.reactionTime;
+    target = { x: Math.max(seen.x + seenVel.x * ahead + cushion, p.minX ?? -Infinity), y: seen.y + seenVel.y * ahead };
+    const closing = t < p.cushionCloseTime ? p.cushionYards / Math.max(0.01, p.cushionCloseTime) : 0;
+    targetVel = { x: seenVel.x - closing, y: seenVel.y };
   }
   // He can't run through the receiver: he stops short, on his own side of him.
   const gap = p.bodyGapYards ?? 0;
@@ -111,11 +139,78 @@ export function stepCoverage(
     const k = gap / dist(wrPos, from);
     target = { x: wrPos.x + (from.x - wrPos.x) * k, y: wrPos.y + (from.y - wrPos.y) * k };
   }
+  if (p.turnAcceleration) return stepMomentum(c, target, targetVel, top, p.turnAcceleration, dt, t, history);
   const speed = Math.min(top, c.speed + p.acceleration * dt);
   const pos = moveToward(c.pos, target, speed * dt);
   const moved = dist(c.pos, pos);
   const dir = moved > 1e-6 ? { x: (pos.x - c.pos.x) / moved, y: (pos.y - c.pos.y) / moved } : c.dir;
-  return { ...c, pos, speed, t, history, dir };
+  return { ...c, pos, speed, t, history, dir, vel: dir ? { x: dir.x * speed, y: dir.y * speed } : { x: 0, y: 0 } };
+}
+
+/**
+ * Coverage with momentum: he steers his velocity toward the target, changing it by at most
+ * `accel` yards/s² (so turns and stops take time). He matches the target's own movement and adds
+ * a closing speed that shrinks as he arrives (so he doesn't orbit it), never above his top speed.
+ */
+function stepMomentum(
+  c: Coverage,
+  target: Vec,
+  targetVel: Vec,
+  top: number,
+  accel: number,
+  dt: number,
+  t: number,
+  history: Coverage['history'],
+): Coverage {
+  const d = dist(c.pos, target);
+  const closeIn = Math.sqrt(2 * accel * d); // fastest closing speed he can still stop from in time
+  let want = d > 1e-6 ? { x: targetVel.x + ((target.x - c.pos.x) / d) * closeIn, y: targetVel.y + ((target.y - c.pos.y) / d) * closeIn } : targetVel;
+  const wantLen = Math.hypot(want.x, want.y);
+  if (wantLen > top) want = { x: (want.x / wantLen) * top, y: (want.y / wantLen) * top };
+  const dv = { x: want.x - c.vel.x, y: want.y - c.vel.y };
+  const dvLen = Math.hypot(dv.x, dv.y);
+  const k = dvLen > accel * dt ? (accel * dt) / dvLen : 1;
+  const vel = { x: c.vel.x + dv.x * k, y: c.vel.y + dv.y * k };
+  const speed = Math.hypot(vel.x, vel.y);
+  const pos = { x: c.pos.x + vel.x * dt, y: c.pos.y + vel.y * dt };
+  const dir = speed > 1e-6 ? { x: vel.x / speed, y: vel.y / speed } : c.dir;
+  return { ...c, pos, speed, t, history, dir, vel };
+}
+
+// ---------- Deep safety ----------
+
+export interface SafetyParams {
+  /** The x he sits at when nobody is deep (line of scrimmage + his depth), and the deepest he'll go. */
+  baseX: number;
+  maxX: number;
+  /** He stays at least this far deeper than the deepest receiver ("nobody gets behind him"). */
+  cushionYards: number;
+  /** Speed while reading the play, and while backing up to stay over the top. */
+  driftSpeed: number;
+  bailSpeed: number;
+  /** Once the ball is thrown: how long before he breaks on it, and how fast he goes. */
+  ballReactionTime: number;
+  ballSpeed: number;
+}
+
+/**
+ * One step of the deep safety: sits deep, shading toward the side with more receivers, and backs
+ * up to stay deeper than the deepest receiver. After the throw (and a moment to read it) he
+ * breaks on the landing spot.
+ */
+export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
+  let target: Vec;
+  let speed: number;
+  if (ball && ball.sinceThrow >= p.ballReactionTime) {
+    target = ball.landing;
+    speed = p.ballSpeed;
+  } else {
+    const avgY = receivers.reduce((s, r) => s + r.y, 0) / receivers.length;
+    const deepest = Math.max(...receivers.map((r) => r.x));
+    target = { x: Math.min(p.maxX, Math.max(p.baseX, deepest + p.cushionYards)), y: (FIELD_MID + avgY) / 2 };
+    speed = target.x > pos.x + 0.25 ? p.bailSpeed : p.driftSpeed;
+  }
+  return moveToward(pos, target, speed * dt);
 }
 
 // ---------- Pass rush ----------
@@ -183,6 +278,12 @@ export interface ContestParams {
    * he contests at this fraction of his normal strength. 1 = no shielding. Gets stop routes open.
    */
   shieldedContestRatio?: number;
+  /**
+   * A defender covering someone ELSE (a corner passing through, the linebacker) contests at this
+   * fraction of his strength: his eyes were on his own man. The deep safety, whose job is the
+   * ball, always contests fully. 1 = no difference. Default 1.
+   */
+  helpContestRatio?: number;
 }
 
 /**
@@ -217,7 +318,9 @@ export function resolveTargetedPass(
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
   const defender = closestIndex(defenders, landing);
-  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p, thrower);
+  // Defender i < receivers.length covers receiver i man-to-man; anyone beyond that is the deep safety.
+  const help = defender < receivers.length && defender !== receiver;
+  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p, thrower, help);
   return { result, receiver, defender };
 }
 
@@ -226,7 +329,7 @@ export function isShielded(wr: Vec, cb: Vec, thrower: Vec): boolean {
   return dist(cb, thrower) > dist(wr, thrower) + 0.5;
 }
 
-export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: ContestParams, thrower?: Vec): PassResult {
+export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: ContestParams, thrower?: Vec, help = false): PassResult {
   const wrD = dist(wr, landing);
   const cbD = dist(cb, landing);
   const wrCanCatch = wrD <= p.catchRadiusYards;
@@ -241,6 +344,7 @@ export function resolvePass(wr: Vec, cb: Vec, landing: Vec, roll: number, p: Con
   // Receiver can get it; how much can the defender interfere?
   let strength = cbD > p.contestRadiusYards ? 0 : 1 - cbD / p.contestRadiusYards; // 1 = right on the ball
   if (thrower && isShielded(wr, cb, thrower)) strength *= p.shieldedContestRatio ?? 1;
+  if (help) strength *= p.helpContestRatio ?? 1;
   const pInt = cbD < wrD ? p.interceptChance * strength : 0;
   const pBreakup = p.breakupChance * strength;
   if (roll < pInt) return 'interception';

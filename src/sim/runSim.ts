@@ -37,6 +37,8 @@ export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0,
     ballReactionTime: d.cbBallReactionTime,
     ballSpeedRatio: d.cbBallSpeedRatio,
     bodyGapYards: d.cbBodyGapYards,
+    turnAcceleration: d.cbTurnAcceleration,
+    anticipation: d.cbAnticipation,
   };
   const lbCover = { ...cbCover, topSpeed: feel.routes.topSpeed * d.lbSpeedRatio, reactionTime: d.lbReactionTime, cushionYards: 1, minX: losX + d.lbFloorYards };
   let cover = f.skill.map((s, i) =>

@@ -49,6 +49,12 @@ export const feel = {
     cbSpeedVariance: 0.08,
     /** How long after the throw before he breaks on the ball. */
     cbBallReactionTime: 0.2,
+    /** Same, for a corner whose own man ISN'T the target (he was watching his man, so he's later to help). */
+    cbHelpBallReactionTime: 0.5,
+    /** Momentum: how fast a defender in coverage can change speed or direction (yd/s²). Lower = cuts and well-timed throws beat him more. */
+    cbTurnAcceleration: 17,
+    /** How much a corner guesses where his man is going (0-1): high = tight on straight routes but fooled by cuts. */
+    cbAnticipation: 0.8,
     /** Fraction of his speed when he has to turn to break on the ball (lower = harder to contest); running the ball's way he keeps full speed. */
     cbBallSpeedRatio: 0.6,
     /** Closest a defender gets to the receiver's body when breaking on the ball (can't run through him). */
@@ -58,6 +64,8 @@ export const feel = {
      * the receiver shields the ball with his body. Lower = stop routes (Hitch, Curl) easier.
      */
     shieldedContestRatio: 0.5,
+    /** A defender covering someone else (passing through, or the linebacker) contests at this fraction of his strength. */
+    helpContestRatio: 0.5,
     /** A defender within this distance of the landing spot can contest the catch. */
     contestRadiusYards: 2.5,
     /** Breakup chance when he's right on the ball (less when further away). */
@@ -70,6 +78,12 @@ export const feel = {
     safetyDepthYards: 15,
     /** How fast the safety drifts while reading the play (fraction of his speed). */
     safetyDriftRatio: 0.5,
+    /** The safety stays at least this far deeper than the deepest receiver... */
+    safetyCushionYards: 3,
+    /** ...backing up at this fraction of his speed to do it. */
+    safetyBailRatio: 0.85,
+    /** How long after the throw before the safety breaks on the ball. */
+    safetyBallReactionTime: 0.25,
     /** Linebacker: lines up this deep, in the middle, and covers the running back. */
     lbDepthYards: 5,
     /** On a run play he never comes closer to the line than this before the handoff (he waits for the play). */

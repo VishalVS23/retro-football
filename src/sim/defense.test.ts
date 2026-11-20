@@ -11,6 +11,7 @@ import {
   startCoverage,
   stepCoverage,
   stepRusher,
+  stepSafety,
   type Coverage,
   type Rusher,
 } from './defense';
@@ -213,6 +214,81 @@ describe('body shielding', () => {
     for (let i = 0; i < 120; i++) c = stepCoverage(c, wr, dt, cover, { landing: wr, sinceThrow: 1 });
     expect(Math.hypot(c.pos.x - wr.x, c.pos.y - wr.y)).toBeCloseTo(0.8, 1);
     expect(c.pos.x).toBeGreaterThan(wr.x); // stayed on his own (downfield) side
+  });
+});
+
+describe('corner momentum, anticipation and help defense', () => {
+  const momentum = { ...cover, topSpeed: 7.8, turnAcceleration: 17, anticipation: 0.8, helpBallReactionTime: 0.5 };
+
+  it('a sharp cut leaves a corner with momentum further behind than an instant-turn corner', () => {
+    const gapAfter = (p: typeof cover) => {
+      const wrStart = { x: 34.5, y: 14.7 };
+      const def = ROUTES.find((r) => r.name === 'Out')!;
+      const path = routePath(wrStart, def, 1);
+      let wr = startRunner(path);
+      let cb: Coverage = startCoverage({ x: wrStart.x + 5, y: wrStart.y }, wrStart);
+      for (let t = 0; t < 1.6; t += dt) {
+        wr = stepRunner(wr, path, dt, run);
+        cb = stepCoverage(cb, wr.pos, dt, p);
+      }
+      return Math.hypot(cb.pos.x - wr.pos.x, cb.pos.y - wr.pos.y);
+    };
+    expect(gapAfter(momentum)).toBeGreaterThan(gapAfter({ ...cover, topSpeed: 7.8 }) + 0.5);
+  });
+
+  it('anticipation keeps him tight on a straight route', () => {
+    const gapOnGo = (anticipation: number) => {
+      const wrStart = { x: 34.5, y: 14.7 };
+      const path = routePath(wrStart, ROUTES.find((r) => r.name === 'Go')!, 1);
+      let wr = startRunner(path);
+      let cb: Coverage = startCoverage({ x: wrStart.x + 5, y: wrStart.y }, wrStart);
+      for (let t = 0; t < 2.5; t += dt) {
+        wr = stepRunner(wr, path, dt, run);
+        cb = stepCoverage(cb, wr.pos, dt, { ...momentum, anticipation });
+      }
+      return Math.hypot(cb.pos.x - wr.pos.x, cb.pos.y - wr.pos.y);
+    };
+    expect(gapOnGo(0.8)).toBeLessThan(gapOnGo(0) - 0.5);
+  });
+
+  it("a help defender (the ball isn't for his man) breaks on it later", () => {
+    const after = (help: boolean) => {
+      let c = startCoverage({ x: 50, y: 20 }, { x: 45, y: 20 });
+      for (let i = 0; i < 24; i++) c = stepCoverage(c, { x: 45, y: 20 }, dt, momentum, { landing: { x: 50, y: 30 }, sinceThrow: (i + 1) * dt, help });
+      return c.pos.y;
+    };
+    expect(after(false)).toBeGreaterThan(after(true) + 0.3);
+  });
+
+  it('a help defender contests weaker; the deep safety (no man) contests fully', () => {
+    const wrs = [{ x: 40, y: 20 }, { x: 40, y: 40 }];
+    const landing = { x: 40, y: 20 };
+    const k = { ...contest, helpContestRatio: 0.5 };
+    const count = (defenders: { x: number; y: number }[]) => {
+      let n = 0;
+      for (let r = 0; r < 100; r++) if (resolveTargetedPass(wrs, defenders, landing, (r + 0.5) / 100, k).result === 'catch') n++;
+      return n;
+    };
+    const near = { x: 40.5, y: 20.5 };
+    const far = { x: 70, y: 0 };
+    const own = count([near, far]); // receiver 0's own corner on him
+    const help = count([far, near]); // receiver 1's corner passing through
+    const safety = count([far, far, near]); // the safety
+    expect(help).toBeGreaterThan(own);
+    expect(safety).toBe(own);
+  });
+
+  it('the safety stays deeper than the deepest receiver, then breaks on the ball after reading it', () => {
+    const p = { baseX: 50, maxX: 119, cushionYards: 3, driftSpeed: 4, bailSpeed: 7, ballReactionTime: 0.25, ballSpeed: 5 };
+    let s = { x: 50, y: 26.65 };
+    for (let i = 0; i < 120; i++) s = stepSafety(s, [{ x: 60, y: 10 }, { x: 40, y: 30 }], dt, p);
+    expect(s.x).toBeCloseTo(63, 0);
+    const before = { ...s };
+    s = stepSafety(s, [{ x: 60, y: 10 }], dt, p, { landing: { x: 63, y: 40 }, sinceThrow: 0.1 });
+    const stillReading = { ...s };
+    for (let i = 0; i < 30; i++) s = stepSafety(s, [{ x: 60, y: 10 }], dt, p, { landing: { x: 63, y: 40 }, sinceThrow: 0.3 + i * dt });
+    expect(stillReading.y - before.y).toBeLessThan(0.1); // not yet breaking toward y 40
+    expect(s.y).toBeGreaterThan(stillReading.y + 2);
   });
 });
 

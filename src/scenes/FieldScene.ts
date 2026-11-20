@@ -23,6 +23,7 @@ import {
   resolveTargetedPass,
   rollCornerSpeed,
   startCoverage,
+  stepSafety,
   stepCoverage,
   stepRusher,
   type Coverage,
@@ -711,6 +712,7 @@ export class FieldScene extends Phaser.Scene {
       receiverCatchChance: this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance,
       defenderCatchChance: feel.defense.defenderCatchChance,
       shieldedContestRatio: feel.defense.shieldedContestRatio,
+      helpContestRatio: feel.defense.helpContestRatio,
     }, th.from);
 
     let result = pass.result;
@@ -1172,6 +1174,9 @@ export class FieldScene extends Phaser.Scene {
       ballReactionTime: feel.defense.cbBallReactionTime,
       ballSpeedRatio: feel.defense.cbBallSpeedRatio,
       bodyGapYards: feel.defense.cbBodyGapYards,
+      helpBallReactionTime: feel.defense.cbHelpBallReactionTime,
+      turnAcceleration: feel.defense.cbTurnAcceleration,
+      anticipation: feel.defense.cbAnticipation,
     };
     // The linebacker covers the RB, but holds his ground past the line until the ball is thrown or handed off.
     const lbCover = {
@@ -1183,23 +1188,32 @@ export class FieldScene extends Phaser.Scene {
       minX: this.match.ballX + (this.calledPlay.run ? feel.defense.lbFloorYards : feel.defense.lbPassDropYards),
     };
     // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
+    // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
-      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, i === RB ? lbCover : cover, ball);
+      const myBall = ball && { ...ball, help: i !== this.targetIndex };
+      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, i === RB ? lbCover : cover, myBall);
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
 
-    // Safety: sits deep, shading toward the side with more receivers; breaks on the ball once it's thrown.
-    const avgY = this.receivers.reduce((s, r) => s + r.runner.pos.y, 0) / this.receivers.length;
-    const deep = ball ? ball.landing : { x: this.safetyDepthX(), y: (FIELD_WIDTH / 2 + avgY) / 2 };
-    const sSpeed = feel.tackling.dbPursuitSpeed * (ball ? feel.defense.cbBallSpeedRatio : feel.defense.safetyDriftRatio);
-    const gap = Math.hypot(deep.x - this.safetyPos.x, deep.y - this.safetyPos.y);
-    if (gap > 0) {
-      const step = Math.min(gap, sSpeed * dt);
-      this.safetyPos = {
-        x: this.safetyPos.x + ((deep.x - this.safetyPos.x) / gap) * step,
-        y: this.safetyPos.y + ((deep.y - this.safetyPos.y) / gap) * step,
-      };
-    }
+    // Safety: sits deep, shading toward the side with more receivers, stays deeper than the deepest
+    // receiver; breaks on the ball once it's thrown (after a moment to read it).
+    const d = feel.defense;
+    const db = feel.tackling.dbPursuitSpeed;
+    this.safetyPos = stepSafety(
+      this.safetyPos,
+      this.receivers.map((r) => r.runner.pos),
+      dt,
+      {
+        baseX: this.safetyDepthX(),
+        maxX: TOTAL_LENGTH - 1,
+        cushionYards: d.safetyCushionYards,
+        driftSpeed: db * d.safetyDriftRatio,
+        bailSpeed: db * d.safetyBailRatio,
+        ballReactionTime: d.safetyBallReactionTime,
+        ballSpeed: db * d.cbBallSpeedRatio,
+      },
+      ball,
+    );
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
 
     const p = this.rushParams();
