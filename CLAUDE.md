@@ -372,7 +372,7 @@ Flow decisions:
 | Stage | Status | Notes |
 |---|---|---|
 | 1 Feel prototype | **Done** (2026-11-14) | All 9 steps built and tested on phone |
-| 2 Full games | **In progress** (plan approved 2026-11-14) | 2-minute quarters. Steps 1–6 done (6b CPU clock smarts + deep-ball fix phone tested 2026-11-19); next: arrow keys, short-route coverage, fumbles (user picks order), then steps 7–8 |
+| 2 Full games | **In progress** (plan approved 2026-11-14) | 2-minute quarters. Steps 1–6 done; steering fix done; arrow keys built (waiting for laptop test); next: short-route coverage or fumbles (user picks), then steps 7–8 |
 | 3–13 | Not started | |
 
 Stage 1 steps:
@@ -412,8 +412,8 @@ Stage 2 steps (approved 2026-11-14; still show a short plan for each step before
 - [ ] 8. Save mid-game, with a save migration so stage 1 saves still load
 
 ### Next up (start of next session)
-0. **Ask the user first: which of these three goes first** (all need a short plan + approval):
-   - **(a) Arrow keys move the ball carrier** (user 2026-11-19: they mostly test on a laptop). Draft: while someone has the ball (receiver after the catch, RB, scrambling QB, maybe not returns since those are CPU), Up/Down steer like a drag; a quick tap of Up/Down = juke (same cooldown); Right = dive/slide (same as the D key / forward flick). Keyboard only, touch unchanged; key timings in `feel` if any are needed.
+0. **Ask the user which of (b) / (c) goes next** (both need a short plan + approval):
+   - [x] **(a) Arrow keys move the ball carrier.** Built 2026-11-20, waiting for the user's laptop test. `FieldScene` window `keydown`/`keyup` listeners (not Phaser keys, so arrows still move ⚙ panel sliders; ignored while an input is focused): hold Up/Down = steer (`arrowSteer`, used in `stepRun` when no thumb is down; pressing one turns off the RB's lane steering), release within `running.jukeFlickTime` = juke, Right = `goDown` (dive / QB slide, like D). Browser check: hold Up 0.5s moved him 2 yd up, tap Down juked, Right slid, no console errors.
    - **(b) Short routes feel smothered** (user 2026-11-19, after the deep-ball fix: "the CBs always swarm me" on everything except verticals and RB plays). Cause: every corner plays the same tight man (~1 yd body gap) every snap, so on short routes he is already near the landing spot. Recommended (Claude's option 1): roll each corner's cushion and reaction time per snap too, so a soft corner gives up the slant/hitch but takes away the deep ball, and a tight one the reverse (read the coverage pre-snap). Stage 3 ratings later drive the rolls. Option 2 = wait for Stage 3.
    - **(c) Fumbles** (below; decided 2026-11-18 to do them after step 6 because turnovers only matter once the opponent drives).
 1. **Fumbles (user asked 2026-11-18): show this plan and wait for approval.** There are no fumbles yet; the user pointed out that avoiding contact is half the point of diving. Draft plan:

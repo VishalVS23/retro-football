@@ -152,6 +152,8 @@ export class FieldScene extends Phaser.Scene {
   private steer = 0;
   private steered = false; // you've steered the RB yourself (his lane steering switches off)
   private steerTouch: { id: number; x: number; y: number; time: number } | null = null;
+  // Arrow keys held down (time pressed), for steering on a keyboard; a quick tap = juke.
+  private arrowDown: { up: number | null; down: number | null } = { up: null, down: null };
   private hitPauseLeft = 0;
   // Interception return: their defender runs at our end zone, our players chase (watch-only).
   private ret: ChaseState = startChase({ x: 0, y: 0 }, []);
@@ -317,6 +319,19 @@ export class FieldScene extends Phaser.Scene {
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => (this.state === 'kickAim' ? this.kick() : this.toggleBullet()));
     // D while running: dive (QB: slide), like a forward flick on the phone.
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.D).on('down', () => this.goDown());
+    // Arrow keys move the ball carrier: hold Up/Down = steer, quick tap = juke, Right = dive / slide.
+    // Plain window listeners (not Phaser keys) so arrows still work on the ⚙ panel's sliders.
+    const onKeyDown = (e: KeyboardEvent) => this.onArrowDown(e);
+    const onKeyUp = (e: KeyboardEvent) => this.onArrowUp(e);
+    const onBlur = () => (this.arrowDown = { up: null, down: null });
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    this.events.once('shutdown', () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    });
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
@@ -480,6 +495,47 @@ export class FieldScene extends Phaser.Scene {
     this.bulletThrow = this.bulletAim;
     if (this.playTime < feel.throw.earliestRelease) this.queuedTarget = this.target;
     else this.startWindup(this.target);
+  }
+
+  /** Is the player carrying the ball (or about to get it on a run play)? */
+  private carryingBall() {
+    return this.state === 'run' || (this.state === 'live' && !!this.calledPlay.run);
+  }
+
+  /** Typing into the ⚙ panel (or moving one of its sliders): leave the arrow keys alone. */
+  private static typingInPanel() {
+    const el = document.activeElement;
+    return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement;
+  }
+
+  private onArrowDown(e: KeyboardEvent) {
+    if (FieldScene.typingInPanel()) return;
+    const key = e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : e.key === 'ArrowRight' ? 'right' : null;
+    if (!key) return;
+    e.preventDefault(); // no page scrolling
+    if (e.repeat) return;
+    if (key === 'right') {
+      this.goDown();
+      return;
+    }
+    this.arrowDown[key] = this.time.now;
+    if (this.carryingBall()) this.steered = true;
+  }
+
+  private onArrowUp(e: KeyboardEvent) {
+    const key = e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : null;
+    if (!key) return;
+    const pressed = this.arrowDown[key];
+    this.arrowDown[key] = null;
+    if (pressed === null || this.state !== 'run') return;
+    if ((this.time.now - pressed) / 1000 <= feel.running.jukeFlickTime) {
+      this.chase = { ...this.chase, carrier: tryJuke(this.chase.carrier, key === 'up' ? -1 : 1, this.carryParams()) };
+    }
+  }
+
+  /** Steering from the arrow keys (-1 up .. +1 down); both or neither held = 0. */
+  private arrowSteer() {
+    return (this.arrowDown.down !== null ? 1 : 0) - (this.arrowDown.up !== null ? 1 : 0);
   }
 
   /** Go down on your own terms: a dive forward (1-3 yd, longer at full speed), or a QB slide. */
@@ -1240,7 +1296,9 @@ export class FieldScene extends Phaser.Scene {
     const steer =
       run && !this.steered
         ? laneSteer(this.chase.carrier.pos, rb.path, feel.runGame.laneLookAheadYards, feel.runGame.laneFullSteerYards)
-        : this.steer;
+        : this.steerTouch
+          ? this.steer
+          : this.arrowSteer();
     const rng = getRngOrFallback();
     const drive = run ? feel.runGame.driveSpeed : 0;
     const step = stepChase(this.chase, steer, dt, this.chaseParams(this.carryParams(), 1, drive), () => rng.next());
@@ -1637,11 +1695,11 @@ export class FieldScene extends Phaser.Scene {
     }
     if (this.state === 'run') {
       if (this.chase.dive) this.label.setText(this.qbRun ? 'Sliding…' : 'Diving…');
-      else this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag = steer · flick up/down = juke · flick → = ${this.qbRun ? 'slide' : 'dive'}`);
+      else this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag/↑↓ = steer · flick/tap ↑↓ = juke · flick →/→ key = ${this.qbRun ? 'slide' : 'dive'}`);
       return;
     }
     if (this.state === 'live' && this.calledPlay.run) {
-      this.label.setText(`${this.calledPlay.name}: handing off… hold a thumb down to steer`);
+      this.label.setText(`${this.calledPlay.name}: handing off… hold a thumb (or ↑↓) to steer`);
       return;
     }
     if (this.state === 'return') {
