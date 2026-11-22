@@ -101,6 +101,8 @@ import { generateLeague, pickOpponent, teamRatings, type League } from '../leagu
 import { hexToNumber, kitColors } from '../league/colors';
 import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
+import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
+import { practiceRows, rosterRows } from '../league/rosterView';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -340,6 +342,7 @@ export class FieldScene extends Phaser.Scene {
       closeDriveSummary();
       closeResumeGame();
       closeChooseTeam();
+      closeTeamScreen();
     });
 
     // Once the save has loaded: pick a team (first time), offer to continue an unfinished game, then autosave.
@@ -1735,6 +1738,8 @@ export class FieldScene extends Phaser.Scene {
     this.league = league;
     const ready = () => {
       this.newOpponent();
+      // The play calling screen opened before the league existed: redraw it so TEAM works.
+      if (this.state === 'calling') this.openCall();
       this.offerResume(save.game);
     };
     if (league.userTeamId !== null) {
@@ -1787,6 +1792,19 @@ export class FieldScene extends Phaser.Scene {
     [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
     [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
     this.updateScoreboard();
+  }
+
+  /** TEAM: the roster screen over the play calling screen (which stays as it was underneath). */
+  private openTeam() {
+    const l = this.league;
+    if (!l || l.userTeamId === null) return;
+    const t = l.teams[l.userTeamId];
+    openTeamScreen({
+      team: { abbr: t.abbr, city: t.city, nickname: t.nickname, color: t.colors[0] },
+      roster: rosterRows(l, t.id),
+      practice: practiceRows(l, t.id),
+      onClose: () => {},
+    });
   }
 
   /** Both teams' main colours (for logos / colour dots on the HTML screens). */
@@ -1989,6 +2007,7 @@ export class FieldScene extends Phaser.Scene {
       canPunt: this.match.down === 4 && !this.match.tryPending && !this.clock.ot, // no punting in overtime
       onPunt: () => this.startKick(true),
       tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
+      onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
     });
   }
 

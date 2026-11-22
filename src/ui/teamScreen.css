@@ -1,0 +1,444 @@
+/*
+ * TEAM screen: pixel UI-kit style (navy panels, thick outlines, colour-coded position chips).
+ * Text is deliberately bigger than the other overlays (8px minimum, 10px for names and numbers)
+ * so a dense roster stays readable on a phone. Scrolls vertically only.
+ */
+#team-screen {
+  --ts-navy: #0d1b2a;
+  --ts-panel: #102a52;
+  --ts-card: #0f2346;
+  --ts-border: #2f6fd6;
+  --ts-gold: #ffd166;
+  --ts-text: #f4efe1;
+  --ts-dim: #9ec5ff;
+  position: fixed;
+  inset: 0;
+  z-index: 5; /* above the play calling screen */
+  display: flex;
+  padding: calc(env(safe-area-inset-top) + 6px) calc(env(safe-area-inset-right) + 10px) calc(env(safe-area-inset-bottom) + 6px)
+    calc(env(safe-area-inset-left) + 10px);
+  background: #0b1d3af5;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--ts-text);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#team-screen button {
+  font-family: inherit;
+  color: inherit;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.ts-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  background: var(--ts-panel);
+  border: 3px solid var(--ts-border);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--ts-navy), inset 0 0 0 2px var(--ts-navy);
+  padding: 6px;
+}
+
+/* ---------- Side rail ---------- */
+.ts-rail {
+  flex: none;
+  width: 104px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ts-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0 6px;
+  font-size: 10px;
+  color: var(--ts-gold);
+}
+.ts-nav,
+.ts-back {
+  padding: 9px 6px;
+  font-size: 8px;
+  text-align: left;
+  background: var(--ts-card);
+  border: 2px solid var(--ts-navy);
+  border-radius: 3px;
+}
+.ts-nav.on {
+  background: #1a3a6e;
+  border-color: var(--ts-gold);
+  color: var(--ts-gold);
+}
+.ts-back {
+  margin-top: auto;
+  background: #d64545;
+  color: var(--ts-navy) !important;
+  border-color: var(--ts-navy);
+  box-shadow: 0 3px 0 var(--ts-navy);
+}
+
+/* ---------- Main area ---------- */
+.ts-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y; /* the game blocks scrolling elsewhere */
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 4px 8px 2px;
+}
+.ts-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.ts-title {
+  font-size: 9px;
+  color: var(--ts-gold);
+  line-height: 1.5;
+}
+.ts-note {
+  font-size: 8px;
+  color: var(--ts-dim);
+  line-height: 1.5;
+}
+.ts-chips {
+  display: flex;
+  gap: 4px;
+}
+.ts-chip {
+  padding: 6px 8px;
+  font-size: 8px;
+  background: var(--ts-card);
+  border: 2px solid var(--ts-navy);
+  border-radius: 3px;
+}
+.ts-chip.on {
+  background: var(--ts-gold);
+  color: var(--ts-navy) !important;
+}
+
+/* ---------- Roster cards ---------- */
+.ts-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px;
+}
+.ts-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px 8px;
+  text-align: left;
+  background: var(--ts-card);
+  border: 2px solid var(--ts-navy);
+  border-radius: 3px;
+}
+.ts-card.starter {
+  border-color: #3d6fb5;
+}
+.ts-card:active {
+  background: #1a3a6e;
+}
+.ts-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.ts-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-age {
+  flex: none;
+  font-size: 8px;
+  color: var(--ts-dim);
+}
+.ts-card-attrs {
+  display: flex;
+  gap: 8px;
+}
+.ts-attr {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ts-attr-l {
+  font-size: 8px;
+  color: var(--ts-dim);
+}
+.ts-attr-v {
+  font-size: 9px;
+  min-width: 2ch;
+  text-align: right;
+}
+.ts-attr .ts-bar {
+  flex: 1;
+}
+
+/* Position chips (colour per position group). */
+.ts-pos {
+  flex: none;
+  display: inline-block;
+  min-width: 3.6em;
+  padding: 3px 4px;
+  font-size: 8px;
+  text-align: center;
+  color: var(--ts-navy);
+  border: 2px solid var(--ts-navy);
+  border-radius: 2px;
+}
+.pos-QB {
+  background: #ffd166;
+}
+.pos-RB {
+  background: #3ddc84;
+}
+.pos-TE {
+  background: #9be38f;
+}
+.pos-WR {
+  background: #5fa8d3;
+}
+.pos-OL {
+  background: #b8bccb;
+}
+.pos-DL {
+  background: #ef7b63;
+}
+.pos-LB {
+  background: #f4a261;
+}
+.pos-CB {
+  background: #c3a2f2;
+}
+.pos-S {
+  background: #a77ce8;
+}
+.pos-K,
+.pos-P {
+  background: #4fd1c5;
+}
+
+/* Stars and bars. */
+.ts-stars {
+  flex: none;
+  display: inline-flex;
+  gap: 1px;
+}
+.ts-star svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+  fill: #3a4a66;
+}
+.ts-star.on svg {
+  fill: var(--ts-gold);
+}
+.ts-bar {
+  display: inline-flex;
+  gap: 1px;
+  height: 8px;
+  min-width: 0;
+}
+.ts-bar i {
+  flex: 1;
+  min-width: 2px;
+  background: #24344f;
+}
+/* Colour bands, Football Manager style: red ... green. */
+.b-poor i.on {
+  background: #e5484d;
+}
+.b-weak i.on {
+  background: #f08c3a;
+}
+.b-ok i.on {
+  background: #e9c46a;
+}
+.b-good i.on {
+  background: #8fd16a;
+}
+.b-great i.on {
+  background: #3ddc84;
+}
+.v-poor {
+  color: #ff6b6b;
+}
+.v-weak {
+  color: #f6a15b;
+}
+.v-ok {
+  color: #f1d58a;
+}
+.v-good {
+  color: #a6e283;
+}
+.v-great {
+  color: #5cf09c;
+}
+
+/* ---------- Player profile ---------- */
+.ts-link {
+  padding: 4px 0;
+  font-size: 8px;
+  color: var(--ts-dim) !important;
+  background: none;
+  border: none;
+}
+.ts-phead {
+  margin: 6px 0 8px;
+}
+.ts-pinfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ts-pname {
+  font-size: 13px;
+  line-height: 1.3;
+}
+.ts-pmeta {
+  font-size: 8px;
+  color: var(--ts-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ts-plevel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--ts-gold);
+}
+.ts-plevel .ts-star svg {
+  width: 12px;
+  height: 12px;
+}
+.ts-pot {
+  font-size: 8px;
+  line-height: 1.6;
+}
+.ts-pot span {
+  color: var(--ts-dim);
+}
+.ts-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--ts-navy);
+  margin-bottom: 8px;
+}
+.ts-tabs button {
+  padding: 8px 12px;
+  font-size: 8px;
+  background: var(--ts-card);
+  border: 2px solid var(--ts-navy);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+}
+.ts-tabs button.on {
+  background: var(--ts-gold);
+  color: var(--ts-navy) !important;
+}
+.ts-section {
+  margin-bottom: 10px;
+}
+.ts-h {
+  font-size: 8px;
+  color: var(--ts-gold);
+  margin-bottom: 6px;
+}
+.ts-sub-h {
+  font-size: 8px;
+  color: var(--ts-dim);
+  margin: 4px 0 8px;
+}
+.ts-persona {
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+.ts-text {
+  font-size: 8px;
+  line-height: 1.7;
+  color: var(--ts-dim);
+}
+.ts-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0 16px;
+}
+.ts-cols.three {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+.ts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 8px;
+  line-height: 1.6;
+}
+.ts-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.ts-none {
+  color: var(--ts-dim);
+}
+.ts-arow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 8px;
+}
+.ts-arow .ts-aname {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-arow.big {
+  font-size: 9px;
+  padding: 4px 0;
+}
+.ts-arow.big .ts-aname {
+  flex: 0 0 16em; /* fits "Medium accuracy" in full */
+}
+.ts-arow.big .ts-bar {
+  flex: 1 1 60px;
+  height: 9px;
+  max-width: 260px;
+}
+.ts-aval {
+  flex: none;
+  min-width: 2ch;
+  text-align: right;
+  font-size: 10px;
+}
+
+/* Narrow phones: slimmer rail, the big rows' name column shrinks. */
+@media (max-width: 720px) {
+  .ts-rail {
+    width: 88px;
+  }
+}

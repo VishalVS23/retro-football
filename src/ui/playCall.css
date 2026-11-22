@@ -268,9 +268,11 @@
 .pc-kick {
   background: #f4a259;
 }
-/* TEAM (greyed until stage 3) makes way for the kick button on small screens. */
-.pc-team.pc-hide {
-  display: none;
+/* TEAM makes way for the PUNT / kick buttons on narrow screens (it's back on the next down). */
+@media (max-width: 900px) {
+  .pc-team.pc-hide {
+    display: none;
+  }
 }
 .pc-btn {
   white-space: nowrap;

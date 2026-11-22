@@ -40,6 +40,8 @@ export interface PlayCallOptions {
   onPunt: () => void;
   /** The coach's 4th-down tip (null on other downs); its button gets a gold glow. */
   tip: { choice: FourthChoice; text: string } | null;
+  /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
+  onTeam: (() => void) | null;
 }
 
 let close: (() => void) | null = null;
@@ -107,7 +109,7 @@ export function openPlayCall(o: PlayCallOptions) {
       <button class="pc-btn pc-audible" data-act="audible" title="Change a receiver's route for this play">AUDIBLE</button>
       <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock: no huddle time comes off at the snap">TIMEOUT (${o.timeoutsLeft})</button>
       <button class="pc-btn pc-cancel" data-act="cancel">CANCEL</button>
-      <button class="pc-btn pc-team${o.kickLabel || o.canPunt ? ' pc-hide' : ''}" data-act="team" disabled title="Coming in stage 3: rosters">TEAM</button>
+      <button class="pc-btn pc-team${o.kickLabel || o.canPunt ? ' pc-hide' : ''}" data-act="team"${o.onTeam ? '' : ' disabled'} title="Your roster and players">TEAM</button>
     </div>
   `;
   document.body.appendChild(root);
@@ -182,6 +184,7 @@ export function openPlayCall(o: PlayCallOptions) {
       timeoutBtn.classList.add('used');
     }
     if (act === 'cancel') finish(o.onCancel);
+    if (act === 'team') o.onTeam?.();
   });
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter') finish(() => o.onExecute(selected, calledPlay()));
