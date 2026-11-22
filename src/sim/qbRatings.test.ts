@@ -4,7 +4,7 @@ import { makeFiller } from '../league/league';
 import type { Player } from '../players/player';
 import { PLAYS } from './routes';
 import { simulatePass, type PassShot } from './passSim';
-import { accuracyFor, arm, missLanding, missRadius } from './qbRatings';
+import { accuracyFor, arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 
 /** A QB with every attribute 10, then the given overrides. */
 function qb(over: Partial<Player['attributes']> = {}): Player {
@@ -47,6 +47,14 @@ describe('QB ratings', () => {
     expect(missRadius(qb({ composure: 18 }), 15, true, F, R)).toBeLessThan(missRadius(avg, 15, true, F, R));
   });
 
+  it('off-target balls are harder to catch: free up to a small miss, then worse the further off', () => {
+    expect(offTargetCatchFactor(0, 1.5, R)).toBe(1);
+    expect(offTargetCatchFactor(R.offTargetFreeYards, 1.5, R)).toBe(1);
+    expect(offTargetCatchFactor(1, 1.5, R)).toBeLessThan(1);
+    expect(offTargetCatchFactor(1.5, 1.5, R)).toBeCloseTo(1 - R.offTargetCatchLoss);
+    expect(offTargetCatchFactor(5, 1.5, R)).toBeCloseTo(1 - R.offTargetCatchLoss);
+  });
+
   it('the ball always lands inside the oval: up to the radius across the throw, less along it', () => {
     const from = { x: 30, y: 20 };
     const aim = { x: 50, y: 20 }; // straight downfield: along = x, across = y
@@ -77,7 +85,7 @@ describe('balance: QB ratings in whole pass plays', () => {
   ];
 
   it('an average QB stays close to perfect throws (the small miss is the one exception to 10 = today)', () => {
-    for (const [name, shot] of routes) expect(catches(name, shot) - catches(name, shot, { qb: qb() }), name).toBeLessThan(9);
+    for (const [name, shot] of routes) expect(catches(name, shot) - catches(name, shot, { qb: qb() }), name).toBeLessThan(13);
   }, SLOW);
 
   it('a weak, inaccurate QB under pressure is clearly worse, but not hopeless', () => {
@@ -89,6 +97,19 @@ describe('balance: QB ratings in whole pass plays', () => {
       expect(c, name).toBeGreaterThan(15);
     }
     expect(lost / routes.length).toBeGreaterThan(15);
+  }, SLOW);
+
+  it('a typical 4-star QB beats a 2-star one, by a lot more under pressure', () => {
+    const two = qb({ throwPower: 11, shortAccuracy: 12, mediumAccuracy: 9, deepAccuracy: 11, composure: 9 });
+    const four = qb({ throwPower: 15, shortAccuracy: 15, mediumAccuracy: 15, deepAccuracy: 14, composure: 13 });
+    let calm = 0;
+    let pressured = 0;
+    for (const [name, shot] of routes) {
+      calm += catches(name, shot, { qb: four }) - catches(name, shot, { qb: two });
+      pressured += catches(name, shot, { qb: four, pressured: true }) - catches(name, shot, { qb: two, pressured: true });
+    }
+    expect(calm / routes.length).toBeGreaterThan(3);
+    expect(pressured / routes.length).toBeGreaterThan(12);
   }, SLOW);
 
   it('a big arm completes more quick throws than a weak one', () => {

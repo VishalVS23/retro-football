@@ -28,6 +28,21 @@ export interface QbRatingParams extends RatingSwitch {
   composureHalvingPoints: number;
   /** The miss area is an oval: this fraction as long along the throw as across it (misses are mostly wide, rarely long or short). */
   scatterDepthRatio: number;
+  /** A miss (distance from the aim point) up to this costs nothing... */
+  offTargetFreeYards: number;
+  /** ...beyond it the receiver's catch chance drops, by this share when the miss is as big as the catch zone. */
+  offTargetCatchLoss: number;
+}
+
+/**
+ * Off-target balls are harder to catch (a reach or a lunge instead of a ball in the hands): the
+ * receiver's catch chance is multiplied by this. Measured from where the QB AIMED, so it's his
+ * accuracy that counts, not how well the player led the receiver.
+ */
+export function offTargetCatchFactor(missYards: number, catchRadiusYards: number, p: Pick<QbRatingParams, 'offTargetFreeYards' | 'offTargetCatchLoss'>): number {
+  const span = Math.max(0.01, catchRadiusYards - p.offTargetFreeYards);
+  const u = Math.min(1, Math.max(0, (missYards - p.offTargetFreeYards) / span));
+  return 1 - p.offTargetCatchLoss * u;
 }
 
 export interface ArmEffect {

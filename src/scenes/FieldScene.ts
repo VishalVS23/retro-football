@@ -104,7 +104,7 @@ import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
 import { offenseLineup, type OffenseLineup } from '../league/lineup';
-import { arm, missLanding, missRadius } from '../sim/qbRatings';
+import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -206,6 +206,8 @@ export class FieldScene extends Phaser.Scene {
   private opponentId: number | null = null;
   /** Who is on the field (from the depth charts), once both teams are known. */
   private ourLineup: OffenseLineup | null = null;
+  /** How far the current pass landed from where the QB aimed (his accuracy), in yards. */
+  private throwMiss = 0;
   /** Last names under our skill players before the snap (formation order; the QB's is in the hint line). */
   private nameLabels: Phaser.GameObjects.Text[] = [];
   /** Runs instead of the usual next step when the current banner ends (or SKIP). */
@@ -713,6 +715,7 @@ export class FieldScene extends Phaser.Scene {
     const rng = getRngOrFallback();
     const radius = this.missRadiusFor(aimed);
     const target = missLanding(this.qbPos, aimed, radius, feel.ratings.scatterDepthRatio, rng.next(), rng.next());
+    this.throwMiss = Math.hypot(target.x - aimed.x, target.y - aimed.y);
     this.currentThrow = this.buildThrow(this.qbPos, target, this.bulletThrow);
     this.flightElapsed = 0;
     const duration = this.currentThrow.duration;
@@ -768,7 +771,10 @@ export class FieldScene extends Phaser.Scene {
       contestRadiusYards: feel.defense.contestRadiusYards,
       breakupChance: feel.defense.breakupChance,
       interceptChance: feel.defense.interceptChance,
-      receiverCatchChance: this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance,
+      // An off-target ball (the QB's miss) is harder to hold on to.
+      receiverCatchChance:
+        (this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance) *
+        offTargetCatchFactor(this.throwMiss, this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards, feel.ratings),
       defenderCatchChance: feel.defense.defenderCatchChance,
       shieldedContestRatio: feel.defense.shieldedContestRatio,
       helpContestRatio: feel.defense.helpContestRatio,

@@ -11,7 +11,7 @@ import { resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, step
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
-import { arm, missLanding, missRadius } from './qbRatings';
+import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -131,7 +131,7 @@ export function simulatePass(
     contestRadiusYards: d.contestRadiusYards,
     breakupChance: d.breakupChance,
     interceptChance: d.interceptChance,
-    receiverCatchChance: ca.receiverCatchChance,
+    receiverCatchChance: ca.receiverCatchChance * offTargetCatchFactor(miss, ca.catchRadiusYards, feel.ratings),
     defenderCatchChance: d.defenderCatchChance,
     shieldedContestRatio: d.shieldedContestRatio,
     helpContestRatio: d.helpContestRatio,

@@ -463,8 +463,8 @@ export const feel = {
     /** Height of the players' names on the field before the snap, in yards (0 = no names). */
     nameSize: 1.3,
     /** QB throwing power: ball speed and max distance per point above / below 10 (0.025 = a 20 throws 25% faster and further). */
-    armSpeedPerPoint: 0.025,
-    armRangePerPoint: 0.025,
+    armSpeedPerPoint: 0.04,
+    armRangePerPoint: 0.04,
     /** QB accuracy: the ball lands inside a circle around the aim point. Radius at accuracy 10, unpressured: base + per yard thrown. */
     scatterBaseYards: 0.15,
     scatterPerYard: 0.035,
@@ -476,6 +476,10 @@ export const feel = {
     composureHalvingPoints: 8,
     /** The miss area is an oval: this fraction as long along the throw as across it (misses go wide more than long / short). */
     scatterDepthRatio: 0.4,
+    /** Off-target balls are harder to catch: a miss up to this far from the aim point costs nothing... */
+    offTargetFreeYards: 0.45,
+    /** ...beyond it the receiver's catch chance drops, by this share at a miss as big as the catch zone (a lunging grab). */
+    offTargetCatchLoss: 0.5,
   },
   juice: {
     hitPauseTime: 0.06,
