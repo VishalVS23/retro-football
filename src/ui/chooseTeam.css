@@ -1,0 +1,183 @@
+/* "Choose your team": same pixel UI-kit style as the other overlays. Scrolls vertically only. */
+#choose-team {
+  --ct-navy: #0d1b2a;
+  --ct-panel: #102a52;
+  --ct-card: #0f2346;
+  --ct-border: #2f6fd6;
+  --ct-gold: #ffd166;
+  --ct-text: #f4efe1;
+  --ct-dim: #9ec5ff;
+  position: fixed;
+  inset: 0;
+  z-index: 5; /* above the play calling screen */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top) + 6px) calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 6px)
+    calc(env(safe-area-inset-left) + 12px);
+  background: #0b1d3af2;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--ct-text);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ct-panel {
+  width: min(900px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--ct-panel);
+  border: 3px solid var(--ct-border);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--ct-navy), inset 0 0 0 2px var(--ct-navy);
+  min-height: 0;
+}
+
+.ct-head {
+  padding: 8px 12px 6px;
+  border-bottom: 2px solid var(--ct-navy);
+}
+.ct-title {
+  font-size: 12px;
+  color: var(--ct-gold);
+}
+.ct-sub {
+  margin-top: 4px;
+  font-size: 7px;
+  line-height: 1.5;
+  color: var(--ct-dim);
+}
+
+.ct-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y; /* the game blocks scrolling elsewhere */
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 10px 10px;
+}
+.ct-conf + .ct-conf {
+  margin-top: 10px;
+}
+.ct-conf-name {
+  font-size: 8px;
+  color: var(--ct-gold);
+  margin: 4px 2px 6px;
+}
+.ct-divs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.ct-div {
+  background: var(--ct-card);
+  border: 2px solid var(--ct-navy);
+  border-radius: 3px;
+  padding: 5px;
+}
+.ct-div-name {
+  font-size: 7px;
+  color: var(--ct-dim);
+  margin: 0 2px 4px;
+}
+
+.ct-team {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px;
+  margin: 0;
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+  text-align: left;
+}
+.ct-team.on {
+  border-color: var(--ct-gold);
+  background: #1a3a6e;
+}
+.ct-chip {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ct-text);
+  border-radius: 50%;
+}
+.ct-names {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ct-abbr {
+  font-size: 9px;
+}
+.ct-nick {
+  font-size: 6px;
+  color: var(--ct-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ct-stars {
+  flex: none;
+  font-size: 7px;
+  color: var(--ct-gold);
+  letter-spacing: -1px;
+}
+
+.ct-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-top: 2px solid var(--ct-navy);
+}
+.ct-picked {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 8px;
+}
+.ct-picked-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ct-picked-ratings {
+  font-size: 7px;
+  color: var(--ct-dim);
+}
+.ct-go {
+  flex: none;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 9px;
+  color: var(--ct-navy);
+  background: #3ddc84;
+  border: 3px solid var(--ct-navy);
+  border-radius: 3px;
+  box-shadow: 0 3px 0 var(--ct-navy);
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.ct-go:disabled {
+  background: #5b6b7f;
+  cursor: default;
+}
+.ct-go:not(:disabled):active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ct-navy);
+}

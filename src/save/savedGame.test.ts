@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createNewSave, migrate, parseSave, serializeSave } from './saveFormat';
+import { SAVE_VERSION, createNewSave, migrate, parseSave, serializeSave } from './saveFormat';
+import { generateLeague } from '../league/league';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from './savedGame';
 import { newClock } from '../sim/clock';
 import { newGame } from '../sim/drive';
@@ -23,13 +24,31 @@ function midGame(): SavedGame {
 }
 
 describe('game in progress', () => {
-  it('a version-1 save upgrades with no game in progress', () => {
+  it('a version-1 save upgrades with no game in progress and no league yet', () => {
     const v1 = { version: 1, seed: 5, rngState: 99, createdAt: fixedDate.toISOString(), updatedAt: fixedDate.toISOString(), sessions: 4 };
     const s = migrate(v1);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.game).toBeNull();
+    expect(s.league).toBeNull();
     expect(s.rngState).toBe(99);
     expect(s.sessions).toBe(4);
+  });
+
+  it('a version-2 save keeps its game in progress (opponent picked later) and gets no league yet', () => {
+    const v2 = { version: 2, seed: 5, rngState: 99, createdAt: fixedDate.toISOString(), updatedAt: fixedDate.toISOString(), sessions: 4, game: midGame() };
+    const s = migrate(v2);
+    expect(s.game).toEqual(midGame());
+    expect(s.game?.opponentId).toBeUndefined();
+    expect(s.league).toBeNull();
+  });
+
+  it('a whole league survives a round trip through a file, and a damaged one is dropped', () => {
+    const league = { ...generateLeague(3), userTeamId: 7 };
+    const save = { ...createNewSave(3, fixedDate), league, game: { ...midGame(), opponentId: 12 } };
+    const back = parseSave(serializeSave(save));
+    expect(back.league).toEqual(league);
+    expect(back.game?.opponentId).toBe(12);
+    expect(migrate({ ...save, league: { teams: [] } }).league).toBeNull();
   });
 
   it('survives a round trip through a file exactly', () => {

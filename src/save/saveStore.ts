@@ -2,6 +2,9 @@
  * Browser storage for saves (IndexedDB via `idb`).
  * Keeps the current save plus a rolling backup of the last MAX_BACKUPS versions.
  * Every write puts the old save into the backups first.
+ *
+ * The league (about 1,150 players) is kept under its own key and only rewritten when it changed,
+ * so the autosave after every play stays small. Backups hold whole saves, league included.
  */
 import { openDB, type IDBPDatabase } from 'idb';
 import { createNewSave, migrate, rotateBackups, type SaveData } from './saveFormat';
@@ -11,6 +14,7 @@ const DB_VERSION = 1;
 const STORE = 'saves';
 const CURRENT = 'current';
 const BACKUPS = 'backups';
+const LEAGUE = 'league';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -25,23 +29,37 @@ function db() {
 
 /** Loads the current save (upgrading it if old), or null if there isn't one. */
 export async function loadSave(): Promise<SaveData | null> {
-  const raw = await (await db()).get(STORE, CURRENT);
-  return raw ? migrate(raw) : null;
+  const d = await db();
+  const raw = await d.get(STORE, CURRENT);
+  if (!raw) return null;
+  const league = await d.get(STORE, LEAGUE);
+  return migrate(league === undefined ? raw : { ...raw, league });
 }
 
-/**
- * Writes a save, moving the previous one into the rolling backups. `backup` false = just overwrite
- * (mid-game autosaves after every play, so the backups don't fill up with the last few snaps).
- */
-export async function writeSave(save: SaveData, backup = true): Promise<void> {
+export interface WriteOptions {
+  /** Move the previous save into the rolling backups first (default true). Mid-game autosaves don't. */
+  backup?: boolean;
+  /** Also write the league (default true). Autosaves skip it unless it changed. */
+  league?: boolean;
+}
+
+/** Writes a save, moving the previous one into the rolling backups. */
+export async function writeSave(save: SaveData, opts: WriteOptions = {}): Promise<void> {
+  const { backup = true, league = true } = opts;
   const d = await db();
   const tx = d.transaction(STORE, 'readwrite');
-  const previous = backup ? ((await tx.store.get(CURRENT)) as SaveData | undefined) : undefined;
-  if (previous) {
-    const backups = ((await tx.store.get(BACKUPS)) as SaveData[] | undefined) ?? [];
-    await tx.store.put(rotateBackups(backups, previous), BACKUPS);
+  if (backup) {
+    const prev = (await tx.store.get(CURRENT)) as SaveData | undefined;
+    if (prev) {
+      const prevLeague = await tx.store.get(LEAGUE);
+      const previous = prevLeague === undefined ? prev : { ...prev, league: prevLeague };
+      const backups = ((await tx.store.get(BACKUPS)) as SaveData[] | undefined) ?? [];
+      await tx.store.put(rotateBackups(backups, previous), BACKUPS);
+    }
   }
-  await tx.store.put({ ...save, updatedAt: new Date().toISOString() }, CURRENT);
+  // The save without its league; the league goes under its own key.
+  await tx.store.put({ ...save, league: null, updatedAt: new Date().toISOString() }, CURRENT);
+  if (league) await tx.store.put(save.league, LEAGUE);
   await tx.done;
 }
 

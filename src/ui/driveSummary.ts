@@ -14,6 +14,9 @@ export interface DriveSummaryOptions {
   /** Score after the drive. */
   us: number;
   them: number;
+  /** Team abbreviations for the score line (default YOU / CPU). */
+  ourAbbr?: string;
+  theirAbbr?: string;
   /** The drive ran out the clock in Q4 (END OF GAME instead of END OF HALF). */
   lastQuarter: boolean;
   /** An overtime possession: no "YOUR BALL" line (the period decides what's next). */
@@ -82,7 +85,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   el.id = 'drive-summary';
   el.innerHTML = `
     <div class="ds-panel" role="dialog" aria-label="CPU drive summary">
-      <div class="ds-head">CPU BALL · ${spotText(d.startX)}</div>
+      <div class="ds-head">${o.theirAbbr ?? 'CPU'} BALL · ${spotText(d.startX)}</div>
       <div class="ds-stats">${d.plays} PLAY${d.plays === 1 ? '' : 'S'} · ${d.yards} YDS${o.overtime ? '' : ` · ${clock(d.seconds)}`}</div>
       ${big}
       <div class="ds-field">
@@ -92,7 +95,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
         <div class="ds-end" style="left:${pct(d.endX)}"></div>
       </div>
       <div class="ds-result ${res.tone}">${res.text}</div>
-      <div class="ds-sub">${[...lines, `YOU ${o.us} - ${o.them} CPU`].join('<br>')}</div>
+      <div class="ds-sub">${[...lines, `${o.ourAbbr ?? 'YOU'} ${o.us} - ${o.them} ${o.theirAbbr ?? 'CPU'}`].join('<br>')}</div>
       <button class="ds-btn" type="button">CONTINUE &gt;</button>
     </div>`;
   // Taps on the panel never reach the field underneath.

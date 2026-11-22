@@ -5,12 +5,15 @@
 import { createRng, type Rng } from '../sim/rng';
 import { type SaveData } from './saveFormat';
 import { snapshotGame, type SavedGame } from './savedGame';
+import type { League } from '../league/league';
 import { openOrCreateSave, writeSave } from './saveStore';
 
 let current: SaveData | null = null;
 let rng: Rng | null = null;
 let persisted = false;
 let imported = false;
+/** The league changed since it was last stored. */
+let leagueDirty = false;
 let resolveReady: (save: SaveData) => void = () => {};
 const ready = new Promise<SaveData>((resolve) => (resolveReady = resolve));
 
@@ -65,7 +68,22 @@ export async function replaceSave(save: SaveData): Promise<void> {
 export async function commitSave(backup = true): Promise<void> {
   if (!current || !rng) return;
   current.rngState = rng.getState();
-  if (persisted) await writeSave(current, backup);
+  // Full saves (backup) always include the league; autosaves only when it changed.
+  const league = backup || leagueDirty;
+  if (persisted) await writeSave(current, { backup, league });
+  if (league) leagueDirty = false;
+}
+
+/** Replace the league (e.g. once it's made and the user picked a team) and store it. Never throws. */
+export async function setLeague(league: League): Promise<void> {
+  if (!current || imported) return;
+  current.league = league;
+  leagueDirty = true;
+  try {
+    await commitSave(false);
+  } catch (err) {
+    console.warn('Saving the league failed:', err);
+  }
 }
 
 /**

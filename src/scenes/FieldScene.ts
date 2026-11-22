@@ -95,7 +95,12 @@ import {
   type ClockEvent,
   type ClockState,
 } from '../sim/clock';
-import { getRngOrFallback, saveGameInProgress, whenSaveReady } from '../save/saveSession';
+import { getRngOrFallback, saveGameInProgress, setLeague, whenSaveReady } from '../save/saveSession';
+import type { SaveData } from '../save/saveFormat';
+import { generateLeague, pickOpponent, teamRatings, type League } from '../league/league';
+import { hexToNumber, kitColors } from '../league/colors';
+import { CONFERENCES, DIVISIONS } from '../league/teams';
+import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -190,6 +195,10 @@ export class FieldScene extends Phaser.Scene {
   private otOursDone = false;
   /** Autosave between plays. Off until the save has loaded and any CONTINUE choice is made. */
   private autosave = false;
+  /** The league (teams and players), once the save has loaded. */
+  private league: League | null = null;
+  /** The team we're playing this game. */
+  private opponentId: number | null = null;
   /** Runs instead of the usual next step when the current banner ends (or SKIP). */
   private nextStep: (() => void) | null = null;
   private form = formation(newGame().ballX);
@@ -330,10 +339,11 @@ export class FieldScene extends Phaser.Scene {
       closePlayCall();
       closeDriveSummary();
       closeResumeGame();
+      closeChooseTeam();
     });
 
-    // Once the save has loaded: offer to continue an unfinished game, then start autosaving.
-    void whenSaveReady().then((save) => this.offerResume(save.game));
+    // Once the save has loaded: pick a team (first time), offer to continue an unfinished game, then autosave.
+    void whenSaveReady().then((save) => this.onSaveLoaded(save));
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
     // SPACE also kicks when the kick meter is up.
@@ -1576,7 +1586,7 @@ export class FieldScene extends Phaser.Scene {
       closeDriveSummary();
       this.afterPlay();
     };
-    openDriveSummary({ drive, us: this.match.us, them: this.match.them, lastQuarter, onContinue: next });
+    openDriveSummary({ drive, us: this.match.us, them: this.match.them, ourAbbr: this.ourAbbr(), theirAbbr: this.theirAbbr(), lastQuarter, onContinue: next });
   }
 
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
@@ -1650,7 +1660,7 @@ export class FieldScene extends Phaser.Scene {
       const pts = good ? 2 : 0;
       this.stats = addPoints(this.stats, this.statPeriod(), 0, pts);
       this.match = { ...this.match, them: this.match.them + pts };
-      this.bannerThen(good ? 'CPU 2-PT: GOOD' : 'CPU 2-PT: NO GOOD', () => this.overtimeNext());
+      this.bannerThen(`${this.theirAbbr()} 2-PT: ${good ? 'GOOD' : 'NO GOOD'}`, () => this.overtimeNext());
       return;
     }
     this.state = 'oppDrive';
@@ -1666,6 +1676,8 @@ export class FieldScene extends Phaser.Scene {
       drive,
       us: this.match.us,
       them: this.match.them,
+      ourAbbr: this.ourAbbr(),
+      theirAbbr: this.theirAbbr(),
       lastQuarter: false,
       overtime: true,
       onContinue: () => {
@@ -1697,17 +1709,92 @@ export class FieldScene extends Phaser.Scene {
       us: this.match.us,
       them: this.match.them,
       stats: this.stats,
+      ourAbbr: this.ourAbbr(),
+      theirAbbr: this.theirAbbr(),
       onPlayAgain: () => {
         closeEndGame();
         this.match = newGame();
         this.clock = newClock(feel.clock);
         this.stats = newGameStats();
+        this.newOpponent();
         this.updateScoreboard();
         this.resetPlay();
       },
     });
     // The game is over: nothing to continue next time.
     if (this.autosave) void saveGameInProgress(null);
+  }
+
+  /**
+   * The save has loaded: make the league if it's new (from the save's seed), ask the user to pick
+   * a team if he hasn't yet, then offer to continue an unfinished game.
+   */
+  private onSaveLoaded(save: SaveData) {
+    const league = save.league ?? generateLeague(save.seed);
+    this.league = league;
+    const ready = () => {
+      this.newOpponent();
+      this.offerResume(save.game);
+    };
+    if (league.userTeamId !== null) {
+      ready();
+      return;
+    }
+    // Stars by rank: the top fifth of the league gets 5, the bottom fifth 1.
+    const ratings = league.teams.map((t) => ({ id: t.id, r: teamRatings(league, t.id) }));
+    const rank = [...ratings].sort((a, b) => b.r.overall - a.r.overall).map((x) => x.id);
+    openChooseTeam({
+      conferences: CONFERENCES,
+      divisions: DIVISIONS,
+      teams: league.teams.map((t) => {
+        const r = ratings[t.id].r;
+        return {
+          id: t.id,
+          city: t.city,
+          nickname: t.nickname,
+          abbr: t.abbr,
+          color: t.colors[0],
+          conference: t.conference,
+          division: t.division,
+          offense: r.offense,
+          defense: r.defense,
+          stars: 5 - Math.floor((rank.indexOf(t.id) * 5) / league.teams.length),
+        };
+      }),
+      onPick: (id) => {
+        league.userTeamId = id;
+        void setLeague(league);
+        ready();
+      },
+    });
+  }
+
+  /** A random opponent for a new game, and both teams' colours on the field. */
+  private newOpponent() {
+    if (!this.league || this.league.userTeamId === null) return;
+    this.opponentId = pickOpponent(this.league, getRngOrFallback());
+    this.applyTeams();
+  }
+
+  /** Field colours and scoreboard names for the two teams playing. */
+  private applyTeams() {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return;
+    const k = kitColors(l.teams[l.userTeamId], l.teams[this.opponentId]);
+    const ours = hexToNumber(k.ours);
+    const theirs = hexToNumber(k.theirs);
+    [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
+    [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
+    this.updateScoreboard();
+  }
+
+  private ourAbbr(): string {
+    const l = this.league;
+    return l && l.userTeamId !== null ? l.teams[l.userTeamId].abbr : 'YOU';
+  }
+
+  private theirAbbr(): string {
+    return this.league && this.opponentId !== null ? this.league.teams[this.opponentId].abbr : 'CPU';
   }
 
   /** On launch: an unfinished game in the save = the CONTINUE / NEW GAME panel. */
@@ -1718,11 +1805,18 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     const c = saved.clock;
+    // Games saved before the league existed (or against a team that's now ours) get a random opponent.
+    const l = this.league;
+    const opp = saved.opponentId;
+    const savedOpp = l && opp !== undefined && opp < l.teams.length && opp !== l.userTeamId ? opp : this.opponentId;
+    const oppAbbr = l && savedOpp !== null ? l.teams[savedOpp].abbr : 'CPU';
     openResumeGame({
-      score: `YOU ${saved.match.us} - ${saved.match.them} CPU`,
+      score: `${this.ourAbbr()} ${saved.match.us} - ${saved.match.them} ${oppAbbr}`,
       situation: `${clockText(c)} · ${downText(saved.match)} · ${spotText(saved.match.ballX)}`,
       onContinue: () => {
         this.autosave = true;
+        this.opponentId = savedOpp;
+        this.applyTeams();
         this.loadGame(saved);
       },
       onNewGame: () => {
@@ -1757,6 +1851,7 @@ export class FieldScene extends Phaser.Scene {
     if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
     const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex };
+    if (this.opponentId !== null) game.opponentId = this.opponentId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
 
@@ -1904,7 +1999,7 @@ export class FieldScene extends Phaser.Scene {
   /** Cheap to call every frame: only redraws when the text changes. */
   private updateScoreboard() {
     const g = this.match;
-    const text = `YOU ${g.us} - ${g.them} CPU  ${clockText(this.clock)}  ${downText(g)} · ${spotText(g.ballX)}`;
+    const text = `${this.ourAbbr()} ${g.us} - ${g.them} ${this.theirAbbr()}  ${clockText(this.clock)}  ${downText(g)} · ${spotText(g.ballX)}`;
     if (text === this.scoreText) return;
     this.scoreText = text;
     this.scoreboard.setText(text);
@@ -2007,7 +2102,7 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     if (this.state === 'oppDrive') {
-      this.label.setText('CPU drive');
+      this.label.setText(`${this.theirAbbr()} drive`);
       return;
     }
     if (this.aimPointerId !== null && this.runAim) {
