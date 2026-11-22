@@ -73,6 +73,8 @@ export function addSaveControls(panel: HTMLElement, flash: (t: string) => void) 
       await replaceSave(save);
       refresh();
       flash('Save loaded');
+      // Restart so the loaded save's game in progress (if any) is offered with CONTINUE.
+      window.setTimeout(() => window.location.reload(), 600);
     } catch (err) {
       const msg = err instanceof SaveError ? err.message : 'Could not load that file.';
       window.alert(msg);

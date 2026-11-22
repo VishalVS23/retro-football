@@ -29,11 +29,14 @@ export async function loadSave(): Promise<SaveData | null> {
   return raw ? migrate(raw) : null;
 }
 
-/** Writes a save, moving the previous one into the rolling backups. */
-export async function writeSave(save: SaveData): Promise<void> {
+/**
+ * Writes a save, moving the previous one into the rolling backups. `backup` false = just overwrite
+ * (mid-game autosaves after every play, so the backups don't fill up with the last few snaps).
+ */
+export async function writeSave(save: SaveData, backup = true): Promise<void> {
   const d = await db();
   const tx = d.transaction(STORE, 'readwrite');
-  const previous = (await tx.store.get(CURRENT)) as SaveData | undefined;
+  const previous = backup ? ((await tx.store.get(CURRENT)) as SaveData | undefined) : undefined;
   if (previous) {
     const backups = ((await tx.store.get(BACKUPS)) as SaveData[] | undefined) ?? [];
     await tx.store.put(rotateBackups(backups, previous), BACKUPS);

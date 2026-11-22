@@ -5,8 +5,9 @@
  * MIGRATIONS that upgrades the previous version. Old saves must always load.
  */
 import { randomSeed } from '../sim/rng';
+import { sanitizeSavedGame, type SavedGame } from './savedGame';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const MAX_BACKUPS = 3;
 
 export interface SaveData {
@@ -19,6 +20,8 @@ export interface SaveData {
   updatedAt: string; // ISO date
   /** How many times this save has been opened. Placeholder content until stage 2+. */
   sessions: number;
+  /** The game in progress (saved between plays), or null = start a new game. Added in version 2. */
+  game: SavedGame | null;
 }
 
 export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
@@ -30,6 +33,7 @@ export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
     createdAt: iso,
     updatedAt: iso,
     sessions: 0,
+    game: null,
   };
 }
 
@@ -38,7 +42,10 @@ export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
  * Example for later: 1: (s) => ({ ...s, version: 2, teams: [] }),
  */
 type AnySave = Record<string, unknown> & { version: number };
-const MIGRATIONS: Record<number, (s: AnySave) => AnySave> = {};
+const MIGRATIONS: Record<number, (s: AnySave) => AnySave> = {
+  // 1 -> 2: games can be saved mid-way. Older saves have no game in progress.
+  1: (s) => ({ ...s, version: 2, game: null }),
+};
 
 export class SaveError extends Error {}
 
@@ -60,6 +67,8 @@ export function migrate(raw: unknown): SaveData {
     s = step(s);
   }
   validate(s);
+  // A damaged game in progress is dropped (new game), never the whole save.
+  s = { ...s, game: sanitizeSavedGame(s.game) };
   return s as unknown as SaveData;
 }
 

@@ -4,11 +4,15 @@
  */
 import { createRng, type Rng } from '../sim/rng';
 import { type SaveData } from './saveFormat';
+import { snapshotGame, type SavedGame } from './savedGame';
 import { openOrCreateSave, writeSave } from './saveStore';
 
 let current: SaveData | null = null;
 let rng: Rng | null = null;
 let persisted = false;
+let imported = false;
+let resolveReady: (save: SaveData) => void = () => {};
+const ready = new Promise<SaveData>((resolve) => (resolveReady = resolve));
 
 export async function startSaveSession(): Promise<SaveData> {
   const opened = await openOrCreateSave();
@@ -16,7 +20,13 @@ export async function startSaveSession(): Promise<SaveData> {
   persisted = opened.persisted;
   rng = createRng(current.seed);
   rng.setState(current.rngState);
+  resolveReady(current);
   return current;
+}
+
+/** Resolves once the save has been opened (the game scene waits for it to offer CONTINUE). */
+export function whenSaveReady(): Promise<SaveData> {
+  return ready;
 }
 
 export function getSave(): SaveData {
@@ -44,6 +54,7 @@ export function isPersisted() {
 
 /** Replace the whole save (e.g. after importing a file) and store it. */
 export async function replaceSave(save: SaveData): Promise<void> {
+  imported = true; // the page reloads next; the game on screen must not autosave over this one
   current = save;
   rng = createRng(save.seed);
   rng.setState(save.rngState);
@@ -51,8 +62,22 @@ export async function replaceSave(save: SaveData): Promise<void> {
 }
 
 /** Store the current save, including where the RNG has got to. */
-export async function commitSave(): Promise<void> {
+export async function commitSave(backup = true): Promise<void> {
   if (!current || !rng) return;
   current.rngState = rng.getState();
-  if (persisted) await writeSave(current);
+  if (persisted) await writeSave(current, backup);
+}
+
+/**
+ * Store the game in progress (null = no game to continue), with the RNG, without touching the
+ * rolling backups. Never throws: a failed autosave must not interrupt the game.
+ */
+export async function saveGameInProgress(game: SavedGame | null): Promise<void> {
+  if (!current || imported) return;
+  current.game = game && snapshotGame(game);
+  try {
+    await commitSave(false);
+  } catch (err) {
+    console.warn('Autosave failed:', err);
+  }
 }

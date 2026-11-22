@@ -95,7 +95,9 @@ import {
   type ClockEvent,
   type ClockState,
 } from '../sim/clock';
-import { getRngOrFallback } from '../save/saveSession';
+import { getRngOrFallback, saveGameInProgress, whenSaveReady } from '../save/saveSession';
+import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
+import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -186,6 +188,8 @@ export class FieldScene extends Phaser.Scene {
   private stats = newGameStats();
   /** Overtime: our possession this period is over (the CPU's comes next). */
   private otOursDone = false;
+  /** Autosave between plays. Off until the save has loaded and any CONTINUE choice is made. */
+  private autosave = false;
   /** Runs instead of the usual next step when the current banner ends (or SKIP). */
   private nextStep: (() => void) | null = null;
   private form = formation(newGame().ballX);
@@ -325,7 +329,11 @@ export class FieldScene extends Phaser.Scene {
       meter.remove();
       closePlayCall();
       closeDriveSummary();
+      closeResumeGame();
     });
+
+    // Once the save has loaded: offer to continue an unfinished game, then start autosaving.
+    void whenSaveReady().then((save) => this.offerResume(save.game));
 
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
     // SPACE also kicks when the kick meter is up.
@@ -1698,6 +1706,58 @@ export class FieldScene extends Phaser.Scene {
         this.resetPlay();
       },
     });
+    // The game is over: nothing to continue next time.
+    if (this.autosave) void saveGameInProgress(null);
+  }
+
+  /** On launch: an unfinished game in the save = the CONTINUE / NEW GAME panel. */
+  private offerResume(raw: unknown) {
+    const saved = sanitizeSavedGame(raw, PLAYS.length);
+    if (!saved || isFreshGame(saved, feel.clock.quarterLength)) {
+      this.autosave = true;
+      return;
+    }
+    const c = saved.clock;
+    openResumeGame({
+      score: `YOU ${saved.match.us} - ${saved.match.them} CPU`,
+      situation: `${clockText(c)} · ${downText(saved.match)} · ${spotText(saved.match.ballX)}`,
+      onContinue: () => {
+        this.autosave = true;
+        this.loadGame(saved);
+      },
+      onNewGame: () => {
+        this.autosave = true;
+        void saveGameInProgress(null);
+      },
+    });
+  }
+
+  /** Picks a saved game up at the play calling screen (it was saved there, between plays). */
+  private loadGame(g: SavedGame) {
+    closePlayCall();
+    closeDriveSummary();
+    closeEndGame();
+    this.match = g.match;
+    this.clock = g.clock;
+    this.stats = g.stats;
+    this.playIndex = g.playIndex;
+    this.otOursDone = false;
+    this.nextStep = null;
+    this.pendingBreak = null;
+    this.finishBreak = null;
+    this.nextClock = null;
+    this.resetPlay();
+  }
+
+  /**
+   * Autosave (each time the play calling screen opens after a play). Skipped while a clock break is
+   * still to come (a try at 0:00 before the half): the last save stays, one play earlier.
+   */
+  private autosaveGame() {
+    if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
+    if (this.match.oppStartX !== null || this.state === 'gameOver') return;
+    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex };
+    void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
 
   /** The safety's spot: deep behind the line, but never past the back of the end zone. */
@@ -1779,7 +1839,10 @@ export class FieldScene extends Phaser.Scene {
     this.cameraFocus = { x: qbStart.x + 12, y: FORMATION_VIEW_Y };
     this.updateLabel();
     this.updateScoreboard();
-    if (call) this.openCall();
+    if (call) {
+      this.autosaveGame();
+      this.openCall();
+    }
   }
 
   /** Shows the play calling screen; EXECUTE lines up the chosen play, CANCEL keeps the current one. */
