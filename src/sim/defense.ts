@@ -27,6 +27,8 @@ export interface CoverParams {
   cushionYards: number;
   /** Seconds after the snap for that cushion to close to nothing. */
   cushionCloseTime: number;
+  /** The cushion never closes below this (off man keeps a step on top). Default 0. */
+  cushionFloorYards?: number;
   /**
    * Closest he can get to the receiver's body while breaking on the ball (he can't run through
    * him). Together with `shieldedContestRatio` this is what gets stop routes (Hitch, Curl) open.
@@ -124,12 +126,13 @@ export function stepCoverage(
     top *= ballBreakRatio(c.dir, c.pos, ball.landing, p.ballSpeedRatio);
   } else {
     const seen = delayedPos(history, t - p.reactionTime);
-    const cushion = p.cushionYards * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
+    const floor = Math.min(p.cushionFloorYards ?? 0, p.cushionYards);
+    const cushion = floor + (p.cushionYards - floor) * Math.max(0, 1 - t / Math.max(0.01, p.cushionCloseTime));
     const before = delayedPos(history, t - p.reactionTime - 0.1);
     const seenVel = { x: (seen.x - before.x) / 0.1, y: (seen.y - before.y) / 0.1 };
     const ahead = (p.anticipation ?? 0) * p.reactionTime;
     target = { x: Math.max(seen.x + seenVel.x * ahead + cushion, p.minX ?? -Infinity), y: seen.y + seenVel.y * ahead };
-    const closing = t < p.cushionCloseTime ? p.cushionYards / Math.max(0.01, p.cushionCloseTime) : 0;
+    const closing = t < p.cushionCloseTime ? (p.cushionYards - floor) / Math.max(0.01, p.cushionCloseTime) : 0;
     targetVel = { x: seenVel.x - closing, y: seenVel.y };
   }
   // He can't run through the receiver: he stops short, on his own side of him.

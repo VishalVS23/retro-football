@@ -78,6 +78,7 @@ import {
 import { PUNTER_DEPTH, insideTwenty } from '../sim/punting';
 import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, type PuntPlay } from '../sim/puntReturn';
 import { coachTip } from '../sim/fourthDown';
+import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStart, pickDefCall, stepBlitzer, teamAggression, type DefCallId } from '../sim/defCalls';
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
@@ -238,6 +239,10 @@ export class FieldScene extends Phaser.Scene {
   private playTime = 0; // seconds since the snap
   private playIndex = 0; // the play called (index into PLAYS)
   private calledPlay: PlayDef = PLAYS[0]; // that play with any hot routes (this snap only)
+  /** Their defensive call for this snap (3d2), rolled once per snap when the huddle opens. */
+  private defCall: DefCallId = 'man';
+  /** The play calling screen was opened at the line (PLAYS before the snap): it shows their defense. */
+  private callAtLine = false;
   private qbPos: Vec = { ...this.form.qb };
   private aimPointerId: number | null = null;
   private aimStart = { x: 0, y: 0 };
@@ -342,7 +347,7 @@ export class FieldScene extends Phaser.Scene {
     plays.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (this.state === 'presnap') this.openCall();
+      if (this.state === 'presnap') this.openCall(true);
     });
     document.body.appendChild(plays);
     this.playsBtn = plays;
@@ -431,11 +436,11 @@ export class FieldScene extends Phaser.Scene {
         const t = this.queuedTarget;
         this.queuedTarget = null;
         this.startWindup(t);
-      } else if (!this.underPressure && closestRusher(this.rushers, this.qbPos) <= feel.pocket.pressureYards) {
+      } else if (!this.underPressure && closestRusher(this.rushThreats(), this.qbPos) <= feel.pocket.pressureYards) {
         this.underPressure = true;
         this.qb.setStrokeStyle(0.3, PRESSURE_COLOR);
       }
-      if (this.state === 'live' && reachedQb(this.rushers, this.qbPos, this.rushParams())) this.sack();
+      if (this.state === 'live' && reachedQb(this.rushThreats(), this.qbPos, this.rushParams())) this.sack();
     }
 
     if (playing) this.drawReceivers();
@@ -1280,34 +1285,20 @@ export class FieldScene extends Phaser.Scene {
       this.state === 'flight' && this.currentThrow
         ? { landing: this.currentThrow.to, sinceThrow: this.flightElapsed }
         : undefined;
-    const cover = {
-      topSpeed: feel.routes.topSpeed * feel.defense.cbSpeedRatio,
-      acceleration: feel.routes.acceleration,
-      reactionTime: feel.defense.cbReactionTime,
-      cushionYards: feel.defense.cbCushionYards,
-      cushionCloseTime: feel.defense.cbCushionCloseTime,
-      ballReactionTime: feel.defense.cbBallReactionTime,
-      ballSpeedRatio: feel.defense.cbBallSpeedRatio,
-      bodyGapYards: feel.defense.cbBodyGapYards,
-      helpBallReactionTime: feel.defense.cbHelpBallReactionTime,
-      turnAcceleration: feel.defense.cbTurnAcceleration,
-      anticipation: feel.defense.cbAnticipation,
-    };
-    // The linebacker covers the RB, but holds his ground past the line until the ball is thrown or handed off.
-    const lbCover = {
-      ...cover,
-      topSpeed: feel.routes.topSpeed * feel.defense.lbSpeedRatio,
-      reactionTime: feel.defense.lbReactionTime,
-      cushionYards: 1,
-      // He reads the play: holds near the line against a run, drops into coverage against a pass.
-      minX: this.match.ballX + (this.calledPlay.run ? feel.defense.lbFloorYards : feel.defense.lbPassDropYards),
-    };
+    // Corners and linebacker play this snap's call (press / off / normal man); the LB holds near the line against a run.
+    const { cb: cover, lb: lbCover } = coverParams(this.defCall, feel, this.match.ballX, !!this.calledPlay.run);
     // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
     // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
       const myBall = ball && { ...ball, help: i !== this.targetIndex };
       // Each defender covers with his own ratings (3d-c): speed, man coverage, gambling.
-      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, coverFor(this.theirLineup?.cover[i], i === RB ? lbCover : cover, feel.ratings), myBall);
+      if (i === RB && this.defCall === 'blitz') {
+        // Blitz: the linebacker shoots his gap at the QB (nobody blocks him; the RB is left uncovered).
+        const goal = this.calledPlay.run ? this.form.qb : this.qbPos;
+        r.coverage = { ...r.coverage, pos: stepBlitzer(r.coverage.pos, goal, this.playTime, dt, feel) };
+      } else {
+        r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, coverFor(this.theirLineup?.cover[i], i === RB ? lbCover : cover, feel.ratings), myBall);
+      }
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
 
@@ -1409,7 +1400,7 @@ export class FieldScene extends Phaser.Scene {
         speed: i === RB ? feel.defense.lbPursuitSpeed : db,
         stunned: 0,
         // On a run the linebacker reads it first, and the corners stay with their receivers a moment (pass first).
-        wait: this.calledPlay.run ? (i === RB ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) : 0,
+        wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : feel.runGame.cbReadTime) : 0,
       })),
       { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
       ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 })),
@@ -2040,13 +2031,11 @@ export class FieldScene extends Phaser.Scene {
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
     const play = this.calledPlay;
     const rng = getRngOrFallback();
+    if (call) this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
-      const cbStart =
-        i === RB
-          ? { x: this.match.ballX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }
-          : { x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y };
+      const cbStart = i === RB ? linebackerStart(this.defCall, feel, this.match.ballX) : cornerStart(this.defCall, feel, wr.pos);
       // Each corner's speed is rolled per snap (the linebacker's isn't).
       const speed = i === RB ? 1 : rollCornerSpeed(1, feel.defense.cbSpeedVariance, rng.next());
       return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos, speed) };
@@ -2105,12 +2094,42 @@ export class FieldScene extends Phaser.Scene {
     this.updateScoreboard();
     if (call) {
       this.autosaveGame();
-      this.openCall();
+      this.openCall(false);
     }
   }
 
-  /** Shows the play calling screen; EXECUTE lines up the chosen play, CANCEL keeps the current one. */
-  private openCall() {
+  /** Their defensive call for the coming snap, weighted by the situation and their aggression. */
+  private rollDefCall(roll: number): DefCallId {
+    if (!feel.defCalls.enabled) return 'man';
+    const g = this.match;
+    return pickDefCall(
+      {
+        down: g.down,
+        toGo: Math.max(1, Math.round((g.tryPending ? OPP_GOAL_X : g.firstDownX) - g.ballX)),
+        ballX: g.ballX,
+        quarter: this.clock.quarter,
+        timeLeft: this.clock.timeLeft,
+        lead: g.them - g.us,
+        aggression: teamAggression(this.opponentId),
+      },
+      feel,
+      roll,
+    );
+  }
+
+  /** Everyone rushing the QB: the rushers, plus the linebacker on a blitz (never blocked). */
+  private rushThreats() {
+    if (this.defCall !== 'blitz') return this.rushers;
+    return [...this.rushers, { pos: this.receivers[RB].coverage.pos, shedAt: 0 }];
+  }
+
+  /**
+   * Shows the play calling screen; EXECUTE lines up the chosen play, CANCEL keeps the current one.
+   * `atLine` = opened with PLAYS before the snap: the diagram shows how their defense lines up
+   * (left out = same as last time, e.g. when the screen is redrawn).
+   */
+  private openCall(atLine?: boolean) {
+    if (atLine !== undefined) this.callAtLine = atLine;
     this.state = 'calling';
     this.updateLabel();
     const fgRange = inFieldGoalRange(this.match.ballX, feel.kicking);
@@ -2153,6 +2172,7 @@ export class FieldScene extends Phaser.Scene {
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
       names: this.diagramNames(),
       matchups: this.diagramMatchups(),
+      defenseRead: this.callAtLine ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall] } : null,
     });
   }
 

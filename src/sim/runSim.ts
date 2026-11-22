@@ -10,6 +10,7 @@ import { startCoverage, stepCoverage } from './defense';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
+import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -33,35 +34,26 @@ export function simulateRun(
   jukeYards = 0,
   losX = 45,
   holdSteer?: number | ((t: number) => number),
+  call: DefCallId = 'man',
 ): { yards: number; by: number } {
   const rng = createRng(seed);
   const f = formation(losX);
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, p.routes[i].stop));
   const d = feel.defense;
-  const cbCover = {
-    topSpeed: feel.routes.topSpeed * d.cbSpeedRatio,
-    acceleration: feel.routes.acceleration,
-    reactionTime: d.cbReactionTime,
-    cushionYards: d.cbCushionYards,
-    cushionCloseTime: d.cbCushionCloseTime,
-    ballReactionTime: d.cbBallReactionTime,
-    ballSpeedRatio: d.cbBallSpeedRatio,
-    bodyGapYards: d.cbBodyGapYards,
-    turnAcceleration: d.cbTurnAcceleration,
-    anticipation: d.cbAnticipation,
-  };
-  const lbCover = { ...cbCover, topSpeed: feel.routes.topSpeed * d.lbSpeedRatio, reactionTime: d.lbReactionTime, cushionYards: 1, minX: losX + d.lbFloorYards };
-  let cover = f.skill.map((s, i) =>
-    startCoverage(i === RB ? { x: losX + d.lbDepthYards, y: mid } : { x: s.pos.x + d.cbCushionYards, y: s.pos.y }, s.pos),
-  );
+  const blitz = call === 'blitz';
+  const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
+  let cover = f.skill.map((s, i) => startCoverage(i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos), s.pos));
   const rg = feel.runGame;
   let rushers = f.rush.map((pos) => ({ pos: { ...pos }, shedAt: rg.shedTime + (rng.next() * 2 - 1) * rg.shedTimeVariance }));
   let t = 0;
   while (!reachedHandoff(runners[RB]) && t < 3) {
     t += dt;
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, feel.routes));
-    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover));
+    // A blitzing linebacker shoots his gap, straight at the QB (a run away from him gets outside him).
+    cover = cover.map((c, i) =>
+      blitz && i === RB ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) } : stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover),
+    );
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }));
   }
   const tk = feel.tackling;
@@ -70,7 +62,8 @@ export function simulateRun(
       pos: { ...c.pos },
       speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
       stunned: 0,
-      wait: i === RB ? rg.lbReadTime : rg.cbReadTime,
+      // A blitzer is already coming: no read.
+      wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : rg.cbReadTime,
     })),
     { pos: { x: losX + d.safetyDepthYards, y: mid }, speed: tk.dbPursuitSpeed, stunned: 0 },
     ...rushers.map((r) => ({ pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) })),

@@ -96,6 +96,44 @@ export const feel = {
     /** His chasing speed once someone has the ball. */
     lbPursuitSpeed: 6.8,
   },
+  /** Defensive calls (3d2): the CPU defense picks press man / off man / LB blitz / normal man each snap. */
+  defCalls: {
+    /** Press man: corners line up this close and close the rest quickly... */
+    pressCushionYards: 1,
+    pressCloseTime: 0.4,
+    /** ...and react to their man this much faster (fraction of the normal reaction delay). */
+    pressReactionRatio: 0.4,
+    /** ...and turn this much quicker (x their momentum), so they sit on short routes. */
+    pressTurnScale: 1.5,
+    /** ...but a pressed corner who gets turned around runs at this fraction of his speed (beatable deep). */
+    pressSpeedRatio: 0.94,
+    /** Off man: corners line up this far off and give ground slowly. */
+    offCushionYards: 8,
+    offCloseTime: 2,
+    /** ...and never let it close below this, so they stay on top of deep routes. */
+    offFloorYards: 0.6,
+    /** LB blitz: he lines up this close to the line, waits this long after the snap, then runs at the QB this fast (yd/s). */
+    blitzStartYards: 2,
+    blitzDelay: 0.45,
+    blitzSpeed: 5.5,
+    /** Base weight of each call (how often it's picked in an ordinary situation). */
+    weightMan: 4,
+    weightPress: 2,
+    weightOff: 2,
+    weightBlitz: 2,
+    /** 3rd / 4th and this many yards or more = long yardage: off man gets this extra weight. */
+    longYards: 7,
+    longOffBonus: 4,
+    /** This many yards or fewer to go = short yardage: press and blitz each get this extra weight. */
+    shortYards: 2,
+    shortAggressiveBonus: 2,
+    /** Inside our opponent's 20 (no room to play off): extra press weight. */
+    redZonePressBonus: 2,
+    /** Defending a lead in the last 2 minutes of Q4: extra off-man weight. */
+    preventOffBonus: 4,
+    /** 0/1 switch: 0 = always normal man (as before 3d2). */
+    enabled: 1,
+  },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
     /** Running back's speed with the ball (later: his speed rating). */

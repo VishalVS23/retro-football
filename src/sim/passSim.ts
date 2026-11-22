@@ -13,6 +13,7 @@ import { createRng } from './rng';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
+import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -35,6 +36,8 @@ export interface PassOptions {
   offense?: (Player | null)[];
   /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety. Leave out = no defender ratings. */
   defense?: { cover: (Player | null)[]; safety: Player | null };
+  /** Their defensive call (3d2). Default: normal man. */
+  call?: DefCallId;
 }
 
 /** Headless pass play. Corner speeds are rolled from `seed`, like the game does each snap. */
@@ -45,7 +48,7 @@ export function simulatePass(
   feel: Feel,
   losX = 35,
   opts: PassOptions = {},
-): { result: PassResult; separation: number; defender: number; miss: number } {
+): { result: PassResult; separation: number; defender: number; miss: number; sacked: boolean } {
   const withQb = 'qb' in opts;
   const armFx = withQb ? arm(opts.qb, feel.ratings) : { speed: 1, range: 1 };
   const rng = createRng(seed);
@@ -56,20 +59,9 @@ export function simulatePass(
   const R = feel.ratings;
   // Each receiver runs his route at his own speed (3d-c); without `offense`, everyone at the plain values.
   const run = f.skill.map((_, i) => (opts.offense ? receiverRunParams(opts.offense[i], feel.routes, R) : feel.routes));
-  const cbCover = {
-    topSpeed: feel.routes.topSpeed * d.cbSpeedRatio,
-    acceleration: feel.routes.acceleration,
-    reactionTime: d.cbReactionTime,
-    cushionYards: d.cbCushionYards,
-    cushionCloseTime: d.cbCushionCloseTime,
-    ballReactionTime: d.cbBallReactionTime,
-    ballSpeedRatio: d.cbBallSpeedRatio,
-    bodyGapYards: d.cbBodyGapYards,
-    helpBallReactionTime: d.cbHelpBallReactionTime,
-    turnAcceleration: d.cbTurnAcceleration,
-    anticipation: d.cbAnticipation,
-  };
-  const lbCover = { ...cbCover, topSpeed: feel.routes.topSpeed * d.lbSpeedRatio, reactionTime: d.lbReactionTime, cushionYards: 1, minX: losX + d.lbPassDropYards };
+  const call = opts.call ?? 'man';
+  const blitz = call === 'blitz';
+  const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, false);
   // Each defender covers with his own ratings (3d-c).
   const def = opts.defense;
   const coverP = f.skill.map((_, i) => {
@@ -78,7 +70,7 @@ export function simulatePass(
   });
   let cover = f.skill.map((s, i) =>
     startCoverage(
-      i === RB ? { x: losX + d.lbDepthYards, y: mid } : { x: s.pos.x + d.cbCushionYards, y: s.pos.y },
+      i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos),
       s.pos,
       i === RB ? 1 : rollCornerSpeed(1, d.cbSpeedVariance, rng.next()),
     ),
@@ -101,11 +93,17 @@ export function simulatePass(
   };
 
 
+  // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
+  type Cov = (typeof cover)[number];
+  const stepLb = (c: Cov, tt: number): Cov => ({ ...c, pos: stepBlitzer(c.pos, qbAt(tt), tt, dt, feel) });
+  let sacked = false;
   let t = 0;
   for (; t < shot.throwAt - 1e-9; t += dt) {
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
-    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, coverP[i]));
+    cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : stepCoverage(c, runners[i].pos, dt, coverP[i])));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
+    const q = qbAt(t + dt);
+    if (blitz && Math.hypot(cover[RB].pos.x - q.x, cover[RB].pos.y - q.y) <= feel.pocket.sackReachYards) sacked = true;
   }
 
   // The throw.
@@ -158,5 +156,5 @@ export function simulatePass(
     })()),
   });
   const nearestDefender = Math.min(...cbSpots.map((c) => Math.hypot(c.x - landing.x, c.y - landing.y)));
-  return { result: pass.result, separation: nearestDefender, defender: pass.defender, miss };
+  return { result: pass.result, separation: nearestDefender, defender: pass.defender, miss, sacked };
 }

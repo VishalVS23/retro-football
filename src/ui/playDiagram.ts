@@ -10,6 +10,7 @@ import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, routePath, type PlayDef } from '../sim/routes';
 import type { Vec } from '../sim/throw';
+import { cornerStart, linebackerStart, type DefCallId } from '../sim/defCalls';
 
 export interface DiagramView {
   x0: number;
@@ -30,6 +31,8 @@ export interface DiagramView {
    * (+1 = ours, shown as a green up-arrow; -1 = theirs, a red down-arrow; 0 = even, a grey dash).
    */
   defense?: { cover: string[]; safety: string; edge: number[] };
+  /** Big diagram: line the defense up for this call (3d2; shown once you're at the line). Default: normal man. */
+  call?: DefCallId;
 }
 
 /** Text from outside goes through this before landing in the SVG. */
@@ -181,8 +184,9 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     // them); the linebacker's and safety's stay below (above them sit the line and route labels).
     const dn = v.defense;
     const dl = (name: string | undefined, fallback: string) => (name ? esc(name.toUpperCase()) : fallback);
-    f.wrs.forEach((wr, i) => (s += player({ x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y }, C.defense, dl(dn?.cover[i], 'CB'), !!dn)));
-    s += player({ x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.cover[RB], 'LB'));
+    const call = v.call ?? 'man';
+    f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), !!dn)));
+    s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
     s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.safety, 'S'));
     f.rush.forEach((r) => (s += player(r, C.defense, null))); // linemen unlabelled: too tightly packed
   }

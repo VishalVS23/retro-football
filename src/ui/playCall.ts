@@ -12,6 +12,7 @@ import type { FourthChoice } from '../sim/fourthDown';
 import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
 import { playDiagramSvg } from './playDiagram';
+import type { DefCallId } from '../sim/defCalls';
 
 export interface PlayCallOptions {
   match: GameState;
@@ -44,6 +45,8 @@ export interface PlayCallOptions {
   names: { qb: string; skill: string[] } | null;
   /** Their defenders' names and the matchup edges for the big diagram (see DiagramView.defense); null = plain CB / LB / S. */
   matchups: { cover: string[]; safety: string; edge: number[] } | null;
+  /** At the line (PLAYS reopened before the snap): their defensive call, drawn in the diagram, with a read and a tip. null = in the huddle. */
+  defenseRead: { call: DefCallId; name: string; tip: string } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
 }
@@ -79,6 +82,10 @@ export function openPlayCall(o: PlayCallOptions) {
   let audible = false;
   const calledPlay = (): PlayDef => ({ ...plays[selected], routes: [...routes] });
 
+  const tipLines = [
+    ...(o.tip ? [`COACH: <b>${o.tip.text.toUpperCase()}</b>`] : []),
+    ...(o.defenseRead ? [`LOOKS LIKE: <b>${o.defenseRead.name}</b> - ${o.defenseRead.tip.toUpperCase()}`] : []),
+  ];
   const rec = (c: FourthChoice) => (o.tip?.choice === c ? ' pc-rec' : '');
 
   const root = document.createElement('div');
@@ -90,7 +97,7 @@ export function openPlayCall(o: PlayCallOptions) {
       <div class="pc-chip">ZONE: <b>${fieldZone(match.ballX)}</b></div>
       <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
     </div>
-    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${o.tip ? `<div class="pc-tip">COACH: <b>${o.tip.text.toUpperCase()}</b></div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
+    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
       <div class="pc-cards">
@@ -138,6 +145,7 @@ export function openPlayCall(o: PlayCallOptions) {
       detailed,
       ...(detailed && o.names ? { names: o.names } : {}),
       ...(detailed && o.matchups ? { defense: o.matchups } : {}),
+      ...(detailed && o.defenseRead ? { call: o.defenseRead.call } : {}),
       ...extra,
     });
   };
