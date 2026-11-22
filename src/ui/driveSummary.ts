@@ -16,6 +16,8 @@ export interface DriveSummaryOptions {
   them: number;
   /** The drive ran out the clock in Q4 (END OF GAME instead of END OF HALF). */
   lastQuarter: boolean;
+  /** An overtime possession: no "YOUR BALL" line (the period decides what's next). */
+  overtime?: boolean;
   onContinue: () => void;
 }
 
@@ -62,8 +64,11 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   const d = o.drive;
   const res = resultLine(d, o.lastQuarter);
   const lines: string[] = [];
-  if (d.result === 'touchdown') lines.push(d.extraPointGood ? 'XP GOOD' : 'XP NO GOOD');
-  if (d.result !== 'endOfHalf') lines.push(`YOUR BALL · ${spotText(d.ourStartX)}`);
+  if (d.result === 'touchdown' && d.extraPointGood !== null) {
+    const kind = d.tryKind === 'twoPoint' ? '2-PT' : 'XP';
+    lines.push(`${kind} ${d.extraPointGood ? 'GOOD' : 'NO GOOD'}`);
+  }
+  if (d.result !== 'endOfHalf' && !o.overtime) lines.push(`YOUR BALL · ${spotText(d.ourStartX)}`);
   const pct = (x: number) => `${(x / TOTAL_LENGTH) * 100}%`;
   const lo = Math.min(d.startX, d.endX);
   const hi = Math.max(d.startX, d.endX);
@@ -78,7 +83,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   el.innerHTML = `
     <div class="ds-panel" role="dialog" aria-label="CPU drive summary">
       <div class="ds-head">CPU BALL · ${spotText(d.startX)}</div>
-      <div class="ds-stats">${d.plays} PLAY${d.plays === 1 ? '' : 'S'} · ${d.yards} YDS · ${clock(d.seconds)}</div>
+      <div class="ds-stats">${d.plays} PLAY${d.plays === 1 ? '' : 'S'} · ${d.yards} YDS${o.overtime ? '' : ` · ${clock(d.seconds)}`}</div>
       ${big}
       <div class="ds-field">
         <div class="ds-ez left"></div><div class="ds-ez right"></div><div class="ds-mid"></div>

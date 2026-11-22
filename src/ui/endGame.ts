@@ -61,7 +61,7 @@ export function openEndGame(o: EndGameOptions) {
   el.innerHTML = `
     <div class="eg-panel" role="dialog" aria-label="Final score and stats">
       <div class="eg-left">
-        <div class="eg-head-line">FINAL</div>
+        <div class="eg-head-line">FINAL${periods > 4 ? ` / ${periodName(periods - 1)}` : ''}</div>
         <div class="eg-result ${outcome.tone}">${outcome.text}</div>
         <div class="eg-score">YOU ${o.us} - ${o.them} CPU</div>
         ${quarters}

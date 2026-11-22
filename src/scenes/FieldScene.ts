@@ -81,6 +81,7 @@ import { coachTip } from '../sim/fourthDown';
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
+import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
 import {
   beforeSnap,
   callTimeout,
@@ -183,6 +184,10 @@ export class FieldScene extends Phaser.Scene {
   private match: GameState = newGame();
   /** Box score for the end-of-game screen. */
   private stats = newGameStats();
+  /** Overtime: our possession this period is over (the CPU's comes next). */
+  private otOursDone = false;
+  /** Runs instead of the usual next step when the current banner ends (or SKIP). */
+  private nextStep: (() => void) | null = null;
   private form = formation(newGame().ballX);
   private scoreboard!: Phaser.GameObjects.Text;
   private scoreText = '';
@@ -876,7 +881,8 @@ export class FieldScene extends Phaser.Scene {
 
   /** New game state after a play or a kick, then the clock (`stops` = this play stops it). */
   private finishPlay(state: GameState, event: DriveEvent, stops: boolean) {
-    this.stats = addPoints(recordEvent(this.stats, event), this.clock.quarter, state.us - this.match.us, state.them - this.match.them);
+    this.stats = addPoints(recordEvent(this.stats, event), this.statPeriod(), state.us - this.match.us, state.them - this.match.them);
+    if (this.clock.ot && possessionOver(event, state)) this.otOursDone = true;
     this.match = state;
     if (state.tryPending) {
       // Touchdown: the try comes first and is untimed. An end of quarter waits until it's over.
@@ -1504,6 +1510,12 @@ export class FieldScene extends Phaser.Scene {
   private afterPlay() {
     this.resetTimer?.remove();
     this.resetTimer = null;
+    const step = this.nextStep;
+    this.nextStep = null;
+    if (step) {
+      step();
+      return;
+    }
     const ev = this.pendingBreak;
     this.pendingBreak = null;
     if (ev) {
@@ -1513,6 +1525,11 @@ export class FieldScene extends Phaser.Scene {
     const finish = this.finishBreak;
     this.finishBreak = null;
     finish?.();
+    if (this.otOursDone) {
+      this.otOursDone = false;
+      this.overtimeCpu();
+      return;
+    }
     // Our possession is over (score, punt, turnover, second-half kickoff): their drive comes first.
     if (this.match.oppStartX !== null) {
       this.runOppDrive(this.match.oppStartX);
@@ -1557,7 +1574,8 @@ export class FieldScene extends Phaser.Scene {
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
   private showBreak(ev: Exclude<ClockEvent, null>) {
     if (ev === 'final') {
-      this.showFinal();
+      if (this.match.us === this.match.them) this.startOvertime(1);
+      else this.showFinal();
       return;
     }
     this.state = 'result';
@@ -1584,8 +1602,83 @@ export class FieldScene extends Phaser.Scene {
     this.resetTimer = this.time.delayedCall((hold + feel.pacing.betweenPlaysTime) * 1000, () => this.afterPlay());
   }
 
+  /** Points go to this period in the box score: 1-4, then 5+ for overtime. */
+  private statPeriod() {
+    return this.clock.ot ? 4 + this.clock.ot : this.clock.quarter;
+  }
+
+  /** A banner, then `next` (when it's done, or on SKIP). */
+  private bannerThen(text: string, next: () => void) {
+    this.state = 'result';
+    this.showBanner(text, feel.pacing.breakBannerTime);
+    this.updateScoreboard();
+    this.updateLabel();
+    this.nextStep = next;
+    this.resetTimer = this.time.delayedCall((feel.pacing.breakBannerTime + feel.pacing.betweenPlaysTime) * 1000, () => this.afterPlay());
+  }
+
+  /** Overtime period `period`: untimed, we go first from their 25 (or a 2-point try in the shootout). */
+  private startOvertime(period: number) {
+    this.clock = { ...this.clock, timeLeft: 0, running: false, ot: period };
+    this.nextClock = null;
+    this.finishBreak = null;
+    this.match = overtimeStart(this.match, period);
+    this.otOursDone = false;
+    this.bannerThen(overtimeBanner(period), () => this.resetPlay());
+  }
+
+  /** Our overtime possession is over: the CPU's turn (a drive from our 25, or a 2-point try). */
+  private overtimeCpu() {
+    const period = this.clock.ot ?? 1;
+    this.match = { ...this.match, oppStartX: null, tryPending: false };
+    // They already lead (pick six, safety): no need for their possession.
+    if (this.match.them > this.match.us) {
+      this.showFinal();
+      return;
+    }
+    const rng = getRngOrFallback();
+    if (period >= SHOOTOUT_PERIOD) {
+      const good = rng.chance(feel.oppDrive.twoPointChance);
+      const pts = good ? 2 : 0;
+      this.stats = addPoints(this.stats, this.statPeriod(), 0, pts);
+      this.match = { ...this.match, them: this.match.them + pts };
+      this.bannerThen(good ? 'CPU 2-PT: GOOD' : 'CPU 2-PT: NO GOOD', () => this.overtimeNext());
+      return;
+    }
+    this.state = 'oppDrive';
+    const m = this.match;
+    const sit = { quarter: 5, timeLeft: 1e6, quarterLength: feel.clock.quarterLength, us: m.us, them: m.them, overtime: true };
+    const drive = simulateOppDrive(OWN_GOAL_LINE_X + 25, sit, feel.oppDrive, rng);
+    this.stats = addPoints(recordTheirDrive(this.stats, drive), this.statPeriod(), 0, drive.points);
+    this.match = { ...m, them: m.them + drive.points };
+    this.updateScoreboard();
+    this.updateLabel();
+    let done = false;
+    openDriveSummary({
+      drive,
+      us: this.match.us,
+      them: this.match.them,
+      lastQuarter: false,
+      overtime: true,
+      onContinue: () => {
+        if (done) return;
+        done = true;
+        closeDriveSummary();
+        this.overtimeNext();
+      },
+    });
+  }
+
+  /** Both teams have had the ball this period: game over, or the next overtime. */
+  private overtimeNext() {
+    if (afterBothPossessions(this.match) === 'over') this.showFinal();
+    else this.startOvertime((this.clock.ot ?? 1) + 1);
+  }
+
   /** Game over: the end-of-game screen (score, stats); PLAY AGAIN starts a fresh game. */
   private showFinal() {
+    this.otOursDone = false;
+    this.nextStep = null;
     this.state = 'gameOver';
     this.clearBanner();
     this.nextClock = null;
@@ -1719,15 +1812,17 @@ export class FieldScene extends Phaser.Scene {
         this.updateLabel();
       },
       kickLabel: this.match.tryPending
-        ? 'KICK XP'
+        ? (this.clock.ot ?? 0) >= SHOOTOUT_PERIOD
+          ? null // shootout: 2-point tries only
+          : 'KICK XP'
         : fgRange
           ? `${this.match.down === 4 ? 'FG' : 'FIELD GOAL'} (${fieldGoalDistance(this.match.ballX)} YD)` // short on 4th: PUNT needs the room
           : null,
       onKick: () => this.startKick(),
       // 4th down: PUNT, and the coach's tip (advice only).
-      canPunt: this.match.down === 4 && !this.match.tryPending,
+      canPunt: this.match.down === 4 && !this.match.tryPending && !this.clock.ot, // no punting in overtime
       onPunt: () => this.startKick(true),
-      tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange }),
+      tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
     });
   }
 

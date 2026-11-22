@@ -14,6 +14,8 @@ export interface FourthDownSituation {
   timeLeft: number;
   /** A field goal is in range from here. */
   fgRange: boolean;
+  /** College overtime: no punting; kick when 3 points tie or win, unless it's short yardage. */
+  overtime?: boolean;
 }
 
 /** Last snap(s) of the half: this many seconds or fewer left in Q2. */
@@ -38,6 +40,14 @@ export function coachTip(sit: FourthDownSituation): { choice: FourthChoice; text
   const toGoal = OPP_GOAL_X - m.ballX;
   const where = `${downText(m)} at ${spotText(m.ballX)}`;
   const tip = (choice: FourthChoice, lead = where) => ({ choice, text: `${lead}: ${PHRASE[choice]}` });
+
+  if (sit.overtime) {
+    const margin = m.us - m.them;
+    const lead = `OT, ${margin < 0 ? `down ${-margin}` : margin > 0 ? `up ${margin}` : 'tied'}`;
+    // Behind: a field goal only if it ties. Tied (going first): kick unless it's 4th & short.
+    const kick = fgRange && margin >= -FIELD_GOAL_MARGIN && (margin < 0 || toGo > 2);
+    return tip(kick ? 'fieldGoal' : 'go', lead);
+  }
 
   if (quarter === 2 && timeLeft <= END_OF_HALF_SECONDS) {
     return tip(fgRange ? 'fieldGoal' : 'go', `${clock(timeLeft)} left in the half`);

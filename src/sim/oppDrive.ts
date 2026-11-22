@@ -6,7 +6,7 @@
  * Inside this file the opponent's drive is worked out in THEIR frame (`t`): they start at their own
  * goal side and drive toward +t, exactly like our offense in drive.ts. t = 120 - x (our coordinates).
  */
-import { FIELD_GOAL_POINTS, OPP_GOAL_X, OWN_GOAL_X, TD_POINTS, YARDS_FOR_FIRST_DOWN, EXTRA_POINT_POINTS, type GameState } from './drive';
+import { FIELD_GOAL_POINTS, OPP_GOAL_X, OWN_GOAL_X, TD_POINTS, YARDS_FOR_FIRST_DOWN, EXTRA_POINT_POINTS, TWO_POINT_POINTS, type GameState } from './drive';
 import { coachTip } from './fourthDown';
 import { fieldGoalDistance } from './kicking';
 import { TOTAL_LENGTH } from './field';
@@ -45,6 +45,8 @@ export interface OppDriveRules {
   fgLongChance: number;
   /** Their extra point after a touchdown. */
   extraPointChance: number;
+  /** Their 2-point tries (overtime: when they need 2, and every try in the shootout from the 3rd OT). */
+  twoPointChance: number;
   /** Net punt (after their coverage and our return), yards. */
   puntNetMinYards: number;
   puntNetMaxYards: number;
@@ -84,8 +86,10 @@ export interface OppDrive {
   ourStartX: number;
   /** Points they scored (touchdown + extra point, or field goal). */
   points: number;
-  /** Only after a touchdown: did the extra point go in. */
+  /** Only after a touchdown: did the try go in (null = no try needed: overtime walk-off). */
   extraPointGood: boolean | null;
+  /** Which try they went for after a touchdown (overtime: 2 when they need it). */
+  tryKind?: 'extraPoint' | 'twoPoint';
   /** Their longest gain, if it was a big one. */
   bigPlay: { kind: 'run' | 'pass'; yards: number } | null;
   note: OppDriveNote;
@@ -109,6 +113,11 @@ export interface OppDriveSituation {
   quarterLength: number;
   us: number;
   them: number;
+  /**
+   * College overtime: untimed (no clock tricks), no punts (4th down: kick only when 3 ties or wins),
+   * and after a touchdown they kick, go for 2, or need no try at all, depending on the score.
+   */
+  overtime?: boolean;
 }
 
 /** After a score the other side starts at its 25 (no kickoffs yet: always a touchback). */
@@ -146,7 +155,8 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   let bigPlay: OppDrive['bigPlay'] = null;
   let note: OppDriveNote = null;
   const stats: OppDriveStats = { passYards: 0, rushYards: 0, firstDowns: 0, sacks: 0 };
-  const halfLeft = halfSecondsLeft(sit);
+  const ot = !!sit.overtime;
+  const halfLeft = ot ? Infinity : halfSecondsLeft(sit);
   const strength = Math.max(0.1, r.strength);
   /** Their lead (negative = behind). The score can't change during the drive. */
   const margin = sit.them - sit.us;
@@ -156,6 +166,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     return left > 0 || sit.quarter % 2 === 0 ? { quarter: sit.quarter, timeLeft: Math.max(0, left) } : { quarter: sit.quarter + 1, timeLeft: left + sit.quarterLength };
   };
 
+  let tryKind: OppDrive['tryKind'];
   const done = (result: OppDriveResult, endT: number, ourStartT: number, points = 0, extraPointGood: boolean | null = null): OppDrive => ({
     result,
     plays,
@@ -169,6 +180,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     bigPlay,
     note,
     stats: { ...stats },
+    ...(tryKind ? { tryKind } : {}),
   });
   // Our ball after they give it up at their-frame spot `t2` (in our end zone = touchback at our 20).
   const ourBallAt = (t2: number) => (t2 >= OPP_GOAL_X ? OPP_GOAL_X - 20 : clampSpot(t2));
@@ -193,7 +205,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     const kneelsLeft = 4 - down;
     const kneelOutGame = clock.quarter === 4 && margin > 0 && left <= kneelsLeft * r.kneelSeconds;
     const kneelOutHalf = clock.quarter === 2 && left <= r.halfKneelTime && OPP_GOAL_X - t > r.halfKneelYards;
-    if (kneelOutGame || kneelOutHalf) {
+    if (!ot && (kneelOutGame || kneelOutHalf)) {
       note = 'kneel';
       plays += Math.max(1, Math.min(kneelsLeft, Math.ceil(left / Math.max(1, r.kneelSeconds))));
       seconds = halfLeft;
@@ -201,12 +213,12 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     }
 
     // Last snap of the half (or the game, when 3 points are enough to matter): kick it now.
-    if (left <= r.lastSnapSeconds && inRange && (clock.quarter === 2 || margin >= -FIELD_GOAL_POINTS)) return kickFieldGoal();
+    if (!ot && left <= r.lastSnapSeconds && inRange && (clock.quarter === 2 || margin >= -FIELD_GOAL_POINTS)) return kickFieldGoal();
 
     // 4th down: the same rules of thumb as our coach (seen from their side of the field).
     if (down === 4) {
       const asIfOurs: GameState = { ballX: t, down: 4, firstDownX: firstDownT, us: sit.them, them: sit.us, oppStartX: null, tryPending: false };
-      const tip = coachTip({ match: asIfOurs, quarter: clock.quarter, timeLeft: clock.timeLeft, fgRange: inRange });
+      const tip = coachTip({ match: asIfOurs, quarter: clock.quarter, timeLeft: clock.timeLeft, fgRange: inRange, overtime: ot });
       if (tip?.choice === 'fieldGoal') return kickFieldGoal();
       if (tip?.choice === 'punt') {
         plays++;
@@ -216,8 +228,8 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     }
 
     // A play. Behind late: hurry-up (and the two-minute drill before halftime). Ahead in Q4: run the clock.
-    const hurry = (clock.quarter === 4 && margin < 0 && clock.timeLeft <= r.hurryTime) || (clock.quarter === 2 && clock.timeLeft <= r.halfHurryTime);
-    const milk = clock.quarter === 4 && margin > 0;
+    const hurry = !ot && (clock.quarter === 4 && margin < 0 && clock.timeLeft <= r.hurryTime) || (clock.quarter === 2 && clock.timeLeft <= r.halfHurryTime);
+    const milk = !ot && clock.quarter === 4 && margin > 0;
     if (hurry) note = 'hurryUp';
     else if (milk) note = 'runClock';
     const playSeconds = hurry ? r.hurryPlaySeconds : milk ? r.milkPlaySeconds : r.playSeconds;
@@ -258,6 +270,15 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
 
     const next = t + gain;
     if (next >= OPP_GOAL_X) {
+      if (ot) {
+        // Overtime: already ahead after the touchdown = game over, no try. Down 1 or tied: kick. Down 2+: go for 2.
+        const after = margin + TD_POINTS;
+        if (after > 0) return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS, null);
+        tryKind = after >= -EXTRA_POINT_POINTS ? 'extraPoint' : 'twoPoint';
+        const good = rng.chance(tryKind === 'extraPoint' ? r.extraPointChance : r.twoPointChance);
+        const extra = good ? (tryKind === 'extraPoint' ? EXTRA_POINT_POINTS : TWO_POINT_POINTS) : 0;
+        return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS + extra, good);
+      }
       const xp = rng.chance(r.extraPointChance);
       return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS + (xp ? EXTRA_POINT_POINTS : 0), xp);
     }

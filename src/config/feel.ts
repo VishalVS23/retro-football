@@ -422,6 +422,8 @@ export const feel = {
     fgSureChance: 0.95,
     fgLongChance: 0.6,
     extraPointChance: 0.95,
+    /** Their 2-point tries (overtime only). */
+    twoPointChance: 0.45,
     /** Their net punt, yards (after coverage and our return). */
     puntNetMinYards: 34,
     puntNetMaxYards: 46,

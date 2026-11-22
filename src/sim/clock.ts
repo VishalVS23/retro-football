@@ -9,6 +9,7 @@
  * - If it's still running at the snap, the huddle takes `huddleRunoff` off first (beforeSnap).
  *   A timeout before the snap stops the clock, so no runoff.
  * - In Q2 and Q4 the clock stops once when it reaches `warningTime` (the late-quarter warning).
+ * - Overtime (`ot` > 0, college style) is untimed: nothing here moves the clock, no timeouts.
  */
 
 import type { DriveEvent, PlayOutcome } from './drive';
@@ -32,6 +33,8 @@ export interface ClockState {
   timeouts: number;
   /** The warning has already been given this quarter. */
   warned: boolean;
+  /** Overtime period (1 = OT, 2 = 2OT...); 0 or missing = regulation. Overtime is untimed. */
+  ot?: number;
 }
 
 /** Something that interrupts the flow between plays. */
@@ -51,6 +54,7 @@ function hasWarning(q: Quarter) {
 
 /** Time passing during a play. Stops at 0:00 but the play carries on. */
 export function tickPlay(c: ClockState, dt: number): ClockState {
+  if (c.ot) return c;
   return { ...c, timeLeft: Math.max(0, c.timeLeft - dt) };
 }
 
@@ -59,6 +63,7 @@ export function tickPlay(c: ClockState, dt: number): ClockState {
  * turnover). Returns the clock for the next snap and any interruption.
  */
 export function endPlay(c: ClockState, stops: boolean, r: ClockRules): { clock: ClockState; event: ClockEvent } {
+  if (c.ot) return { clock: { ...c, running: false }, event: null };
   if (c.timeLeft <= 0) return endOfQuarter(c, r);
   if (hasWarning(c.quarter) && !c.warned && c.timeLeft <= r.warningTime) {
     return { clock: { ...c, running: false, warned: true }, event: 'warning' };
@@ -72,7 +77,7 @@ export function endPlay(c: ClockState, stops: boolean, r: ClockRules): { clock: 
  * `snap` = false means show the event and wait for another tap.
  */
 export function beforeSnap(c: ClockState, r: ClockRules): { clock: ClockState; event: ClockEvent; snap: boolean } {
-  if (!c.running) return { clock: c, event: null, snap: true };
+  if (!c.running || c.ot) return { clock: c, event: null, snap: true };
   const after = c.timeLeft - Math.max(0, r.huddleRunoff);
   if (hasWarning(c.quarter) && !c.warned && c.timeLeft > r.warningTime && after <= r.warningTime) {
     return { clock: { ...c, timeLeft: r.warningTime, running: false, warned: true }, event: 'warning', snap: false };
@@ -86,7 +91,7 @@ export function beforeSnap(c: ClockState, r: ClockRules): { clock: ClockState; e
 
 /** A timeout only helps while the clock is running between plays. */
 export function canCallTimeout(c: ClockState): boolean {
-  return c.running && c.timeouts > 0;
+  return !c.ot && c.running && c.timeouts > 0;
 }
 
 export function callTimeout(c: ClockState): ClockState {
@@ -101,6 +106,7 @@ export function callTimeout(c: ClockState): ClockState {
  * passes the late-quarter warning uses it up (no warning on our next snap).
  */
 export function runOff(c: ClockState, seconds: number, r: ClockRules): { clock: ClockState; event: ClockEvent } {
+  if (c.ot) return { clock: { ...c, running: false }, event: null };
   const left = c.timeLeft - Math.max(0, seconds);
   const pastWarning = (q: Quarter, t: number) => hasWarning(q) && t <= r.warningTime;
   if (left > 0) return { clock: { ...c, timeLeft: left, running: false, warned: c.warned || pastWarning(c.quarter, left) }, event: null };
@@ -126,8 +132,9 @@ function endOfQuarter(c: ClockState, r: ClockRules): { clock: ClockState; event:
   };
 }
 
-/** "Q2 1:05". Shows whole seconds, rounded up (so 0:00 means truly out of time). */
+/** "Q2 1:05". Shows whole seconds, rounded up (so 0:00 means truly out of time). Overtime: "OT", "2OT". */
 export function clockText(c: ClockState): string {
+  if (c.ot) return c.ot === 1 ? 'OT' : `${c.ot}OT`;
   const s = Math.ceil(c.timeLeft - 1e-9);
   const m = Math.floor(s / 60);
   return `Q${c.quarter} ${m}:${String(s % 60).padStart(2, '0')}`;
