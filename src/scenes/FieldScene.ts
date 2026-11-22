@@ -103,7 +103,8 @@ import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
-import { offenseLineup, type OffenseLineup } from '../league/lineup';
+import { defenseLineup, offenseLineup, type DefenseLineup, type OffenseLineup } from '../league/lineup';
+import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
@@ -206,6 +207,7 @@ export class FieldScene extends Phaser.Scene {
   private opponentId: number | null = null;
   /** Who is on the field (from the depth charts), once both teams are known. */
   private ourLineup: OffenseLineup | null = null;
+  private theirLineup: DefenseLineup | null = null;
   /** How far the current pass landed from where the QB aimed (his accuracy), in yards. */
   private throwMiss = 0;
   /** Last names under our skill players before the snap (formation order; the QB's is in the hint line). */
@@ -719,7 +721,7 @@ export class FieldScene extends Phaser.Scene {
     this.currentThrow = this.buildThrow(this.qbPos, target, this.bulletThrow);
     this.flightElapsed = 0;
     const duration = this.currentThrow.duration;
-    for (const r of this.receivers) r.atLanding = runnerAfter(r.runner, r.path, duration, feel.routes).pos;
+    this.receivers.forEach((r, i) => (r.atLanding = runnerAfter(r.runner, r.path, duration, this.runParams(i)).pos));
     // The ball is meant for whoever's route takes him closest to the landing spot.
     this.targetIndex = closestIndex(this.receivers.map((r) => r.atLanding), target);
     this.state = 'flight';
@@ -748,7 +750,32 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private stepRoutes(dt: number) {
-    for (const r of this.receivers) r.runner = stepRunner(r.runner, r.path, dt, feel.routes);
+    this.receivers.forEach((r, i) => (r.runner = stepRunner(r.runner, r.path, dt, this.runParams(i))));
+  }
+
+  /**
+   * The catch roll's per-player numbers (3d-c): each receiver's hands (and the QB's miss) and the
+   * contested-catch trait; each defender's ball skills ([3 corners, linebacker, safety]).
+   */
+  private contestPlayerMods() {
+    const R = feel.ratings;
+    const base = this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance;
+    const radius = this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards;
+    const off = this.ourLineup?.skill ?? [null, null, null, null];
+    const def = this.theirLineup ? [...this.theirLineup.cover, this.theirLineup.safety] : [null, null, null, null, null];
+    const m = def.map((p) => contestMods(p, R));
+    return {
+      receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
+      contested: off.map((p) => contestedCatchRatio(p, R)),
+      breakup: m.map((x) => x.breakup),
+      intercept: m.map((x) => x.intercept),
+      hold: m.map((x) => x.hold),
+    };
+  }
+
+  /** Receiver i's route running: his speed, acceleration and cuts (3d-c). */
+  private runParams(i: number) {
+    return receiverRunParams(this.ourLineup?.skill[i], feel.routes, feel.ratings);
   }
 
   private drawReceivers() {
@@ -778,7 +805,7 @@ export class FieldScene extends Phaser.Scene {
       defenderCatchChance: feel.defense.defenderCatchChance,
       shieldedContestRatio: feel.defense.shieldedContestRatio,
       helpContestRatio: feel.defense.helpContestRatio,
-    }, th.from);
+    }, th.from, this.contestPlayerMods());
 
     let result = pass.result;
     const wrPos = wrSpots[pass.receiver];
@@ -1279,7 +1306,8 @@ export class FieldScene extends Phaser.Scene {
     // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
       const myBall = ball && { ...ball, help: i !== this.targetIndex };
-      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, i === RB ? lbCover : cover, myBall);
+      // Each defender covers with his own ratings (3d-c): speed, man coverage, gambling.
+      r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, coverFor(this.theirLineup?.cover[i], i === RB ? lbCover : cover, feel.ratings), myBall);
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
 
@@ -1297,7 +1325,7 @@ export class FieldScene extends Phaser.Scene {
         cushionYards: d.safetyCushionYards,
         driftSpeed: db * d.safetyDriftRatio,
         bailSpeed: db * d.safetyBailRatio,
-        ballReactionTime: d.safetyBallReactionTime,
+        ballReactionTime: safetyReadTime(this.theirLineup?.safety, d.safetyBallReactionTime, feel.ratings),
         ballSpeed: db * d.cbBallSpeedRatio,
       },
       ball,
@@ -1858,6 +1886,7 @@ export class FieldScene extends Phaser.Scene {
     [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
     [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
     this.ourLineup = offenseLineup(l, l.userTeamId);
+    this.theirLineup = defenseLineup(l, this.opponentId);
     this.placeNameLabels();
     this.updateScoreboard();
   }
@@ -1884,6 +1913,21 @@ export class FieldScene extends Phaser.Scene {
         .setPosition(dots[i].x, dots[i].y + PLAYER_RADIUS + 0.2)
         .setVisible(show && feel.ratings.nameSize > 0);
     });
+  }
+
+  /**
+   * Their defenders' names and who has the edge in each matchup, for the play-call diagram.
+   * No arrows when ratings are switched off (everyone is a 10 then).
+   */
+  private diagramMatchups(): { cover: string[]; safety: string; edge: number[] } | null {
+    const us = this.ourLineup;
+    const them = this.theirLineup;
+    if (!us || !them) return null;
+    return {
+      cover: them.cover.map((p) => p.lastName),
+      safety: them.safety.lastName,
+      edge: us.skill.map((p, i) => (feel.ratings.enabled ? matchupEdge(p, them.cover[i]) : 0)),
+    };
   }
 
   /** Last names for the play-call diagram (formation order), or null before the teams are known. */
@@ -2108,6 +2152,7 @@ export class FieldScene extends Phaser.Scene {
       tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
       names: this.diagramNames(),
+      matchups: this.diagramMatchups(),
     });
   }
 

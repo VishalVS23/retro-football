@@ -12,6 +12,7 @@ import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
+import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -30,6 +31,10 @@ export interface PassOptions {
   qb?: Player | null;
   /** He's under pressure when he throws (the miss circle grows). */
   pressured?: boolean;
+  /** Our skill players in formation order (wide top, slot, wide bottom, RB). Leave out = no receiver ratings. */
+  offense?: (Player | null)[];
+  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety. Leave out = no defender ratings. */
+  defense?: { cover: (Player | null)[]; safety: Player | null };
 }
 
 /** Headless pass play. Corner speeds are rolled from `seed`, like the game does each snap. */
@@ -48,6 +53,9 @@ export function simulatePass(
   const f = formation(losX);
   const paths = f.skill.map((s, i) => routePath(s.pos, play.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, play.routes[i].stop));
+  const R = feel.ratings;
+  // Each receiver runs his route at his own speed (3d-c); without `offense`, everyone at the plain values.
+  const run = f.skill.map((_, i) => (opts.offense ? receiverRunParams(opts.offense[i], feel.routes, R) : feel.routes));
   const cbCover = {
     topSpeed: feel.routes.topSpeed * d.cbSpeedRatio,
     acceleration: feel.routes.acceleration,
@@ -62,6 +70,12 @@ export function simulatePass(
     anticipation: d.cbAnticipation,
   };
   const lbCover = { ...cbCover, topSpeed: feel.routes.topSpeed * d.lbSpeedRatio, reactionTime: d.lbReactionTime, cushionYards: 1, minX: losX + d.lbPassDropYards };
+  // Each defender covers with his own ratings (3d-c).
+  const def = opts.defense;
+  const coverP = f.skill.map((_, i) => {
+    const base = i === RB ? lbCover : cbCover;
+    return def ? coverFor(def.cover[i], base, R) : base;
+  });
   let cover = f.skill.map((s, i) =>
     startCoverage(
       i === RB ? { x: losX + d.lbDepthYards, y: mid } : { x: s.pos.x + d.cbCushionYards, y: s.pos.y },
@@ -82,27 +96,27 @@ export function simulatePass(
     cushionYards: d.safetyCushionYards,
     driftSpeed: tk.dbPursuitSpeed * d.safetyDriftRatio,
     bailSpeed: tk.dbPursuitSpeed * d.safetyBailRatio,
-    ballReactionTime: d.safetyBallReactionTime,
+    ballReactionTime: def ? safetyReadTime(def.safety, d.safetyBallReactionTime, R) : d.safetyBallReactionTime,
     ballSpeed: tk.dbPursuitSpeed * d.cbBallSpeedRatio,
   };
 
 
   let t = 0;
   for (; t < shot.throwAt - 1e-9; t += dt) {
-    runners = runners.map((r, i) => stepRunner(r, paths[i], dt, feel.routes));
-    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover));
+    runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
+    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, coverP[i]));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
   }
 
   // The throw.
   const qb = qbAt(t);
   const me = runners[shot.to];
-  const guess = runnerAfter(me, paths[shot.to], 1, feel.routes).pos; // rough first guess, refined below
+  const guess = runnerAfter(me, paths[shot.to], 1, run[shot.to]).pos; // rough first guess, refined below
   let landing = guess;
   let duration = 1;
   for (let k = 0; k < 4; k++) {
     duration = flightTime(Math.hypot(landing.x - qb.x, landing.y - qb.y), feel.throw) / armFx.speed;
-    const ideal = runnerAfter(me, paths[shot.to], duration, feel.routes).pos;
+    const ideal = runnerAfter(me, paths[shot.to], duration, run[shot.to]).pos;
     landing = { x: me.pos.x + (ideal.x - me.pos.x) * shot.lead, y: me.pos.y + (ideal.y - me.pos.y) * shot.lead };
   }
   // His accuracy: the ball lands somewhere in a circle around where he aimed.
@@ -113,12 +127,10 @@ export function simulatePass(
     landing = missLanding(qb, aimed, radius, feel.ratings.scatterDepthRatio, rng.next(), rng.next());
     miss = Math.hypot(landing.x - aimed.x, landing.y - aimed.y);
   }
-  const atLanding = runners.map((r, i) => runnerAfter(r, paths[i], duration, feel.routes).pos);
+  const atLanding = runners.map((r, i) => runnerAfter(r, paths[i], duration, run[i]).pos);
   for (let e = 0; e < duration - 1e-9; e += dt) {
-    runners = runners.map((r, i) => stepRunner(r, paths[i], dt, feel.routes));
-    cover = cover.map((c, i) =>
-      stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover, { landing, sinceThrow: e + dt, help: i !== shot.to }),
-    );
+    runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
+    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, coverP[i], { landing, sinceThrow: e + dt, help: i !== shot.to }));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams, { landing, sinceThrow: e + dt });
   }
   const ca = feel.catching;
@@ -135,7 +147,16 @@ export function simulatePass(
     defenderCatchChance: d.defenderCatchChance,
     shieldedContestRatio: d.shieldedContestRatio,
     helpContestRatio: d.helpContestRatio,
-  }, qb);
+  }, qb, {
+    ...(opts.offense && {
+      receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
+      contested: opts.offense.map((p) => contestedCatchRatio(p, R)),
+    }),
+    ...(def && (() => {
+      const all = [...def.cover, def.safety].map((p) => contestMods(p, R));
+      return { breakup: all.map((m) => m.breakup), intercept: all.map((m) => m.intercept), hold: all.map((m) => m.hold) };
+    })()),
+  });
   const nearestDefender = Math.min(...cbSpots.map((c) => Math.hypot(c.x - landing.x, c.y - landing.y)));
   return { result: pass.result, separation: nearestDefender, defender: pass.defender, miss };
 }

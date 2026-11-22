@@ -45,8 +45,8 @@ export const feel = {
     cbReactionTime: 0.25,
     /** His top speed as a fraction of the receiver's, on average... */
     cbSpeedRatio: 0.97,
-    /** ...give or take up to this share, rolled per corner per snap (so some snaps he can run with a go route; Stage 3: speed ratings). */
-    cbSpeedVariance: 0.08,
+    /** ...give or take up to this share, rolled per corner per snap (a small wobble on top of his speed rating, so a mismatch isn't a sure thing). */
+    cbSpeedVariance: 0.05,
     /** How long after the throw before he breaks on the ball. */
     cbBallReactionTime: 0.2,
     /** Same, for a corner whose own man ISN'T the target (he was watching his man, so he's later to help). */
@@ -480,6 +480,26 @@ export const feel = {
     offTargetFreeYards: 0.45,
     /** ...beyond it the receiver's catch chance drops, by this share at a miss as big as the catch zone (a lunging grab). */
     offTargetCatchLoss: 0.5,
+    /** Receivers vs defenders (3d-c). Top speed per speed point, acceleration per acceleration point. */
+    speedPerPoint: 0.008,
+    accelerationPerPoint: 0.01,
+    /** Route running: speed kept through a cut, added per point (routes.cutSpeedRatio at 10). */
+    cutPerPoint: 0.02,
+    /** Hands: every this many points above 10 halves a receiver's drops (below doubles them). */
+    handsHalvingPoints: 5,
+    /** Man coverage: every this many points above 10 halves a defender's reaction delay to his man's moves. */
+    coverReactionHalvingPoints: 8,
+    /** Man coverage: how quickly a defender stops and turns (momentum) per point, so a fast corner doesn't overrun stop routes. */
+    coverTurnPerPoint: 0.05,
+    /** Ball skills: a defender's breakup / interception chances per point. */
+    ballSkillsPerPoint: 0.05,
+    /** Safety: every this many points of zone coverage + anticipation above 10 halves his read on the throw. */
+    safetyReadHalvingPoints: 8,
+    /** Trait "Gambles on interceptions": pick chance x this, and he guesses more (anticipation + the bonus). */
+    gambleInterceptBoost: 1.4,
+    gambleAnticipationBonus: 0.12,
+    /** Trait "Wins contested catches": defenders' breakup chance on his balls x this. */
+    contestedBreakupRatio: 0.7,
   },
   juice: {
     hitPauseTime: 0.06,

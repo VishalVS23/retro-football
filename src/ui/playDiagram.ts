@@ -24,6 +24,12 @@ export interface DiagramView {
   tappable?: boolean;
   /** Big diagram: our players' last names instead of WR / RB / QB (skill in formation order). */
   names?: { qb: string; skill: string[] };
+  /**
+   * Big diagram: the defenders' last names (cover[i] covers skill spot i: three corners and the
+   * linebacker; plus the safety) and the matchup edge for each of our skill players
+   * (+1 = ours, shown as a green up-arrow; -1 = theirs, a red down-arrow; 0 = nothing).
+   */
+  defense?: { cover: string[]; safety: string; edge: number[] };
 }
 
 /** Text from outside goes through this before landing in the SVG. */
@@ -43,6 +49,8 @@ const C = {
   goalPost: '#ffd23f',
   offense: '#e76f51',
   defense: '#3a6ea5',
+  edgeUs: '#3ddc84',
+  edgeThem: '#ff5c5c',
 };
 const FONT = `'Press Start 2P', monospace`;
 const n = (v: number) => Math.round(v * 100) / 100;
@@ -101,10 +109,19 @@ function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.ro
   return { line: s, label };
 }
 
-function player(p: Vec, color: string, label: string | null): string {
+/** A small matchup arrow left of a player: up (green) = our edge, down (red) = theirs. */
+function edgeArrow(p: Vec, edge: number): string {
+  if (!edge) return '';
+  const x = p.x - 2.1;
+  const y = p.y;
+  const pts = edge > 0 ? `${n(x - 0.8)},${n(y + 0.6)} ${n(x + 0.8)},${n(y + 0.6)} ${n(x)},${n(y - 0.8)}` : `${n(x - 0.8)},${n(y - 0.6)} ${n(x + 0.8)},${n(y - 0.6)} ${n(x)},${n(y + 0.8)}`;
+  return `<polygon points="${pts}" fill="${edge > 0 ? C.edgeUs : C.edgeThem}" stroke="${C.outline}" stroke-width="0.25"/>`;
+}
+
+function player(p: Vec, color: string, label: string | null, above = false): string {
   let s = `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="0.95" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
   if (label) {
-    s += `<text x="${n(p.x)}" y="${n(p.y + 2.5)}" font-size="1.05" text-anchor="middle" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
+    s += `<text x="${n(p.x)}" y="${n(above ? p.y - 1.5 : p.y + 2.5)}" font-size="1.05" text-anchor="middle" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
   }
   return s;
 }
@@ -159,9 +176,13 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
 
   if (v.detailed) {
     // Defense where it lines up (same spots as on the field).
-    f.wrs.forEach((wr) => (s += player({ x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y }, C.defense, 'CB')));
-    s += player({ x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }, C.defense, 'LB');
-    s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, 'S');
+    // With names, the corners' go ABOVE them (our receivers' names are below ours, right next to
+    // them); the linebacker's and safety's stay below (above them sit the line and route labels).
+    const dn = v.defense;
+    const dl = (name: string | undefined, fallback: string) => (name ? esc(name.toUpperCase()) : fallback);
+    f.wrs.forEach((wr, i) => (s += player({ x: wr.pos.x + feel.defense.cbCushionYards, y: wr.pos.y }, C.defense, dl(dn?.cover[i], 'CB'), !!dn)));
+    s += player({ x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.cover[RB], 'LB'));
+    s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.safety, 'S'));
     f.rush.forEach((r) => (s += player(r, C.defense, null))); // linemen unlabelled: too tightly packed
   }
   f.block.forEach((b) => (s += player(b, C.offense, null)));
@@ -169,6 +190,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null)));
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null); // the backfield is too crowded for his name
+  if (v.detailed && v.defense) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

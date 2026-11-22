@@ -42,6 +42,8 @@ export interface PlayCallOptions {
   tip: { choice: FourthChoice; text: string } | null;
   /** Our players' last names for the big diagram (formation order); null = plain WR / RB / QB. */
   names: { qb: string; skill: string[] } | null;
+  /** Their defenders' names and the matchup edges for the big diagram (see DiagramView.defense); null = plain CB / LB / S. */
+  matchups: { cover: string[]; safety: string; edge: number[] } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
 }
@@ -135,6 +137,7 @@ export function openPlayCall(o: PlayCallOptions) {
       h: win.h,
       detailed,
       ...(detailed && o.names ? { names: o.names } : {}),
+      ...(detailed && o.matchups ? { defense: o.matchups } : {}),
       ...extra,
     });
   };

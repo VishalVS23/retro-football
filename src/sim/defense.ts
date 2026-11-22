@@ -308,6 +308,20 @@ export function closestIndex(points: Vec[], to: Vec): number {
  * Several receivers and defenders: the pass is meant for the receiver nearest the landing spot,
  * and the defender nearest the landing spot is the one who can interfere (or pick it off).
  */
+/**
+ * Per-player adjustments (Stage 3d-c ratings), by index. Missing = no change.
+ * receiverCatch: each receiver's catch chance (replaces p.receiverCatchChance);
+ * contested: each receiver's multiplier on defenders' breakup chance ("Wins contested catches");
+ * breakup / intercept / hold: each defender's multipliers on breakup, interception and holding on.
+ */
+export interface PlayerContestMods {
+  receiverCatch?: number[];
+  contested?: number[];
+  breakup?: number[];
+  intercept?: number[];
+  hold?: number[];
+}
+
 export function resolveTargetedPass(
   receivers: Vec[],
   defenders: Vec[],
@@ -315,12 +329,20 @@ export function resolveTargetedPass(
   roll: number,
   p: ContestParams,
   thrower?: Vec,
+  mods: PlayerContestMods = {},
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
   const defender = closestIndex(defenders, landing);
   // Defender i < receivers.length covers receiver i man-to-man; anyone beyond that is the deep safety.
   const help = defender < receivers.length && defender !== receiver;
-  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, p, thrower, help);
+  const params: ContestParams = {
+    ...p,
+    receiverCatchChance: mods.receiverCatch?.[receiver] ?? p.receiverCatchChance,
+    breakupChance: p.breakupChance * (mods.breakup?.[defender] ?? 1) * (mods.contested?.[receiver] ?? 1),
+    interceptChance: p.interceptChance * (mods.intercept?.[defender] ?? 1),
+    defenderCatchChance: Math.min(1, p.defenderCatchChance * (mods.hold?.[defender] ?? 1)),
+  };
+  const result = resolvePass(receivers[receiver], defenders[defender], landing, roll, params, thrower, help);
   return { result, receiver, defender };
 }
 
