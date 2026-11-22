@@ -453,6 +453,16 @@ export const feel = {
     /** Our timeouts per half (whole number). */
     timeoutsPerHalf: 3,
   },
+  /**
+   * Player ratings on the field (Stage 3d+, src/sim/ratings.ts). A rating of 10 = the plain values
+   * above; the per-point amounts below move them for better / worse players.
+   */
+  ratings: {
+    /** 1 = ratings count, 0 = everyone plays as an average (10) player, to compare. */
+    enabled: 1,
+    /** Height of the players' names on the field before the snap, in yards (0 = no names). */
+    nameSize: 1.3,
+  },
   juice: {
     hitPauseTime: 0.06,
     screenShakeTime: 0.15,

@@ -40,6 +40,8 @@ export interface PlayCallOptions {
   onPunt: () => void;
   /** The coach's 4th-down tip (null on other downs); its button gets a gold glow. */
   tip: { choice: FourthChoice; text: string } | null;
+  /** Our players' last names for the big diagram (formation order); null = plain WR / RB / QB. */
+  names: { qb: string; skill: string[] } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
 }
@@ -57,7 +59,7 @@ export function closePlayCall() {
 // Diagram windows, in field yards. Across the field we show the band the routes use; along the
 // field, as many yards as fit the box's shape, starting a few yards behind the line of scrimmage.
 // Minis use a fixed length instead, centred in the card (no empty field on the right).
-const BIG: DiagramWindow = { y0: 4.5, h: 45, behind: 7 }; // tall enough for Out routes on both sides
+const BIG: DiagramWindow = { y0: 4.5, h: 45, behind: 10 }; // tall enough for Out routes on both sides
 const MINI: DiagramWindow = { y0: 10, h: 34, behind: 4, w: 42 };
 interface DiagramWindow {
   y0: number;
@@ -132,6 +134,7 @@ export function openPlayCall(o: PlayCallOptions) {
       w,
       h: win.h,
       detailed,
+      ...(detailed && o.names ? { names: o.names } : {}),
       ...extra,
     });
   };

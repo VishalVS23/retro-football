@@ -22,7 +22,12 @@ export interface DiagramView {
   hot?: boolean[];
   /** Audible mode: ring each receiver (and the RB on a pass play) and make him tappable (`data-wr` = his index). */
   tappable?: boolean;
+  /** Big diagram: our players' last names instead of WR / RB / QB (skill in formation order). */
+  names?: { qb: string; skill: string[] };
 }
+
+/** Text from outside goes through this before landing in the SVG. */
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 const C = {
   turf: '#2f6b4f',
@@ -160,9 +165,10 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     f.rush.forEach((r) => (s += player(r, C.defense, null))); // linemen unlabelled: too tightly packed
   }
   f.block.forEach((b) => (s += player(b, C.offense, null)));
-  f.wrs.forEach((wr) => (s += player(wr.pos, C.offense, v.detailed ? 'WR' : null)));
-  s += player(f.rb.pos, C.offense, v.detailed ? 'RB' : null);
-  s += player(f.qb, C.offense, v.detailed ? 'QB' : null);
+  const nm = v.names;
+  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null)));
+  s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
+  s += player(f.qb, C.offense, v.detailed ? 'QB' : null); // the backfield is too crowded for his name
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

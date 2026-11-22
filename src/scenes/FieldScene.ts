@@ -103,6 +103,7 @@ import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
+import { offenseLineup, type OffenseLineup } from '../league/lineup';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -201,6 +202,10 @@ export class FieldScene extends Phaser.Scene {
   private league: League | null = null;
   /** The team we're playing this game. */
   private opponentId: number | null = null;
+  /** Who is on the field (from the depth charts), once both teams are known. */
+  private ourLineup: OffenseLineup | null = null;
+  /** Last names under our skill players before the snap (formation order; the QB's is in the hint line). */
+  private nameLabels: Phaser.GameObjects.Text[] = [];
   /** Runs instead of the usual next step when the current banner ends (or SKIP). */
   private nextStep: (() => void) | null = null;
   private form = formation(newGame().ballX);
@@ -298,6 +303,7 @@ export class FieldScene extends Phaser.Scene {
       this.fitCamera();
       this.updateLabel();
       this.sizeBall();
+      this.placeNameLabels();
     };
     window.addEventListener(FEEL_CHANGE_EVENT, onFeelChange);
     this.events.once('shutdown', () => window.removeEventListener(FEEL_CHANGE_EVENT, onFeelChange));
@@ -654,6 +660,7 @@ export class FieldScene extends Phaser.Scene {
     this.state = 'live';
     this.playTime = 0;
     this.routeG.clear(); // route lines hide on the snap
+    this.nameLabels.forEach((t) => t.setVisible(false)); // so do the names
     this.updateLabel();
   }
 
@@ -1791,7 +1798,39 @@ export class FieldScene extends Phaser.Scene {
     const theirs = hexToNumber(k.theirs);
     [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
     [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
+    this.ourLineup = offenseLineup(l, l.userTeamId);
+    this.placeNameLabels();
     this.updateScoreboard();
+  }
+
+  /** Our players' last names, small, under each of them before the snap (hidden once the ball is live). */
+  private placeNameLabels() {
+    const lu = this.ourLineup;
+    if (!lu) return;
+    if (!this.nameLabels.length) {
+      this.nameLabels = Array.from({ length: SKILL_COUNT }, () =>
+        this.add
+          .text(0, 0, '', { fontFamily: 'monospace', fontSize: '48px', fontStyle: 'bold', color: '#f4efe1', stroke: '#14202b', strokeThickness: 8 })
+          .setOrigin(0.5, 0)
+          .setScale(feel.ratings.nameSize / 48)
+          .setDepth(2.5),
+      );
+    }
+    const dots = this.wrDots;
+    const players = lu.skill;
+    const show = this.state === 'presnap' || this.state === 'calling';
+    this.nameLabels.forEach((t, i) => {
+      t.setText(players[i].lastName.toUpperCase())
+        .setScale(feel.ratings.nameSize / 48)
+        .setPosition(dots[i].x, dots[i].y + PLAYER_RADIUS + 0.2)
+        .setVisible(show && feel.ratings.nameSize > 0);
+    });
+  }
+
+  /** Last names for the play-call diagram (formation order), or null before the teams are known. */
+  private diagramNames(): { qb: string; skill: string[] } | null {
+    const lu = this.ourLineup;
+    return lu ? { qb: lu.qb.lastName, skill: lu.skill.map((p) => p.lastName) } : null;
   }
 
   /** TEAM: the roster screen over the play calling screen (which stays as it was underneath). */
@@ -1957,6 +1996,7 @@ export class FieldScene extends Phaser.Scene {
     this.drawMarkers();
     this.routeG.clear();
     this.receivers.forEach((r, i) => this.drawRoute(r.path, play.routes[i].stop));
+    this.placeNameLabels();
     this.cameraFocus = { x: qbStart.x + 12, y: FORMATION_VIEW_Y };
     this.updateLabel();
     this.updateScoreboard();
@@ -2008,6 +2048,7 @@ export class FieldScene extends Phaser.Scene {
       onPunt: () => this.startKick(true),
       tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
+      names: this.diagramNames(),
     });
   }
 
@@ -2104,7 +2145,8 @@ export class FieldScene extends Phaser.Scene {
     if (this.state === 'presnap') {
       const run = this.clock.running ? ` (clock running: -${Math.round(feel.clock.huddleRunoff)}s)` : '';
       const tryText = this.match.tryPending ? '2-PT TRY: ' : '';
-      this.label.setText(`${tryText}${PLAYS[this.playIndex].name} · TAP to snap${run} · ⚙ = feel`);
+      const qb = this.ourLineup ? ` · QB ${this.ourLineup.qb.lastName}` : '';
+      this.label.setText(`${tryText}${PLAYS[this.playIndex].name}${qb} · TAP to snap${run} · ⚙ = feel`);
       return;
     }
     if (this.state === 'kickAim') {

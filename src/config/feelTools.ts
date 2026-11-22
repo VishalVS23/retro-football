@@ -21,7 +21,7 @@ export function listEntries(f: FeelShape): FeelEntry[] {
 
 /** Slider range for a setting, guessed from its name and default value. */
 export function sliderRange(key: string, defaultValue: number): { min: number; max: number; step: number } {
-  if (/Mode$/.test(key)) return { min: 0, max: 1, step: 1 };
+  if (/(Mode|[eE]nabled)$/.test(key)) return { min: 0, max: 1, step: 1 }; // on/off switches
   if (/(Lerp|Ratio|Chance)$/.test(key)) return { min: 0, max: 1, step: 0.01 };
   if (/Response$/.test(key)) return { min: 0, max: Math.max(30, defaultValue * 3), step: 0.5 }; // 0 = instant
   if (/Intensity$/.test(key)) return { min: 0, max: Math.max(0.05, defaultValue * 4), step: 0.001 };
