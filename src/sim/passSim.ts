@@ -10,6 +10,8 @@ import { RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, 
 import { resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepSafety, type PassResult } from './defense';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
+import type { Player } from '../players/player';
+import { arm, missLanding, missRadius } from './qbRatings';
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -23,8 +25,24 @@ export interface PassShot {
   lead: number;
 }
 
+export interface PassOptions {
+  /** Our QB (Stage 3d-b): his arm speeds the ball up, his accuracy adds the miss. null = a plain 10. Leave out = no QB ratings at all (perfect throws, as before 3d). */
+  qb?: Player | null;
+  /** He's under pressure when he throws (the miss circle grows). */
+  pressured?: boolean;
+}
+
 /** Headless pass play. Corner speeds are rolled from `seed`, like the game does each snap. */
-export function simulatePass(play: PlayDef, shot: PassShot, seed: number, feel: Feel, losX = 35): { result: PassResult; separation: number; defender: number } {
+export function simulatePass(
+  play: PlayDef,
+  shot: PassShot,
+  seed: number,
+  feel: Feel,
+  losX = 35,
+  opts: PassOptions = {},
+): { result: PassResult; separation: number; defender: number; miss: number } {
+  const withQb = 'qb' in opts;
+  const armFx = withQb ? arm(opts.qb, feel.ratings) : { speed: 1, range: 1 };
   const rng = createRng(seed);
   const d = feel.defense;
   const f = formation(losX);
@@ -83,9 +101,17 @@ export function simulatePass(play: PlayDef, shot: PassShot, seed: number, feel: 
   let landing = guess;
   let duration = 1;
   for (let k = 0; k < 4; k++) {
-    duration = flightTime(Math.hypot(landing.x - qb.x, landing.y - qb.y), feel.throw);
+    duration = flightTime(Math.hypot(landing.x - qb.x, landing.y - qb.y), feel.throw) / armFx.speed;
     const ideal = runnerAfter(me, paths[shot.to], duration, feel.routes).pos;
     landing = { x: me.pos.x + (ideal.x - me.pos.x) * shot.lead, y: me.pos.y + (ideal.y - me.pos.y) * shot.lead };
+  }
+  // His accuracy: the ball lands somewhere in a circle around where he aimed.
+  let miss = 0;
+  if (withQb) {
+    const aimed = landing;
+    const radius = missRadius(opts.qb, Math.hypot(aimed.x - qb.x, aimed.y - qb.y), !!opts.pressured, feel.throw, feel.ratings);
+    landing = missLanding(qb, aimed, radius, feel.ratings.scatterDepthRatio, rng.next(), rng.next());
+    miss = Math.hypot(landing.x - aimed.x, landing.y - aimed.y);
   }
   const atLanding = runners.map((r, i) => runnerAfter(r, paths[i], duration, feel.routes).pos);
   for (let e = 0; e < duration - 1e-9; e += dt) {
@@ -111,5 +137,5 @@ export function simulatePass(play: PlayDef, shot: PassShot, seed: number, feel: 
     helpContestRatio: d.helpContestRatio,
   }, qb);
   const nearestDefender = Math.min(...cbSpots.map((c) => Math.hypot(c.x - landing.x, c.y - landing.y)));
-  return { result: pass.result, separation: nearestDefender, defender: pass.defender };
+  return { result: pass.result, separation: nearestDefender, defender: pass.defender, miss };
 }

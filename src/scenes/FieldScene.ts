@@ -104,6 +104,7 @@ import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
 import { offenseLineup, type OffenseLineup } from '../league/lineup';
+import { arm, missLanding, missRadius } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -611,10 +612,12 @@ export class FieldScene extends Phaser.Scene {
       this.aimG.clear();
       return;
     }
+    // A bigger arm reaches further with the same drag scale (same yards per pixel, longer max).
+    const range = this.qbArm().range;
     this.target = aimTarget(this.qbPos, d.x, d.y, this.scale.height, {
       mode: feel.throw.aimMode,
-      dragForMaxRatio: feel.throw.aimDragForMaxRatio,
-      maxDistanceYards: feel.throw.maxDistanceYards,
+      dragForMaxRatio: feel.throw.aimDragForMaxRatio * range,
+      maxDistanceYards: feel.throw.maxDistanceYards * range,
     });
     // Aiming behind the QB = scramble: show a RUN arrow instead of a throw arc.
     this.setRunAim(isRunAim(this.qbPos, this.target, feel.scramble.runAimAngle));
@@ -624,7 +627,7 @@ export class FieldScene extends Phaser.Scene {
       return;
     }
     // A bullet can't go as far: same direction, cut down to its max distance.
-    if (this.bulletAim) this.target = clampDistance(this.qbPos, this.target, feel.bullet.maxDistanceYards);
+    if (this.bulletAim) this.target = clampDistance(this.qbPos, this.target, feel.bullet.maxDistanceYards * range);
     this.drawAimPreview(this.target, this.bulletAim);
   }
 
@@ -694,7 +697,11 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  private releaseBall(target: Vec) {
+  private releaseBall(aimed: Vec) {
+    // His accuracy: the ball lands somewhere in the miss oval drawn while aiming.
+    const rng = getRngOrFallback();
+    const radius = this.missRadiusFor(aimed);
+    const target = missLanding(this.qbPos, aimed, radius, feel.ratings.scatterDepthRatio, rng.next(), rng.next());
     this.currentThrow = this.buildThrow(this.qbPos, target, this.bulletThrow);
     this.flightElapsed = 0;
     const duration = this.currentThrow.duration;
@@ -2202,11 +2209,46 @@ export class FieldScene extends Phaser.Scene {
     this.shadow.setPosition(x, y).setAlpha(Math.max(0.12, 0.35 - h * 0.02));
   }
 
-  /** A normal pass or a bullet (flatter and faster, see feel.bullet). */
+  /** A normal pass or a bullet (flatter and faster, see feel.bullet). A big arm gets it there sooner. */
   private buildThrow(from: Vec, to: Vec, bullet: boolean) {
+    const speed = this.qbArm().speed;
     return bullet
-      ? makeThrow({ ...from }, to, feel.throw, feel.bullet.arcHeightRatio, feel.bullet.flightTimeRatio)
-      : makeThrow({ ...from }, to, feel.throw, feel.throw.arcHeightRatio);
+      ? makeThrow({ ...from }, to, feel.throw, feel.bullet.arcHeightRatio, feel.bullet.flightTimeRatio / speed)
+      : makeThrow({ ...from }, to, feel.throw, feel.throw.arcHeightRatio, 1 / speed);
+  }
+
+  /** Our QB's arm (1 / 1 = an average arm, or no league yet). */
+  private qbArm() {
+    return arm(this.ourLineup?.qb, feel.ratings);
+  }
+
+  /** How far a throw to `aimed` can miss right now (his accuracy for that length, pressure, composure). */
+  private missRadiusFor(aimed: Vec): number {
+    const yards = Math.hypot(aimed.x - this.qbPos.x, aimed.y - this.qbPos.y);
+    return missRadius(this.ourLineup?.qb, yards, this.underPressure, feel.throw, feel.ratings);
+  }
+
+  /** The miss oval around the aim point: a soft patch, wide across the throw, short along it. */
+  private drawMissArea(aimed: Vec, bullet: boolean) {
+    const radius = this.missRadiusFor(aimed);
+    if (radius < 0.05) return;
+    const len = Math.hypot(aimed.x - this.qbPos.x, aimed.y - this.qbPos.y) || 1;
+    const ux = (aimed.x - this.qbPos.x) / len;
+    const uy = (aimed.y - this.qbPos.y) / len;
+    const along = radius * feel.ratings.scatterDepthRatio;
+    const pts: Phaser.Types.Math.Vector2Like[] = [];
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      const al = Math.cos(a) * along;
+      const ac = Math.sin(a) * radius;
+      pts.push({ x: aimed.x + ux * al - uy * ac, y: aimed.y + uy * al + ux * ac });
+    }
+    const g = this.aimG;
+    const color = this.underPressure ? 0xff6b6b : bullet ? COLORS.bullet : COLORS.aim;
+    g.fillStyle(color, this.underPressure ? 0.55 : 0.42);
+    g.fillPoints(pts, true);
+    g.lineStyle(0.16, this.underPressure ? 0xffd0d0 : 0xffffff, 0.85);
+    g.strokePoints(pts, true);
   }
 
   private drawAimPreview(target: Vec, bullet: boolean) {
@@ -2216,6 +2258,7 @@ export class FieldScene extends Phaser.Scene {
     g.fillStyle(bullet ? COLORS.bullet : COLORS.aim, 0.9);
     const pts = arcPoints(th, Math.max(6, Math.round(Math.hypot(target.x - this.qbPos.x, target.y - this.qbPos.y) / 1.5)));
     for (const pt of pts.slice(1)) g.fillCircle(pt.x, pt.y - pt.h * feel.ball.heightDrawRatio, 0.22);
+    this.drawMissArea(target, bullet);
     this.drawLandingMarker(target, 1, bullet);
   }
 

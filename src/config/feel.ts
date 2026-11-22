@@ -462,6 +462,20 @@ export const feel = {
     enabled: 1,
     /** Height of the players' names on the field before the snap, in yards (0 = no names). */
     nameSize: 1.3,
+    /** QB throwing power: ball speed and max distance per point above / below 10 (0.025 = a 20 throws 25% faster and further). */
+    armSpeedPerPoint: 0.025,
+    armRangePerPoint: 0.025,
+    /** QB accuracy: the ball lands inside a circle around the aim point. Radius at accuracy 10, unpressured: base + per yard thrown. */
+    scatterBaseYards: 0.15,
+    scatterPerYard: 0.035,
+    /** Every this many accuracy points above 10 halves the circle (below doubles it). */
+    accuracyHalvingPoints: 4,
+    /** Under pressure the circle grows by this share at composure 10... */
+    pressureScatter: 0.8,
+    /** ...and every this many composure points above 10 halves that (below doubles it). */
+    composureHalvingPoints: 8,
+    /** The miss area is an oval: this fraction as long along the throw as across it (misses go wide more than long / short). */
+    scatterDepthRatio: 0.4,
   },
   juice: {
     hitPauseTime: 0.06,
