@@ -62,6 +62,9 @@
   color: var(--eg-bad);
 }
 .eg-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
 }
 

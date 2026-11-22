@@ -180,6 +180,24 @@ body {
   margin-left: 6px;
 }
 
+/* ---------- Team logos (HTML screens); teams without one get a colour dot ---------- */
+.team-logo {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.team-dot-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.team-dot {
+  display: block;
+  border: 2px solid #f4efe1;
+  border-radius: 50%;
+}
+
 /* ---------- SKIP button (returns and result banners) ---------- */
 #skip-btn {
   position: fixed;

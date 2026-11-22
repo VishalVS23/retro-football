@@ -1711,6 +1711,7 @@ export class FieldScene extends Phaser.Scene {
       stats: this.stats,
       ourAbbr: this.ourAbbr(),
       theirAbbr: this.theirAbbr(),
+      ...this.teamColors(),
       onPlayAgain: () => {
         closeEndGame();
         this.match = newGame();
@@ -1786,6 +1787,13 @@ export class FieldScene extends Phaser.Scene {
     [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
     [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
     this.updateScoreboard();
+  }
+
+  /** Both teams' main colours (for logos / colour dots on the HTML screens). */
+  private teamColors(): { ourColor?: string; theirColor?: string } {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return {};
+    return { ourColor: l.teams[l.userTeamId].colors[0], theirColor: l.teams[this.opponentId].colors[0] };
   }
 
   private ourAbbr(): string {

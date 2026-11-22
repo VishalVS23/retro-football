@@ -5,6 +5,7 @@
 import '@fontsource/press-start-2p/latin-400.css';
 import './endGame.css';
 import { totalYards, type GameStats, type SideStats } from '../sim/gameStats';
+import { teamLogoHtml } from './teamLogo';
 
 export interface EndGameOptions {
   us: number;
@@ -13,6 +14,9 @@ export interface EndGameOptions {
   /** Team abbreviations (default YOU / CPU). */
   ourAbbr?: string;
   theirAbbr?: string;
+  /** Team colours, for the logo / colour dot next to the score (no logos when missing). */
+  ourColor?: string;
+  theirColor?: string;
   onPlayAgain: () => void;
 }
 
@@ -68,7 +72,7 @@ export function openEndGame(o: EndGameOptions) {
       <div class="eg-left">
         <div class="eg-head-line">FINAL${periods > 4 ? ` / ${periodName(periods - 1)}` : ''}</div>
         <div class="eg-result ${outcome.tone}">${outcome.text}</div>
-        <div class="eg-score">${us} ${o.us} - ${o.them} ${them}</div>
+        <div class="eg-score">${o.ourColor ? teamLogoHtml(us, o.ourColor, 26) : ''}<span>${us} ${o.us} - ${o.them} ${them}</span>${o.theirColor ? teamLogoHtml(them, o.theirColor, 26) : ''}</div>
         ${quarters}
         <div class="eg-qb"><span>YOUR QB</span>${qbLine}</div>
         <div class="eg-qb"><span>LONGEST PLAY</span>${s.longest} YDS</div>

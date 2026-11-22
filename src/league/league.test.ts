@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from '../sim/rng';
 import { colorDistance, kitColors, MIN_COLOR_DISTANCE, TURF } from './colors';
 import { FILLER_QUALITY, depthChart, generateLeague, pickOpponent, sanitizeLeague, teamRatings, type League } from './league';
-import { CONFERENCES, DIVISIONS, TEAM_DEFS } from './teams';
+import { CONFERENCES, DIVISIONS, TEAM_DEFS, TEAM_LOGOS } from './teams';
 import { ACTIVE_MAX, POSITIONS, PRACTICE_MAX, ROSTER_TARGET, STARTERS } from '../players/positions';
 import { currentAbility } from '../players/player';
 
@@ -20,6 +20,16 @@ describe('teams', () => {
       }
     }
     for (const t of TEAM_DEFS) expect(t.abbr).toMatch(/^[A-Z]{3}$/);
+  });
+
+  it('every logo listed has its file in public/logos, and every file belongs to a team', () => {
+    const abbrs = new Set(TEAM_DEFS.map((t) => t.abbr));
+    const files = new Set(Object.keys(import.meta.glob('/public/logos/*.png')).map((f) => f.replace('/public/logos/', '').replace('.png', '')));
+    for (const a of TEAM_LOGOS) {
+      expect(abbrs.has(a), a).toBe(true);
+      expect(files.has(a), a).toBe(true);
+    }
+    for (const f of files) expect(TEAM_LOGOS.has(f), f).toBe(true);
   });
 
   it('every team’s main colour stands out from the grass (so at home it wears its own colour)', () => {

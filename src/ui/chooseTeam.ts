@@ -4,6 +4,7 @@
  */
 import '@fontsource/press-start-2p/latin-400.css';
 import './chooseTeam.css';
+import { teamLogoHtml } from './teamLogo';
 
 export interface TeamChoice {
   id: number;
@@ -47,7 +48,7 @@ export function openChooseTeam(o: ChooseTeamOptions) {
             .map(
               (t) => `
               <button class="ct-team" type="button" data-id="${t.id}">
-                <span class="ct-chip" style="background:${t.color}"></span>
+                ${teamLogoHtml(t.abbr, t.color, 30)}
                 <span class="ct-names"><span class="ct-abbr">${t.abbr}</span><span class="ct-nick">${t.nickname}</span></span>
                 <span class="ct-stars" aria-label="${t.stars} of 5 stars">${starText(t.stars)}</span>
               </button>`,
@@ -81,14 +82,17 @@ export function openChooseTeam(o: ChooseTeamOptions) {
       picked = o.teams.find((t) => t.id === Number(b.dataset.id)) ?? null;
       picks.forEach((x) => x.classList.toggle('on', x === b));
       if (!picked) return;
-      pickedEl.innerHTML = '';
+      pickedEl.innerHTML = teamLogoHtml(picked.abbr, picked.color, 34);
+      const text = document.createElement('span');
+      text.className = 'ct-picked-text';
       const name = document.createElement('span');
       name.className = 'ct-picked-name';
       name.textContent = `${picked.city} ${picked.nickname}`.toUpperCase();
       const r = document.createElement('span');
       r.className = 'ct-picked-ratings';
       r.textContent = `OFF ${picked.offense.toFixed(1)} · DEF ${picked.defense.toFixed(1)}`;
-      pickedEl.append(name, r);
+      text.append(name, r);
+      pickedEl.append(text);
       go.disabled = false;
       go.textContent = `PLAY AS ${picked.abbr} >`;
     }),
