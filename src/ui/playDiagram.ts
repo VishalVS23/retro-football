@@ -27,7 +27,7 @@ export interface DiagramView {
   /**
    * Big diagram: the defenders' last names (cover[i] covers skill spot i: three corners and the
    * linebacker; plus the safety) and the matchup edge for each of our skill players
-   * (+1 = ours, shown as a green up-arrow; -1 = theirs, a red down-arrow; 0 = nothing).
+   * (+1 = ours, shown as a green up-arrow; -1 = theirs, a red down-arrow; 0 = even, a grey dash).
    */
   defense?: { cover: string[]; safety: string; edge: number[] };
 }
@@ -51,6 +51,7 @@ const C = {
   defense: '#3a6ea5',
   edgeUs: '#3ddc84',
   edgeThem: '#ff5c5c',
+  edgeEven: '#a9b4c2',
 };
 const FONT = `'Press Start 2P', monospace`;
 const n = (v: number) => Math.round(v * 100) / 100;
@@ -109,11 +110,11 @@ function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.ro
   return { line: s, label };
 }
 
-/** A small matchup arrow left of a player: up (green) = our edge, down (red) = theirs. */
+/** A small matchup marker left of a player: up arrow (green) = our edge, down (red) = theirs, grey dash = even. */
 function edgeArrow(p: Vec, edge: number): string {
-  if (!edge) return '';
   const x = p.x - 2.1;
   const y = p.y;
+  if (!edge) return `<rect x="${n(x - 0.7)}" y="${n(y - 0.25)}" width="1.4" height="0.5" fill="${C.edgeEven}" stroke="${C.outline}" stroke-width="0.2"/>`;
   const pts = edge > 0 ? `${n(x - 0.8)},${n(y + 0.6)} ${n(x + 0.8)},${n(y + 0.6)} ${n(x)},${n(y - 0.8)}` : `${n(x - 0.8)},${n(y - 0.6)} ${n(x + 0.8)},${n(y - 0.6)} ${n(x)},${n(y + 0.8)}`;
   return `<polygon points="${pts}" fill="${edge > 0 ? C.edgeUs : C.edgeThem}" stroke="${C.outline}" stroke-width="0.25"/>`;
 }
