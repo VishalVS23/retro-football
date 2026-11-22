@@ -28,6 +28,12 @@ describe('fumble chance', () => {
     expect(big).toBeLessThan(sack);
   });
 
+  it('turning up the normal chance raises big hits and sacks too (never below it)', () => {
+    const q = { ...p, chance: 1 };
+    expect(fumbleChance({ tacklerSpeed: 7.9 }, q)).toBe(1);
+    expect(fumbleChance({ sack: true }, q)).toBe(1);
+  });
+
   it('an unknown tackler counts as a normal hit', () => {
     expect(fumbleChance({}, p)).toBe(p.chance);
   });
@@ -41,7 +47,7 @@ describe('fumble chance', () => {
   });
 
   it('a zero chance never fumbles', () => {
-    expect(rollFumble({ sack: true }, { ...p, stripSackChance: 0 }, () => 0)).toBe(false);
+    expect(rollFumble({ sack: true }, { ...p, chance: 0, stripSackChance: 0 }, () => 0)).toBe(false);
   });
 });
 

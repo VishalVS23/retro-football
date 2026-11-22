@@ -27,10 +27,13 @@ export interface Hit {
   sack?: boolean;
 }
 
-/** How likely this tackle is to knock the ball loose. */
+/**
+ * How likely this tackle is to knock the ball loose. A big hit or a sack is never LESS likely than a
+ * normal tackle (so turning up `chance` alone raises every kind of tackle).
+ */
 export function fumbleChance(hit: Hit, p: FumbleParams): number {
-  if (hit.sack) return p.stripSackChance;
-  if ((hit.tacklerSpeed ?? 0) >= p.bigHitSpeed) return p.bigHitChance;
+  if (hit.sack) return Math.max(p.chance, p.stripSackChance);
+  if ((hit.tacklerSpeed ?? 0) >= p.bigHitSpeed) return Math.max(p.chance, p.bigHitChance);
   return p.chance;
 }
 
