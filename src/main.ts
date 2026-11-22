@@ -3,6 +3,7 @@ import { FieldScene } from './scenes/FieldScene';
 import { setupFeelPanel } from './debug/feelPanel';
 import { addSaveControls } from './debug/saveControls';
 import { addSamplePlayers } from './debug/samplePlayers';
+import { addGameControls } from './debug/gameControls';
 import { startSaveSession } from './save/saveSession';
 import { registerSW } from 'virtual:pwa-register';
 
@@ -25,6 +26,7 @@ const feelPanel = setupFeelPanel();
 // Open (or create) the save, then add the Export/Import buttons to the ⚙ panel.
 void startSaveSession().then(() => {
   addSaveControls(feelPanel.panel, feelPanel.flash);
+  addGameControls(feelPanel.panel);
   addSamplePlayers(feelPanel.panel);
 });
 

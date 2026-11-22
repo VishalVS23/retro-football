@@ -108,6 +108,7 @@ import { arm, missLanding, missRadius } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
+import { CHANGE_TEAM_EVENT, NEW_GAME_EVENT } from '../debug/gameControls';
 
 // Placeholder colours only. The real art comes in stage 13.
 const COLORS = {
@@ -308,6 +309,16 @@ export class FieldScene extends Phaser.Scene {
     };
     window.addEventListener(FEEL_CHANGE_EVENT, onFeelChange);
     this.events.once('shutdown', () => window.removeEventListener(FEEL_CHANGE_EVENT, onFeelChange));
+
+    // ⚙ panel buttons (debug/gameControls.ts): quit to a new game, or pick another team.
+    const onNewGame = () => this.startNewGame();
+    const onChangeTeam = () => this.changeTeam();
+    window.addEventListener(NEW_GAME_EVENT, onNewGame);
+    window.addEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
+    this.events.once('shutdown', () => {
+      window.removeEventListener(NEW_GAME_EVENT, onNewGame);
+      window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
+    });
 
     // SKIP button (a DOM button, so taps on it never reach the field). Taps elsewhere don't skip.
     const skip = document.createElement('button');
@@ -1729,15 +1740,7 @@ export class FieldScene extends Phaser.Scene {
       ourAbbr: this.ourAbbr(),
       theirAbbr: this.theirAbbr(),
       ...this.teamColors(),
-      onPlayAgain: () => {
-        closeEndGame();
-        this.match = newGame();
-        this.clock = newClock(feel.clock);
-        this.stats = newGameStats();
-        this.newOpponent();
-        this.updateScoreboard();
-        this.resetPlay();
-      },
+      onPlayAgain: () => this.startNewGame(),
     });
     // The game is over: nothing to continue next time.
     if (this.autosave) void saveGameInProgress(null);
@@ -1760,6 +1763,53 @@ export class FieldScene extends Phaser.Scene {
       ready();
       return;
     }
+    this.chooseTeam(league, (id) => {
+      league.userTeamId = id;
+      void setLeague(league);
+      ready();
+    });
+  }
+
+  /**
+   * Throws away the game in progress (if any) and starts a fresh one against a new opponent:
+   * PLAY AGAIN on the end screen, and NEW GAME / CHANGE TEAM in the ⚙ panel.
+   */
+  private startNewGame() {
+    closePlayCall();
+    closeDriveSummary();
+    closeEndGame();
+    closeTeamScreen();
+    closeResumeGame();
+    this.kickMeter?.classList.remove('show');
+    this.match = newGame();
+    this.clock = newClock(feel.clock);
+    this.stats = newGameStats();
+    this.otOursDone = false;
+    this.nextStep = null;
+    this.pendingBreak = null;
+    this.finishBreak = null;
+    this.nextClock = null;
+    this.playIndex = 0;
+    this.autosave = true;
+    this.newOpponent();
+    void saveGameInProgress(null);
+    this.updateScoreboard();
+    this.resetPlay();
+  }
+
+  /** ⚙ CHANGE TEAM: pick a team again, then a fresh game with it. */
+  private changeTeam() {
+    const league = this.league;
+    if (!league) return;
+    this.chooseTeam(league, (id) => {
+      league.userTeamId = id;
+      void setLeague(league);
+      this.startNewGame();
+    });
+  }
+
+  /** The CHOOSE YOUR TEAM screen for this league; `onPick` gets the team id. */
+  private chooseTeam(league: League, onPick: (id: number) => void) {
     // Stars by rank: the top fifth of the league gets 5, the bottom fifth 1.
     const ratings = league.teams.map((t) => ({ id: t.id, r: teamRatings(league, t.id) }));
     const rank = [...ratings].sort((a, b) => b.r.overall - a.r.overall).map((x) => x.id);
@@ -1781,11 +1831,7 @@ export class FieldScene extends Phaser.Scene {
           stars: 5 - Math.floor((rank.indexOf(t.id) * 5) / league.teams.length),
         };
       }),
-      onPick: (id) => {
-        league.userTeamId = id;
-        void setLeague(league);
-        ready();
-      },
+      onPick,
     });
   }
 
