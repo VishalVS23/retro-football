@@ -16,7 +16,7 @@ export interface CarryParams {
   runSpeed: number;
   /** Fastest sideways speed when steering. */
   steerSpeed: number;
-  /** How quickly steering responds (higher = snappier). */
+  /** How quickly steering responds (higher = snappier; 0 = instant: full sideways speed at once, stops at once). */
   steerResponse: number;
   /** Sideways burst speed during a juke. */
   jukeSpeed: number;
@@ -78,7 +78,7 @@ export function stepCarrier(c: Carrier, steer: number, dt: number, p: CarryParam
     jukeLeft = Math.max(0, jukeLeft - dt);
   } else {
     const want = Math.max(-1, Math.min(1, steer)) * p.steerSpeed;
-    vy = c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt); // eases in and out
+    vy = p.steerResponse > 0 ? c.vy + (want - c.vy) * Math.min(1, p.steerResponse * dt) : want; // eases in and out, or instant
     recover = Math.max(0, recover - dt);
   }
   // Cutting sideways costs forward speed: steering never makes him faster overall than running

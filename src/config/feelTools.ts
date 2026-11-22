@@ -23,6 +23,7 @@ export function listEntries(f: FeelShape): FeelEntry[] {
 export function sliderRange(key: string, defaultValue: number): { min: number; max: number; step: number } {
   if (/Mode$/.test(key)) return { min: 0, max: 1, step: 1 };
   if (/(Lerp|Ratio|Chance)$/.test(key)) return { min: 0, max: 1, step: 0.01 };
+  if (/Response$/.test(key)) return { min: 0, max: Math.max(30, defaultValue * 3), step: 0.5 }; // 0 = instant
   if (/Intensity$/.test(key)) return { min: 0, max: Math.max(0.05, defaultValue * 4), step: 0.001 };
   const max = Math.max(1, defaultValue * 3);
   const step = max <= 2 ? 0.01 : max <= 20 ? 0.05 : 0.5;

@@ -459,8 +459,9 @@ export class FieldScene extends Phaser.Scene {
   private onMove(p: Phaser.Input.Pointer) {
     const running = this.state === 'run' || (this.state === 'live' && this.calledPlay.run);
     if (running && this.steerTouch && p.id === this.steerTouch.id) {
-      const full = Math.max(1, this.scale.height * feel.running.steerDragRatio);
-      this.steer = Math.max(-1, Math.min(1, (p.y - this.steerTouch.y) / full));
+      // Up or down, nothing in between: past the small dead zone he moves at full sideways speed.
+      const dy = p.y - this.steerTouch.y;
+      this.steer = Math.abs(dy) > this.scale.height * feel.running.steerDeadZoneRatio ? Math.sign(dy) : 0;
       if (Math.abs(p.y - this.steerTouch.y) >= MIN_DRAG_PX) this.steered = true;
       return;
     }

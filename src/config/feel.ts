@@ -119,12 +119,15 @@ export const feel = {
   running: {
     /** Ball carrier's forward speed after the catch (later: his speed rating). */
     runSpeed: 7.5,
-    /** Fastest sideways speed when steering with your thumb. */
+    /**
+     * Sideways speed while you hold up or down. Moving is normalized: sideways speed comes out of
+     * forward speed, so a diagonal is never faster than running straight.
+     */
     steerSpeed: 5,
-    /** How snappy steering is (higher = turns quicker). */
-    steerResponse: 10,
-    /** Dragging this fraction of the screen height = full steer. */
-    steerDragRatio: 0.2,
+    /** How snappy up/down is: 0 = instant (starts and stops the moment you press / let go); higher = eases in. */
+    steerResponse: 0,
+    /** Dead zone: drag your thumb up or down more than this fraction of the screen height to move. */
+    steerDeadZoneRatio: 0.03,
     /** Juke: sideways burst speed, how long it lasts, and the wait before the next. */
     jukeSpeed: 9,
     jukeTime: 0.18,

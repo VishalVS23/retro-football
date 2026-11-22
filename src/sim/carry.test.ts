@@ -32,6 +32,16 @@ function runFor(c: Carrier, seconds: number, steer: number) {
 }
 
 describe('ball carrier', () => {
+  it('steerResponse 0 = instant up/down: full sideways speed at once, stops at once, never faster than straight', () => {
+    const p = { ...carry, steerResponse: 0 };
+    const moving = stepCarrier(startCarrier({ x: 40, y: 20 }), 1, dt, p);
+    expect(moving.vy).toBe(5);
+    // Normalized: forward speed drops so the total stays at run speed.
+    const speed = Math.hypot(moving.pos.x - 40, moving.pos.y - 20) / dt;
+    expect(speed).toBeCloseTo(7.5);
+    expect(moving.pos.x - 40).toBeCloseTo(Math.sqrt(7.5 ** 2 - 25) * dt);
+    expect(stepCarrier(moving, 0, dt, p).vy).toBe(0);
+  });
   it('runs downfield on his own', () => {
     const c = runFor(startCarrier({ x: 40, y: 20 }), 1, 0);
     expect(c.pos.x).toBeCloseTo(47.5);
