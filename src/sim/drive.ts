@@ -68,6 +68,9 @@ export type DriveEvent =
   | 'punt'
   | 'puntReturnTD'
   | 'muffedPunt'
+  | 'fumbleLost'
+  | 'fumbleTD'
+  | 'takeaway'
   | null;
 
 export function newGame(): GameState {
@@ -157,7 +160,31 @@ export function applyMuffedPunt(s: GameState, spotX: number): { state: GameState
   return { state: { ...s, ...firstDownAt(spotX), oppStartX: null, tryPending: false }, event: 'muffedPunt' };
 }
 
-const ORDINAL = ['', '1st', '2nd', '3rd', '4th'];
+/**
+ * We fumbled at `spotX`. We fell on it: the play counts as a tackle there (next down, first down,
+ * turnover on downs or safety, as usual). They fell on it: their ball at the spot; in our own end
+ * zone that's a touchdown for them. On a 2-point try either way it's no good.
+ */
+export function applyFumble(s: GameState, spotX: number, weRecovered: boolean): { state: GameState; event: DriveEvent } {
+  if (weRecovered || s.tryPending) return applyPlay(s, { kind: 'spot', x: Math.min(spotX, OPP_GOAL_X - 1) });
+  if (spotX <= OWN_GOAL_X) {
+    return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), them: s.them + TD_POINTS, oppStartX: null }, event: 'fumbleTD' };
+  }
+  const oppStartX = Math.min(OPP_GOAL_X - 1, Math.max(OWN_GOAL_X + 1, Math.round(spotX)));
+  return { state: { ...s, ...firstDownAt(NEW_DRIVE_X), oppStartX }, event: 'fumbleLost' };
+}
+
+/**
+ * Their returner (interception or punt return) fumbled at `spotX` and we fell on it: our ball,
+ * 1st & 10 there (in their end zone = touchdown).
+ */
+export function applyTakeaway(s: GameState, spotX: number): { state: GameState; event: DriveEvent } {
+  if (spotX >= OPP_GOAL_X) return applyPlay({ ...s, tryPending: false }, { kind: 'touchdown' });
+  const x = Math.min(OPP_GOAL_X - 1, Math.max(OWN_GOAL_X + 1, Math.round(spotX)));
+  return { state: { ...s, ...firstDownAt(x), oppStartX: null, tryPending: false }, event: 'takeaway' };
+}
+
+const ORDINAL =['', '1st', '2nd', '3rd', '4th'];
 
 /** "3rd & 7", "1st & Goal". */
 export function downText(s: GameState): string {

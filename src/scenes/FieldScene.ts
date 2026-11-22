@@ -57,6 +57,8 @@ import {
   applyMuffedPunt,
   applyPunt,
   applyPuntReturnTD,
+  applyFumble,
+  applyTakeaway,
   downText,
   newGame,
   spotText,
@@ -76,6 +78,7 @@ import {
 import { PUNTER_DEPTH, insideTwenty } from '../sim/punting';
 import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, type PuntPlay } from '../sim/puntReturn';
 import { coachTip } from '../sim/fourthDown';
+import { rollFumble, rollRecovery } from '../sim/fumble';
 import {
   beforeSnap,
   callTimeout,
@@ -797,7 +800,7 @@ export class FieldScene extends Phaser.Scene {
     this.ret.pursuers.forEach((c, i) => this.chaserDots[i].setPosition(c.pos.x, c.pos.y).setAlpha(c.stunned > 0 ? 0.45 : 1));
     this.cameraFocus = { x: r.x - feel.camera.leadYards, y: r.y };
     if (step.missed) this.floatText(r.x, r.y - 2, 'BROKE IT!', '#ff8a8a');
-    if (step.end) this.endReturn(step.end === 'down' ? 'tackled' : step.end); // returners never dive
+    if (step.end) this.endReturn(step.end === 'down' ? 'tackled' : step.end, step.tackler); // returners never dive
   }
 
   /** Numbers for one frame of a run: the carrier's running, the chase, and the tackles. */
@@ -824,10 +827,18 @@ export class FieldScene extends Phaser.Scene {
     if (this.returnerDot) this.cameras.main.centerOn(this.ret.carrier.pos.x, this.ret.carrier.pos.y);
   }
 
-  private endReturn(how: 'tackled' | 'out' | 'touchdown') {
+  private endReturn(how: 'tackled' | 'out' | 'touchdown', tackler?: Pursuer) {
     this.state = 'result';
     const r = this.ret.carrier.pos;
     const yards = Math.max(0, Math.round(this.returnStartX - (how === 'touchdown' ? OWN_GOAL_LINE_X : r.x)));
+    if (how === 'tackled') {
+      const ours = this.ret.pursuers.map((q) => q.pos);
+      if (this.theirFumble(r, tackler?.speed, ours, this.defenseSpots())) {
+        this.hitPauseLeft = feel.juice.hitPauseTime;
+        this.scheduleReset();
+        return;
+      }
+    }
     if (how === 'touchdown') {
       this.shakeScreen(feel.juice.touchdownShakeScale);
       if (this.returnerDot) this.popPlayer(this.returnerDot);
@@ -1049,6 +1060,17 @@ export class FieldScene extends Phaser.Scene {
       result = applyMuffedPunt(this.match, end.spotX);
     } else {
       const net = Math.round(end.spotX - losX);
+      if (end.kind === 'return' && end.how === 'tackled') {
+        const ours = play.coverage.map((c) => c.pos);
+        const theirs = [r, ...play.returnTeam.map((q) => q.pos)];
+        if (this.theirFumble(r, end.tacklerSpeed, ours, theirs)) {
+          this.hitPauseLeft = feel.juice.hitPauseTime;
+          this.puntPlay = null;
+          this.tweens.add({ targets: [this.ball, this.shadow], alpha: 0, duration: feel.pacing.bannerTime * 1000 });
+          this.scheduleReset();
+          return;
+        }
+      }
       if (end.kind === 'return') {
         if (end.how === 'tackled') {
           this.hitPauseLeft = feel.juice.hitPauseTime;
@@ -1337,10 +1359,10 @@ export class FieldScene extends Phaser.Scene {
     });
     this.cameraFocus = { x: c.x + feel.camera.leadYards, y: c.y };
     if (step.missed) this.floatText(c.x, c.y - 2, step.missed === 'juked' ? 'JUKED!' : 'BROKE IT!', '#7ec8e3');
-    if (step.end) this.endRun(step.end);
+    if (step.end) this.endRun(step.end, step.tackler);
   }
 
-  private endRun(how: 'tackled' | 'out' | 'touchdown' | 'down') {
+  private endRun(how: 'tackled' | 'out' | 'touchdown' | 'down', tackler?: Pursuer) {
     this.state = 'result';
     this.steerTouch = null;
     this.steer = 0;
@@ -1355,7 +1377,15 @@ export class FieldScene extends Phaser.Scene {
       this.hitPauseLeft = feel.juice.hitPauseTime; // tiny freeze-frame, then shake
       shake(yards >= feel.juice.bigGainYards ? feel.juice.bigHitShakeScale : 1);
       // A scrambling QB brought down behind the line is a sack; a run stopped for no gain is stuffed.
-      this.showBanner(this.qbRun && c.x < this.match.ballX ? 'SACKED' : this.calledPlay.run && yards <= 0 ? 'STUFFED!' : 'TACKLED');
+      const sacked = this.qbRun && c.x < this.match.ballX;
+      const rng = getRngOrFallback();
+      if (rollFumble({ tacklerSpeed: tackler?.speed, sack: sacked }, feel.fumble, () => rng.next())) {
+        this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, yards < 0 ? '#ff8a8a' : '#ffd166');
+        this.ourFumble(c);
+        this.scheduleReset();
+        return;
+      }
+      this.showBanner(sacked ? 'SACKED' : this.calledPlay.run && yards <= 0 ? 'STUFFED!' : 'TACKLED');
     } else if (how === 'down') {
       this.showBanner(this.qbRun ? 'SLIDE' : 'DOWN'); // went down on his own: in bounds, clock keeps running
     } else {
@@ -1381,11 +1411,67 @@ export class FieldScene extends Phaser.Scene {
       yoyo: true,
     });
     this.shakeScreen();
-    this.showBanner('SACKED');
     const loss = Math.round(this.qbPos.x - this.match.ballX);
     this.floatText(this.qbPos.x, this.qbPos.y - 2, `${loss} YDS`, '#ff8a8a');
-    this.recordPlay({ kind: 'spot', x: this.qbPos.x });
+    const rng = getRngOrFallback();
+    if (rollFumble({ sack: true }, feel.fumble, () => rng.next())) {
+      this.ourFumble(this.qbPos);
+    } else {
+      this.showBanner('SACKED');
+      this.recordPlay({ kind: 'spot', x: this.qbPos.x });
+    }
     this.scheduleReset();
+  }
+
+  /** Where our 11 / their 11 stand right now (for who falls on a loose ball). */
+  private offenseSpots() {
+    return [this.qb, ...this.wrDots, ...this.blockerDots].map((d) => ({ x: d.x, y: d.y }));
+  }
+
+  private defenseSpots() {
+    return [...this.cbDots, this.safety, ...this.rusherDots].map((d) => ({ x: d.x, y: d.y }));
+  }
+
+  /**
+   * We were tackled and the ball came out at `at`: whoever has more players around it is likelier to
+   * fall on it. FUMBLE! stays the headline; the text under it says who has it.
+   */
+  private ourFumble(at: { x: number; y: number }) {
+    const rng = getRngOrFallback();
+    const kept = rollRecovery(at, this.offenseSpots(), this.defenseSpots(), feel.fumble, () => rng.next());
+    const { state, event } = applyFumble(this.match, at.x, kept);
+    this.finishPlay(state, event, !kept || (event !== null && event !== 'firstDown'));
+    this.shakeScreen();
+    this.showBanner('FUMBLE!');
+    const after: Partial<Record<NonNullable<DriveEvent>, string>> = {
+      firstDown: ' · FIRST DOWN',
+      turnoverOnDowns: ' · TURNOVER ON DOWNS',
+      safety: ' · SAFETY',
+      fumbleTD: ' · TOUCHDOWN',
+    };
+    const text = (kept ? 'RECOVERED' : 'LOST') + ((event && after[event]) ?? '');
+    this.floatText(at.x, Math.min(at.y + 6, FIELD_WIDTH - 2), text, kept && event !== 'safety' && event !== 'turnoverOnDowns' ? '#ffd166' : '#ff8a8a');
+  }
+
+  /**
+   * Their returner (interception or punt return) was tackled: maybe he fumbles. Returns true if we
+   * fell on it (the play is then over: our ball there). If they fall on it nothing changes.
+   */
+  private theirFumble(at: { x: number; y: number }, tacklerSpeed: number | undefined, ours: { x: number; y: number }[], theirs: { x: number; y: number }[]) {
+    if (this.match.tryPending) return false; // a 2-point try is over either way
+    const rng = getRngOrFallback();
+    if (!rollFumble({ tacklerSpeed }, feel.fumble, () => rng.next())) return false;
+    this.shakeScreen();
+    if (!rollRecovery(at, theirs, ours, feel.fumble, () => rng.next())) {
+      this.floatText(at.x, Math.min(at.y + 6, FIELD_WIDTH - 2), 'FUMBLE! THEY KEEP IT', '#ff8a8a');
+      return false;
+    }
+    const { state, event } = applyTakeaway(this.match, at.x);
+    this.finishPlay(state, event, true);
+    this.showBanner('FUMBLE!');
+    const text = event === 'touchdown' ? 'RECOVERED · TOUCHDOWN!' : `OUR BALL · ${spotText(state.ballX)}`;
+    this.floatText(Math.min(Math.max(at.x, 6), TOTAL_LENGTH - 6), Math.min(at.y + 6, FIELD_WIDTH - 2), text, '#ffd166');
+    return true;
   }
 
   private scheduleReset() {

@@ -197,6 +197,21 @@ export const feel = {
     qbChaseSpeed: 5.5,
     olChaseSpeed: 5,
   },
+  /**
+   * Fumbles: only a tackle can knock the ball loose (dives, slides and going out of bounds never
+   * fumble). Later: ball security rating and weather scale these.
+   */
+  fumble: {
+    /** Chance a normal tackle knocks the ball out. */
+    chance: 0.02,
+    /** Chance on a big hit (tackler at least bigHitSpeed fast: defensive backs, gunners). */
+    bigHitChance: 0.04,
+    bigHitSpeed: 7.5,
+    /** Chance a sack is a strip sack. */
+    stripSackChance: 0.08,
+    /** Players this close to the loose ball can fall on it (more of yours nearby = better odds). */
+    recoverRadiusYards: 5,
+  },
   routes: {
     /** Receiver top speed, yards per second (later scaled by his speed rating). */
     topSpeed: 8,

@@ -301,6 +301,8 @@ export interface ChaseStep {
   missed: 'broken' | 'juked' | null;
   /** How the run ended this frame, or null if it goes on. 'down' = he went down on his own. */
   end: 'tackled' | 'out' | 'touchdown' | 'down' | null;
+  /** Who brought him down (when end = 'tackled'): his speed decides a big hit (fumble.ts). */
+  tackler?: Pursuer;
 }
 
 export function startChase(at: Vec, pursuers: Pursuer[]): ChaseState {
@@ -335,7 +337,7 @@ export function stepChase(s: ChaseState, steer: number, dt: number, p: ChasePara
     const check = checkTackles(pursuers, carrier, roll, p.tackle);
     pursuers = check.pursuers;
     missed = check.missed;
-    if (check.tackled) return { state: { carrier, pursuers, seen, t }, missed, end: 'tackled' };
+    if (check.tackled) return { state: { carrier, pursuers, seen, t }, missed, end: 'tackled', tackler: pursuers[check.by] };
   }
   return { state: { carrier, pursuers, seen, t }, missed, end: playEnd(carrier.pos, p.dirX) };
 }

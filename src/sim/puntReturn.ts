@@ -25,7 +25,7 @@ export type PuntEnd =
   | { kind: 'bounce'; path: PuntPath; spotX: number } // nobody touched it: touchback / out / downed
   | { kind: 'fairCatch'; spotX: number }
   | { kind: 'muff'; spotX: number } // he dropped it and we recovered: our ball
-  | { kind: 'return'; how: 'tackled' | 'out'; spotX: number; yards: number }
+  | { kind: 'return'; how: 'tackled' | 'out'; spotX: number; yards: number; tacklerSpeed?: number }
   | { kind: 'returnTD'; yards: number };
 
 export interface CoverageMan {
@@ -303,7 +303,10 @@ export function stepPuntPlay(s0: PuntPlay, dt: number, feel: Feel, roll: () => n
     s.phase = 'done';
     const x = s.returner.x;
     if (step.end === 'touchdown') s.end = { kind: 'returnTD', yards: Math.round(s.catchX - OWN_GOAL_X) };
-    else s.end = { kind: 'return', how: step.end === 'out' ? 'out' : 'tackled', spotX: spot(x), yards: Math.round(s.catchX - x) };
+    else {
+      const how = step.end === 'out' ? 'out' : 'tackled';
+      s.end = { kind: 'return', how, spotX: spot(x), yards: Math.round(s.catchX - x), tacklerSpeed: step.tackler?.speed };
+    }
   }
   return { play: s, events };
 }
