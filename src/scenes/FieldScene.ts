@@ -1314,7 +1314,8 @@ export class FieldScene extends Phaser.Scene {
         pos: { ...r.coverage.pos },
         speed: i === RB ? feel.defense.lbPursuitSpeed : db,
         stunned: 0,
-        wait: i === RB && this.calledPlay.run ? feel.runGame.lbReadTime : 0, // the linebacker reads the run first
+        // On a run the linebacker reads it first, and the corners stay with their receivers a moment (pass first).
+        wait: this.calledPlay.run ? (i === RB ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) : 0,
       })),
       { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
       ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 })),

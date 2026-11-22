@@ -109,5 +109,14 @@ describe('run play balance (headless, 300 runs each)', () => {
       expect(lazy.stuffed).toBeGreaterThan(0.05);
       expect(juker.stuffed).toBeLessThan(lazy.stuffed / 2);
     });
+    it(`${name}: holding the steering one way the whole run is no exploit`, () => {
+      // User 2026-11-21: a Toss with the steering held down gained 12+ yd every time (a defender in
+      // front parked just out of tackling reach). Headless it was 15.8 yd and 100% went 10+.
+      for (const steer of [-1, 1]) {
+        const gains = Array.from({ length: 300 }, (_, i) => simulateRun(play(name), i + 1, feel, 0, 45, steer).yards);
+        expect(gains.reduce((a, b) => a + b, 0) / gains.length).toBeLessThan(4);
+        expect(gains.filter((g) => g >= 10).length / gains.length).toBeLessThan(0.15);
+      }
+    });
   }
 });

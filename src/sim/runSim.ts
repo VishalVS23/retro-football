@@ -22,7 +22,8 @@ const mid = FIELD_WIDTH / 2;
  * `jukeYards`: like a player would, juke away from a defender who gets this close in front of him
  * (0 = never juke).
  */
-export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0, losX = 45): { yards: number; by: number } {
+/** `holdSteer`: instead of following the lane, hold the steering this way the whole run (-1 up .. +1 down). */
+export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0, losX = 45, holdSteer?: number): { yards: number; by: number } {
   const rng = createRng(seed);
   const f = formation(losX);
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
@@ -59,7 +60,7 @@ export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0,
       pos: { ...c.pos },
       speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
       stunned: 0,
-      wait: i === RB ? rg.lbReadTime : 0,
+      wait: i === RB ? rg.lbReadTime : rg.cbReadTime,
     })),
     { pos: { x: losX + d.safetyDepthYards, y: mid }, speed: tk.dbPursuitSpeed, stunned: 0 },
     ...rushers.map((r) => ({ pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) })),
@@ -74,7 +75,7 @@ export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0,
   };
   let lastBy = -1;
   for (let i = 0; i < 60 * 15; i++) {
-    const steer = laneSteer(s.carrier.pos, paths[RB], rg.laneLookAheadYards, rg.laneFullSteerYards);
+    const steer = holdSteer ?? laneSteer(s.carrier.pos, paths[RB], rg.laneLookAheadYards, rg.laneFullSteerYards);
     if (jukeYards > 0) {
       const c = s.carrier.pos;
       const threat = s.pursuers.find((d) => canTackle(d) && d.pos.x > c.x - 0.5 && Math.hypot(d.pos.x - c.x, d.pos.y - c.y) < jukeYards);

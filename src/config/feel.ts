@@ -107,6 +107,8 @@ export const feel = {
     driveSpeed: 1.2,
     /** Linebacker pauses this long after the handoff to read the run. */
     lbReadTime: 0.4,
+    /** Cornerbacks stay with their receiver this long after the handoff before reading the run (pass first). */
+    cbReadTime: 0.3,
     /** Until you steer, the RB follows his lane: aims this far ahead on it... */
     laneLookAheadYards: 2,
     /** ...and steers fully once he's this far off it. */
