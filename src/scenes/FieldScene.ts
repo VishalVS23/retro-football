@@ -79,6 +79,8 @@ import { PUNTER_DEPTH, insideTwenty } from '../sim/punting';
 import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, type PuntPlay } from '../sim/puntReturn';
 import { coachTip } from '../sim/fourthDown';
 import { rollFumble, rollRecovery } from '../sim/fumble';
+import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
+import { closeEndGame, openEndGame } from '../ui/endGame';
 import {
   beforeSnap,
   callTimeout,
@@ -137,7 +139,7 @@ interface Receiver {
   coverage: Coverage;
 }
 
-type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'kickAim' | 'kickFlight' | 'result' | 'oppDrive';
+type State = 'calling' | 'presnap' | 'live' | 'windup' | 'flight' | 'run' | 'return' | 'kickAim' | 'kickFlight' | 'result' | 'oppDrive' | 'gameOver';
 const JUKE_MIN_PX = 25; // a flick must move at least this far to count as a juke
 
 /** Draws the field in "yard" units; the camera zoom turns yards into screen pixels. */
@@ -179,6 +181,8 @@ export class FieldScene extends Phaser.Scene {
 
   // Downs, distance and score (rules live in sim/drive.ts).
   private match: GameState = newGame();
+  /** Box score for the end-of-game screen. */
+  private stats = newGameStats();
   private form = formation(newGame().ballX);
   private scoreboard!: Phaser.GameObjects.Text;
   private scoreText = '';
@@ -419,7 +423,7 @@ export class FieldScene extends Phaser.Scene {
       this.kick(); // any tap kicks
       return;
     }
-    if (this.state === 'return' || this.state === 'result' || this.state === 'calling' || this.state === 'kickFlight' || this.state === 'oppDrive') return;
+    if (this.state === 'return' || this.state === 'result' || this.state === 'calling' || this.state === 'kickFlight' || this.state === 'oppDrive' || this.state === 'gameOver') return;
     if (this.state === 'live' && this.aimPointerId !== null && p.id !== this.aimPointerId) {
       this.toggleBullet(); // other thumb taps while aiming
       return;
@@ -732,6 +736,7 @@ export class FieldScene extends Phaser.Scene {
     }
 
     if (result === 'interception') {
+      this.statPlay({ kind: 'pass', result: 'interception' });
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
       this.popPlayer(cbDot);
@@ -761,6 +766,7 @@ export class FieldScene extends Phaser.Scene {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
       this.showBanner('INCOMPLETE');
     }
+    this.statPlay({ kind: 'pass', result: 'incomplete' });
     this.recordPlay({ kind: 'incomplete' });
     this.scheduleReset();
   }
@@ -870,6 +876,7 @@ export class FieldScene extends Phaser.Scene {
 
   /** New game state after a play or a kick, then the clock (`stops` = this play stops it). */
   private finishPlay(state: GameState, event: DriveEvent, stops: boolean) {
+    this.stats = addPoints(recordEvent(this.stats, event), this.clock.quarter, state.us - this.match.us, state.them - this.match.them);
     this.match = state;
     if (state.tryPending) {
       // Touchdown: the try comes first and is untimed. An end of quarter waits until it's over.
@@ -1371,6 +1378,10 @@ export class FieldScene extends Phaser.Scene {
     const c = this.chase.carrier.pos;
     const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - this.match.ballX);
     const shake = (mult: number) => this.shakeScreen(mult);
+    // Box score: a catch is a completion; a scramble stopped behind the line is a sack.
+    if (this.qbRun) this.statPlay(how === 'tackled' && c.x < this.match.ballX ? { kind: 'sack', yards } : { kind: 'run', yards });
+    else if (this.calledPlay.run) this.statPlay({ kind: 'run', yards });
+    else this.statPlay({ kind: 'pass', result: 'complete', yards, touchdown: how === 'touchdown' });
     if (how === 'touchdown') {
       shake(feel.juice.touchdownShakeScale);
       if (this.carrierDot) this.popPlayer(this.carrierDot);
@@ -1415,6 +1426,7 @@ export class FieldScene extends Phaser.Scene {
     this.shakeScreen();
     const loss = Math.round(this.qbPos.x - this.match.ballX);
     this.floatText(this.qbPos.x, this.qbPos.y - 2, `${loss} YDS`, '#ff8a8a');
+    this.statPlay({ kind: 'sack', yards: loss });
     const rng = getRngOrFallback();
     if (rollFumble({ sack: true }, feel.fumble, () => rng.next())) {
       this.ourFumble(this.qbPos);
@@ -1423,6 +1435,11 @@ export class FieldScene extends Phaser.Scene {
       this.recordPlay({ kind: 'spot', x: this.qbPos.x });
     }
     this.scheduleReset();
+  }
+
+  /** One of our snaps for the box score (2-point tries don't count). Call before the rules update the game. */
+  private statPlay(p: OurPlay) {
+    if (!this.match.tryPending) this.stats = recordOurPlay(this.stats, p);
   }
 
   /** Where our 11 / their 11 stand right now (for who falls on a loose ball). */
@@ -1521,7 +1538,9 @@ export class FieldScene extends Phaser.Scene {
     const r = runOff(c, drive.seconds, feel.clock);
     this.setClock(r.clock, r.event);
     this.pendingBreak = r.event;
-    this.match = applyOppDrive(this.match, drive);
+    const after = applyOppDrive(this.match, drive);
+    this.stats = addPoints(recordTheirDrive(this.stats, drive), r.clock.quarter, after.us - this.match.us, after.them - this.match.them);
+    this.match = after;
     this.updateScoreboard();
     this.updateLabel();
     // Stays up until CONTINUE (user: no auto-advance, there's a lot to read).
@@ -1537,6 +1556,10 @@ export class FieldScene extends Phaser.Scene {
 
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
   private showBreak(ev: Exclude<ClockEvent, null>) {
+    if (ev === 'final') {
+      this.showFinal();
+      return;
+    }
     this.state = 'result';
     const text = {
       warning: this.warningText(),
@@ -1556,15 +1579,32 @@ export class FieldScene extends Phaser.Scene {
         this.match = secondHalf(this.match);
       };
     }
-    if (ev === 'final') {
-      this.finishBreak = () => {
-        this.match = newGame();
-        this.clock = newClock(feel.clock);
-      };
-    }
     this.updateScoreboard();
     this.updateLabel();
     this.resetTimer = this.time.delayedCall((hold + feel.pacing.betweenPlaysTime) * 1000, () => this.afterPlay());
+  }
+
+  /** Game over: the end-of-game screen (score, stats); PLAY AGAIN starts a fresh game. */
+  private showFinal() {
+    this.state = 'gameOver';
+    this.clearBanner();
+    this.nextClock = null;
+    this.finishBreak = null;
+    this.updateScoreboard();
+    this.updateLabel();
+    openEndGame({
+      us: this.match.us,
+      them: this.match.them,
+      stats: this.stats,
+      onPlayAgain: () => {
+        closeEndGame();
+        this.match = newGame();
+        this.clock = newClock(feel.clock);
+        this.stats = newGameStats();
+        this.updateScoreboard();
+        this.resetPlay();
+      },
+    });
   }
 
   /** The safety's spot: deep behind the line, but never past the back of the end zone. */

@@ -89,6 +89,16 @@ export interface OppDrive {
   /** Their longest gain, if it was a big one. */
   bigPlay: { kind: 'run' | 'pass'; yards: number } | null;
   note: OppDriveNote;
+  /** Box-score numbers for the end-of-game screen (gains count up to the goal line; sacks count against passing). */
+  stats: OppDriveStats;
+}
+
+export interface OppDriveStats {
+  passYards: number;
+  rushYards: number;
+  firstDowns: number;
+  /** Times their QB was sacked. */
+  sacks: number;
 }
 
 /** The game situation the drive starts in. Scores are from OUR side (us / them). */
@@ -135,6 +145,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   let seconds = 0;
   let bigPlay: OppDrive['bigPlay'] = null;
   let note: OppDriveNote = null;
+  const stats: OppDriveStats = { passYards: 0, rushYards: 0, firstDowns: 0, sacks: 0 };
   const halfLeft = halfSecondsLeft(sit);
   const strength = Math.max(0.1, r.strength);
   /** Their lead (negative = behind). The score can't change during the drive. */
@@ -157,6 +168,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     extraPointGood,
     bigPlay,
     note,
+    stats: { ...stats },
   });
   // Our ball after they give it up at their-frame spot `t2` (in our end zone = touchback at our 20).
   const ourBallAt = (t2: number) => (t2 >= OPP_GOAL_X ? OPP_GOAL_X - 20 : clampSpot(t2));
@@ -226,6 +238,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       return done('interception', t, ourBallAt(t + rng.range(5, 20)));
     } else if (rng.chance(r.sackChance)) {
       gain = -rng.range(r.sackMinYards, r.sackMaxYards);
+      stats.sacks++;
     } else if (rng.chance(r.incompleteChance)) {
       gain = 0;
       stops = true;
@@ -239,6 +252,8 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     }
     seconds += stops ? r.incompleteSeconds : playSeconds;
     const counted = Math.round(Math.min(gain, OPP_GOAL_X - t)); // a gain only counts up to the goal line
+    if (run) stats.rushYards += counted;
+    else stats.passYards += counted;
     if (counted >= BIG_PLAY_YARDS && (!bigPlay || counted > bigPlay.yards)) bigPlay = { kind: run ? 'run' : 'pass', yards: counted };
 
     const next = t + gain;
@@ -249,6 +264,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     // A sack in their own end zone is a safety; rare enough that it's just spotted at their 1 here.
     t = clampSpot(next);
     if (t >= firstDownT) {
+      stats.firstDowns++;
       down = 1;
       firstDownT = Math.min(t + YARDS_FOR_FIRST_DOWN, OPP_GOAL_X);
     } else if (down === 4) {
