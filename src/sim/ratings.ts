@@ -44,3 +44,10 @@ export function scale(rating: number, perPoint: number, floor = 0.1): number {
 export function halving(chance: number, rating: number, halvingPoints: number, max = 0.95): number {
   return Math.min(max, chance * Math.pow(2, -(rating - AVERAGE_RATING) / halvingPoints));
 }
+
+/** A chance moved by `steps` doublings (+) or halvings (-) of its odds. */
+export function oddsShift(chance: number, steps: number): number {
+  if (steps === 0 || chance <= 0 || chance >= 1) return chance;
+  const odds = (chance / (1 - chance)) * Math.pow(2, steps);
+  return odds / (1 + odds);
+}

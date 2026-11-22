@@ -3,7 +3,7 @@
  * Only a TACKLE can knock the ball loose: diving, sliding and going out of bounds never fumble
  * (that's the reward for avoiding contact). Nobody scoops and runs it back yet: the ball is dead
  * where it came out, and a dice roll decides who falls on it.
- * Stage 3: the carrier's ball security and the weather (rain/snow) scale the chances.
+ * Stage 3: the carrier's ball security and the tackler's traits scale the chances (`Hit.ratio`); weather later.
  */
 import type { Vec } from './throw';
 
@@ -25,6 +25,10 @@ export interface Hit {
   tacklerSpeed?: number;
   /** The QB was sacked (pass rush got home, or a scramble stopped behind the line). */
   sack?: boolean;
+  /** Ratings: x the chance (the carrier's ball security, the tackler's "Goes for the strip"). Default 1. */
+  ratio?: number;
+  /** Trait "Big hitter": counts as a big hit whatever his speed. */
+  bigHitter?: boolean;
 }
 
 /**
@@ -32,9 +36,10 @@ export interface Hit {
  * normal tackle (so turning up `chance` alone raises every kind of tackle).
  */
 export function fumbleChance(hit: Hit, p: FumbleParams): number {
-  if (hit.sack) return Math.max(p.chance, p.stripSackChance);
-  if ((hit.tacklerSpeed ?? 0) >= p.bigHitSpeed) return Math.max(p.chance, p.bigHitChance);
-  return p.chance;
+  const ratio = hit.ratio ?? 1;
+  if (hit.sack) return Math.min(1, Math.max(p.chance, p.stripSackChance) * ratio);
+  if (hit.bigHitter || (hit.tacklerSpeed ?? 0) >= p.bigHitSpeed) return Math.min(1, Math.max(p.chance, p.bigHitChance) * ratio);
+  return Math.min(1, p.chance * ratio);
 }
 
 export function rollFumble(hit: Hit, p: FumbleParams, roll: () => number): boolean {

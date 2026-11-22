@@ -11,6 +11,18 @@ import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry
 import { laneSteer, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
 import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { carryFor, pursuerFor, tackleFor } from './runRatings';
+import type { Player } from '../players/player';
+
+/** Who's on the field (ratings, 3e-a). Anyone missing plays as an average starter. */
+export interface RunPlayers {
+  rb?: Player;
+  /** Their corners and linebacker, in formation order (CB1, CB3, CB2, LB1). */
+  cover?: (Player | undefined)[];
+  safety?: Player;
+  /** DL1, DL2. */
+  rush?: (Player | undefined)[];
+}
 
 const dt = 1 / 60;
 const mid = FIELD_WIDTH / 2;
@@ -35,7 +47,8 @@ export function simulateRun(
   losX = 45,
   holdSteer?: number | ((t: number) => number),
   call: DefCallId = 'man',
-): { yards: number; by: number } {
+  players: RunPlayers = {},
+): { yards: number; by: number; broken: number } {
   const rng = createRng(seed);
   const f = formation(losX);
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
@@ -57,26 +70,37 @@ export function simulateRun(
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }));
   }
   const tk = feel.tackling;
+  const R = feel.ratings;
   const pursuers: Pursuer[] = [
-    ...cover.map((c, i) => ({
-      pos: { ...c.pos },
-      speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
-      stunned: 0,
-      // A blitzer is already coming: no read.
-      wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : rg.cbReadTime,
-    })),
-    { pos: { x: losX + d.safetyDepthYards, y: mid }, speed: tk.dbPursuitSpeed, stunned: 0 },
-    ...rushers.map((r) => ({ pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) })),
+    ...cover.map((c, i) =>
+      pursuerFor(
+        players.cover?.[i],
+        i === RB ? 'LB' : 'CB',
+        {
+          pos: { ...c.pos },
+          speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
+          stunned: 0,
+          // A blitzer is already coming: no read.
+          wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : rg.cbReadTime,
+        },
+        R,
+      ),
+    ),
+    pursuerFor(players.safety, 'S', { pos: { x: losX + d.safetyDepthYards, y: mid }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
+    ...rushers.map((r, i) =>
+      pursuerFor(players.rush?.[i], 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) }, R),
+    ),
   ];
   let s = startChase(runners[RB].pos, pursuers);
   const params = {
-    carry: { ...feel.running, runSpeed: rg.rbRunSpeed },
+    carry: carryFor(players.rb, 'RB', { ...feel.running, runSpeed: rg.rbRunSpeed }, R),
     pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed: rg.driveSpeed },
-    tackle: tk,
+    tackle: tackleFor(players.rb, 'RB', tk, R),
     graceTime: tk.catchGraceTime,
     dirX: 1 as const,
   };
   let lastBy = -1;
+  let broken = 0;
   for (let i = 0; i < 60 * 15; i++) {
     const steer = typeof holdSteer === 'function' ? holdSteer(s.t) : holdSteer ?? laneSteer(s.carrier.pos, paths[RB], rg.laneLookAheadYards, rg.laneFullSteerYards);
     if (jukeYards > 0) {
@@ -86,12 +110,13 @@ export function simulateRun(
     }
     const step = stepChase(s, steer, dt, params, () => rng.next());
     s = step.state;
+    if (step.missed) broken++;
     if (step.end) {
       if (step.end === 'tackled') lastBy = nearest(s);
       break;
     }
   }
-  return { yards: s.carrier.pos.x - losX, by: lastBy };
+  return { yards: s.carrier.pos.x - losX, by: lastBy, broken };
 }
 
 /** Index of the pursuer nearest the carrier (who made the tackle). */

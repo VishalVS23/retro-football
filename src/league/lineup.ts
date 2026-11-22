@@ -19,6 +19,8 @@ export interface DefenseLineup {
   /** Covering skill spots 0-3: the three corners and the linebacker (on the RB). */
   cover: [Player, Player, Player, Player];
   safety: Player;
+  /** The two pass rushers (DL1, DL2): they chase the ball carrier once free of their blocks. */
+  rush: [Player, Player];
 }
 
 export function offenseLineup(league: League, teamId: number): OffenseLineup {
@@ -28,5 +30,5 @@ export function offenseLineup(league: League, teamId: number): OffenseLineup {
 
 export function defenseLineup(league: League, teamId: number): DefenseLineup {
   const c = depthChart(league, teamId);
-  return { cover: [c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player], safety: c.S[0].player };
+  return { cover: [c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player], safety: c.S[0].player, rush: [c.DL[0].player, c.DL[1].player] };
 }

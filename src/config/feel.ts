@@ -538,6 +538,25 @@ export const feel = {
     gambleAnticipationBonus: 0.12,
     /** Trait "Wins contested catches": defenders' breakup chance on his balls x this. */
     contestedBreakupRatio: 0.7,
+    /**
+     * Ball carriers vs tacklers (3e-a). These count against the AVERAGE STARTER at that role (not 10),
+     * so an average runner vs average tacklers plays like today. Top speed per speed point (carriers and chasers).
+     */
+    runSpeedPerPoint: 0.012,
+    /** Juke burst (sideways speed) per agility point. */
+    jukeBurstPerPoint: 0.03,
+    /** Every this many acceleration points halves the time back to full speed after a juke. */
+    jukeRecoverHalvingPoints: 6,
+    /** Every this many points of agility edge (runner vs tackler's agility + anticipation) doubles the odds a juke fools him. */
+    elusiveOddsPoints: 6,
+    /** Every this many points of strength-vs-tackling edge doubles the odds of breaking a tackle. */
+    powerOddsPoints: 6,
+    /** Trait "Fights for extra yards": broken-tackle odds x this. */
+    extraYardsOdds: 1.4,
+    /** Every this many ball-security points above average halves a carrier's fumbles (below doubles them). */
+    securityHalvingPoints: 5,
+    /** Trait "Goes for the strip": fumble chance on his tackles x this. */
+    stripFumbleBoost: 1.5,
   },
   juice: {
     hitPauseTime: 0.06,

@@ -6,6 +6,7 @@
  */
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import type { Vec } from './throw';
+import { oddsShift } from './ratings';
 
 const dist = (a: Vec, b: Vec) => Math.hypot(b.x - a.x, b.y - a.y);
 
@@ -118,6 +119,14 @@ export interface Pursuer {
   held?: number;
   /** Seconds left reading the play (a linebacker on a handoff): stands still, but can still tackle. */
   wait?: number;
+  /** Ratings (runRatings.ts): a sure tackler moves the runner's broken-tackle odds this many doublings (negative = fewer). */
+  brokenSteps?: number;
+  /** Ratings: same for the runner's juke working on him (negative = harder to fool). */
+  jukeSteps?: number;
+  /** Ratings / traits: the fumble chance on his tackles x this ("Goes for the strip"). */
+  fumbleRatio?: number;
+  /** Trait "Big hitter": every tackle he makes counts as a big hit. */
+  bigHitter?: boolean;
 }
 
 /** Can he make a tackle right now? (Not on the turf, not held by a blocker.) */
@@ -259,8 +268,9 @@ export function checkTackles(pursuers: Pursuer[], c: Carrier, roll: () => number
   let by = -1;
   for (const { i } of order) {
     by = i;
-    const juked = isJuking(c) && roll() < p.jukeEvadeChance;
-    if (!juked && roll() >= p.brokenTackleChance) return { tackled: true, by: i, missed: null, pursuers: out };
+    const d = pursuers[i];
+    const juked = isJuking(c) && roll() < oddsShift(p.jukeEvadeChance, d.jukeSteps ?? 0);
+    if (!juked && roll() >= oddsShift(p.brokenTackleChance, d.brokenSteps ?? 0)) return { tackled: true, by: i, missed: null, pursuers: out };
     out[i].stunned = p.stunTime;
     missed = juked ? 'juked' : 'broken';
   }

@@ -38,6 +38,7 @@ import {
   tryJuke,
   startDive,
   stepTrailer,
+  type CarryParams,
   type ChaseParams,
   type ChaseState,
   type Pursuer,
@@ -80,6 +81,7 @@ import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, t
 import { coachTip } from '../sim/fourthDown';
 import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStart, pickDefCall, stepBlitzer, teamAggression, type DefCallId } from '../sim/defCalls';
 import { rollFumble, rollRecovery } from '../sim/fumble';
+import { carryFor, pursuerFor, securityRatio, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
 import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
@@ -105,6 +107,7 @@ import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
 import { defenseLineup, offenseLineup, type DefenseLineup, type OffenseLineup } from '../league/lineup';
+import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
@@ -883,7 +886,7 @@ export class FieldScene extends Phaser.Scene {
   private returnParams() {
     const ic = feel.interception;
     const ramp = ic.returnTurnTime > 0 ? Math.min(1, this.ret.t / ic.returnTurnTime) : 1;
-    return { ...this.carryParams(), runSpeed: ic.returnSpeed * ramp };
+    return { ...this.baseCarryParams(), runSpeed: ic.returnSpeed * ramp };
   }
 
   private stepReturn(dt: number) {
@@ -900,17 +903,19 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** Numbers for one frame of a run: the carrier's running, the chase, and the tackles. */
-  private chaseParams(carry: ReturnType<FieldScene['carryParams']>, dirX: 1 | -1, driveSpeed = 0): ChaseParams {
+  private chaseParams(carry: CarryParams, dirX: 1 | -1, driveSpeed = 0, rated = false): ChaseParams {
     const tk = feel.tackling;
+    const tackle = {
+      tackleReachYards: tk.tackleReachYards,
+      brokenTackleChance: tk.brokenTackleChance,
+      jukeEvadeChance: tk.jukeEvadeChance,
+      stunTime: tk.stunTime,
+    };
     return {
       carry,
       pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed },
-      tackle: {
-        tackleReachYards: tk.tackleReachYards,
-        brokenTackleChance: tk.brokenTackleChance,
-        jukeEvadeChance: tk.jukeEvadeChance,
-        stunTime: tk.stunTime,
-      },
+      // Our ball carrier's strength and agility (his side of every tackle); returns stay plain for now.
+      tackle: rated ? tackleFor(this.carrierPlayer(), this.carrierRole(), tackle, feel.ratings) : tackle,
       graceTime: tk.catchGraceTime,
       dirX,
     };
@@ -1342,7 +1347,22 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  private carryParams() {
+  /** Our ball carrier's running, with his ratings (speed, agility, acceleration). */
+  private carryParams(): CarryParams {
+    return carryFor(this.carrierPlayer(), this.carrierRole(), this.baseCarryParams(), feel.ratings);
+  }
+
+  /** Who has the ball (QB on a scramble, else the receiver / RB who caught or took it). */
+  private carrierPlayer() {
+    if (!this.ourLineup) return null;
+    return this.qbRun ? this.ourLineup.qb : this.targetIndex >= 0 ? this.ourLineup.skill[this.targetIndex] : null;
+  }
+
+  private carrierRole(): CarrierRole {
+    return this.qbRun ? 'QB' : this.rbRun ? 'RB' : 'WR';
+  }
+
+  private baseCarryParams(): CarryParams {
     return {
       runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : this.rbRun ? feel.runGame.rbRunSpeed : feel.running.runSpeed,
       steerSpeed: feel.running.steerSpeed,
@@ -1394,16 +1414,26 @@ export class FieldScene extends Phaser.Scene {
     // On a scramble or a run play our line keeps blocking: a rusher is held (can't tackle) until
     // the moment he beats his blocker.
     const blocking = this.qbRun || !!this.calledPlay.run;
+    const them = this.theirLineup;
+    const rated = (p: Pursuer, who: Player | undefined, role: TacklerRole) => pursuerFor(who, role, p, feel.ratings);
     this.chase = startChase(at, [
-      ...this.receivers.map((r, i) => ({
-        pos: { ...r.coverage.pos },
-        speed: i === RB ? feel.defense.lbPursuitSpeed : db,
-        stunned: 0,
-        // On a run the linebacker reads it first, and the corners stay with their receivers a moment (pass first).
-        wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : feel.runGame.cbReadTime) : 0,
-      })),
-      { pos: { ...this.safetyPos }, speed: db, stunned: 0 },
-      ...this.rushers.map((r) => ({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 })),
+      ...this.receivers.map((r, i) =>
+        rated(
+          {
+            pos: { ...r.coverage.pos },
+            speed: i === RB ? feel.defense.lbPursuitSpeed : db,
+            stunned: 0,
+            // On a run the linebacker reads it first, and the corners stay with their receivers a moment (pass first).
+            wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : feel.runGame.cbReadTime) : 0,
+          },
+          them?.cover[i],
+          i === RB ? 'LB' : 'CB',
+        ),
+      ),
+      rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0 }, them?.safety, 'S'),
+      ...this.rushers.map((r, i) =>
+        rated({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 }, them?.rush[i], 'DL'),
+      ),
     ]);
     this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
     // Everyone else stops his route and follows the play (the carrier's own entry is ignored).
@@ -1423,7 +1453,7 @@ export class FieldScene extends Phaser.Scene {
           : this.arrowSteer();
     const rng = getRngOrFallback();
     const drive = run ? feel.runGame.driveSpeed : 0;
-    const step = stepChase(this.chase, steer, dt, this.chaseParams(this.carryParams(), 1, drive), () => rng.next());
+    const step = stepChase(this.chase, steer, dt, this.chaseParams(this.carryParams(), 1, drive, true), () => rng.next());
     this.chase = step.state;
     const c = this.chase.carrier.pos;
     this.carrierDot?.setPosition(c.x, c.y);
@@ -1469,7 +1499,8 @@ export class FieldScene extends Phaser.Scene {
       // A scrambling QB brought down behind the line is a sack; a run stopped for no gain is stuffed.
       const sacked = this.qbRun && c.x < this.match.ballX;
       const rng = getRngOrFallback();
-      if (rollFumble({ tacklerSpeed: tackler?.speed, sack: sacked }, feel.fumble, () => rng.next())) {
+      const ratio = securityRatio(this.carrierPlayer(), this.carrierRole(), feel.ratings) * (tackler?.fumbleRatio ?? 1);
+      if (rollFumble({ tacklerSpeed: tackler?.speed, sack: sacked, ratio, bigHitter: tackler?.bigHitter }, feel.fumble, () => rng.next())) {
         this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, yards < 0 ? '#ff8a8a' : '#ffd166');
         this.ourFumble(c);
         this.scheduleReset();
@@ -1505,7 +1536,7 @@ export class FieldScene extends Phaser.Scene {
     this.floatText(this.qbPos.x, this.qbPos.y - 2, `${loss} YDS`, '#ff8a8a');
     this.statPlay({ kind: 'sack', yards: loss });
     const rng = getRngOrFallback();
-    if (rollFumble({ sack: true }, feel.fumble, () => rng.next())) {
+    if (rollFumble({ sack: true, ratio: securityRatio(this.ourLineup?.qb, 'QB', feel.ratings) }, feel.fumble, () => rng.next())) {
       this.ourFumble(this.qbPos);
     } else {
       this.showBanner('SACKED');
