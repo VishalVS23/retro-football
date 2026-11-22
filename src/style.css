@@ -163,6 +163,15 @@ body {
   border-bottom: 1px solid #f4efe133;
   margin-bottom: 4px;
 }
+.fp-players {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.fp-players:empty {
+  display: none;
+}
 
 .fp-build {
   font-weight: normal;
