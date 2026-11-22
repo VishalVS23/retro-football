@@ -22,8 +22,18 @@ const mid = FIELD_WIDTH / 2;
  * `jukeYards`: like a player would, juke away from a defender who gets this close in front of him
  * (0 = never juke).
  */
-/** `holdSteer`: instead of following the lane, hold the steering this way the whole run (-1 up .. +1 down). */
-export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0, losX = 45, holdSteer?: number): { yards: number; by: number } {
+/**
+ * `holdSteer`: instead of following the lane, hold the steering this way the whole run (-1 up .. +1 down),
+ * or a function of the time since the handoff (e.g. flip up/down every 0.2 s to zig-zag).
+ */
+export function simulateRun(
+  p: PlayDef,
+  seed: number,
+  feel: Feel,
+  jukeYards = 0,
+  losX = 45,
+  holdSteer?: number | ((t: number) => number),
+): { yards: number; by: number } {
   const rng = createRng(seed);
   const f = formation(losX);
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
@@ -68,14 +78,14 @@ export function simulateRun(p: PlayDef, seed: number, feel: Feel, jukeYards = 0,
   let s = startChase(runners[RB].pos, pursuers);
   const params = {
     carry: { ...feel.running, runSpeed: rg.rbRunSpeed },
-    pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, driveSpeed: rg.driveSpeed },
+    pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed: rg.driveSpeed },
     tackle: tk,
     graceTime: tk.catchGraceTime,
     dirX: 1 as const,
   };
   let lastBy = -1;
   for (let i = 0; i < 60 * 15; i++) {
-    const steer = holdSteer ?? laneSteer(s.carrier.pos, paths[RB], rg.laneLookAheadYards, rg.laneFullSteerYards);
+    const steer = typeof holdSteer === 'function' ? holdSteer(s.t) : holdSteer ?? laneSteer(s.carrier.pos, paths[RB], rg.laneLookAheadYards, rg.laneFullSteerYards);
     if (jukeYards > 0) {
       const c = s.carrier.pos;
       const threat = s.pursuers.find((d) => canTackle(d) && d.pos.x > c.x - 0.5 && Math.hypot(d.pos.x - c.x, d.pos.y - c.y) < jukeYards);

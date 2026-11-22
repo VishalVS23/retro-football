@@ -130,6 +130,11 @@ export interface PursuitParams {
   reactionTime: number;
   /** How far ahead (in seconds) they aim, to take a pursuit angle. */
   leadTime: number;
+  /**
+   * They judge which way he's going from how he moved over this many seconds (not his last split
+   * second), so twitching up and down can't send them the wrong way. Default 0.3.
+   */
+  readWindow?: number;
   runSpeed: number;
   /** Which way the runner is heading (+1 right, -1 left). Defaults to +1. */
   dirX?: 1 | -1;
@@ -137,13 +142,11 @@ export interface PursuitParams {
   driveSpeed?: number;
 }
 
-/** What the defenders have seen of the runner, so they can react late. `vx` = his real speed along the field. */
-export type Sightings = Array<{ t: number; pos: Vec; vy: number; vx?: number }>;
+/** What the defenders have seen of the runner, so they can react late. */
+export type Sightings = Array<{ t: number; pos: Vec; vy: number }>;
 
 export function remember(seen: Sightings, t: number, c: Carrier, keepSeconds: number): Sightings {
-  const last = seen[seen.length - 1];
-  const vx = last && t > last.t ? (c.pos.x - last.pos.x) / (t - last.t) : last?.vx;
-  return [...seen, { t, pos: { ...c.pos }, vy: c.vy, vx }].filter((s) => s.t >= t - keepSeconds);
+  return [...seen, { t, pos: { ...c.pos }, vy: c.vy }].filter((s) => s.t >= t - keepSeconds);
 }
 
 function sightingAt(seen: Sightings, t: number) {
@@ -162,12 +165,16 @@ function sightingAt(seen: Sightings, t: number) {
 export function stepPursuers(pursuers: Pursuer[], seen: Sightings, t: number, dt: number, p: PursuitParams): Pursuer[] {
   const s = sightingAt(seen, t - p.reactionTime);
   const dirX = p.dirX ?? 1;
-  const vx = s.vx ?? dirX * p.runSpeed;
+  // His average velocity over the read window (just after he got the ball: assume straight ahead).
+  const e = sightingAt(seen, s.t - (p.readWindow ?? 0.3));
+  const span = s.t - e.t;
+  const vx = span > 0.05 ? (s.pos.x - e.pos.x) / span : dirX * p.runSpeed;
+  const vy = span > 0.05 ? (s.pos.y - e.pos.y) / span : s.vy;
   const late = Math.max(0, t - s.t);
-  const guess = { x: s.pos.x + vx * late, y: s.pos.y + s.vy * late };
+  const guess = { x: s.pos.x + vx * late, y: s.pos.y + vy * late };
   const targetFor = (d: Pursuer) => {
     const lead = Math.min(p.leadTime, dist(d.pos, guess) / Math.max(1, d.speed));
-    return { x: guess.x + vx * lead, y: guess.y + s.vy * lead };
+    return { x: guess.x + vx * lead, y: guess.y + vy * lead };
   };
   return pursuers.map((d) => {
     if (d.stunned > 0) return { ...d, stunned: Math.max(0, d.stunned - dt) };

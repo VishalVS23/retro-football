@@ -815,7 +815,7 @@ export class FieldScene extends Phaser.Scene {
     const tk = feel.tackling;
     return {
       carry,
-      pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, driveSpeed },
+      pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed },
       tackle: {
         tackleReachYards: tk.tackleReachYards,
         brokenTackleChance: tk.brokenTackleChance,

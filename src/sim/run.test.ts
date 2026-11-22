@@ -118,5 +118,13 @@ describe('run play balance (headless, 300 runs each)', () => {
         expect(gains.filter((g) => g >= 10).length / gains.length).toBeLessThan(0.15);
       }
     });
+    it(`${name}: twitching up and down fast doesn't shake the defenders`, () => {
+      // User 2026-11-21: spamming up/down after a catch scored every other time (defenders read the
+      // runner's last split second, so their aim swung ~3 yd each twitch). Now no better than the lane.
+      const twitch = (t: number) => (Math.floor(t / 0.15) % 2 ? 1 : -1);
+      const avg = (steer?: (t: number) => number) =>
+        Array.from({ length: 300 }, (_, i) => simulateRun(play(name), i + 1, feel, 0, 45, steer).yards).reduce((a, b) => a + b, 0) / 300;
+      expect(avg(twitch)).toBeLessThanOrEqual(avg() + 0.5);
+    });
   }
 });

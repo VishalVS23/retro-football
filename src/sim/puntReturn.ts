@@ -154,7 +154,7 @@ function returnParams(feel: Feel, t: number): ChaseParams {
       jukeForwardRatio: r.jukeForwardRatio,
       jukeRecoverTime: r.jukeRecoverTime,
     },
-    pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, driveSpeed: 0 },
+    pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed: 0 },
     tackle: { tackleReachYards: tk.tackleReachYards, brokenTackleChance: tk.brokenTackleChance, jukeEvadeChance: tk.jukeEvadeChance, stunTime: tk.stunTime },
     graceTime: 0,
     dirX: -1,

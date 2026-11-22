@@ -182,6 +182,8 @@ export const feel = {
     pursuitReactionTime: 0.2,
     /** How far ahead they aim when chasing (pursuit angle), in seconds. */
     pursuitLeadTime: 0.35,
+    /** They read which way the runner is going from his last this-many seconds (twitching can't fool them). */
+    pursuitReadWindow: 0.3,
     /**
      * Chasing speeds: defensive backs and linemen. DBs are a bit faster than any ball carrier, so a
      * defender with an angle can still run you down; one you've fully beaten can't.
