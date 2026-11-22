@@ -72,6 +72,14 @@ describe('player generation', () => {
     expect(mean(old.map((p) => p.attributes.leadership))).toBeGreaterThan(mean(young.map((p) => p.attributes.leadership)) + 1.5);
   });
 
+  it('young players are quicker but read the game less well than veterans of the same rating', () => {
+    const young = many('CB', 13, 22);
+    const old = many('CB', 13, 32);
+    const reads = (p: Player) => (p.attributes.anticipation + p.attributes.decisions + p.attributes.composure) / 3;
+    expect(mean(young.map(reads))).toBeLessThan(mean(old.map(reads)) - 2);
+    expect(mean(young.map((p) => p.attributes.speed))).toBeGreaterThan(mean(old.map((p) => p.attributes.speed)) + 2);
+  });
+
   it('potential is never below current ability, and young players have more room to grow', () => {
     const young = many('QB', 10, 22);
     const peak = many('QB', 10, PEAK_AGE.QB + 2);

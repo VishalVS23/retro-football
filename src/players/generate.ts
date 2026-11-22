@@ -39,6 +39,8 @@ export const GEN = {
   weightDrop: 0.4,
   /** Physical attributes lost per year past his position's peak age (+1). */
   declinePerYear: 0.7,
+  /** Young players read the game less well: these "reads" drop this much per year before peak age. */
+  rawnessPerYear: 0.45,
   /** Leadership gained per year of age past 26 (veterans lead). */
   leadershipPerYear: 0.3,
   /** Room to grow per year younger than his peak age: up to this much potential. */
@@ -55,6 +57,8 @@ export const GEN = {
 const tri = (rng: Rng) => rng.next() + rng.next() - 1;
 
 const DECLINING: readonly AttributeKey[] = ['speed', 'acceleration', 'agility', 'stamina'];
+/** Reading the game: still raw in young players (they make up for it physically). */
+const READS: readonly AttributeKey[] = ['anticipation', 'decisions', 'composure', 'vision', 'footballIQ', 'concentration'];
 
 function rollHidden(rng: Rng): Hidden {
   const h = {} as Hidden;
@@ -78,6 +82,8 @@ function rollAttributes(rng: Rng, spec: PlayerSpec): Attributes {
   // Veterans: slower, but better leaders.
   const pastPeak = age - PEAK_AGE[pos] - 1;
   if (pastPeak > 0) for (const key of DECLINING) raw[key] -= pastPeak * GEN.declinePerYear;
+  const yearsToPeak = PEAK_AGE[pos] - age;
+  if (yearsToPeak > 0) for (const key of READS) raw[key] -= yearsToPeak * GEN.rawnessPerYear;
   if (!weights.leadership) raw.leadership += (age - 26) * GEN.leadershipPerYear;
 
   // Nudge the attributes that matter so his rating lands on the quality asked for
@@ -89,7 +95,9 @@ function rollAttributes(rng: Rng, spec: PlayerSpec): Attributes {
   for (let pass = 0; pass < 3; pass++) {
     shift += q - rawPositionRating(attrs, pos);
     for (const key of ATTRIBUTE_KEYS) {
-      if (weights[key] && !(pastPeak > 0 && DECLINING.includes(key))) attrs[key] = clampAttr(raw[key] + shift);
+      // Lost speed (veterans) and rawness (youngsters) stay: the rest makes up for them.
+      const fixed = (pastPeak > 0 && DECLINING.includes(key)) || (yearsToPeak > 0 && READS.includes(key));
+      if (weights[key] && !fixed) attrs[key] = clampAttr(raw[key] + shift);
     }
   }
   return attrs;

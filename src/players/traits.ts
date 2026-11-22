@@ -16,7 +16,9 @@ export type TraitId =
   | 'bigHitter'
   | 'goesForStrip'
   | 'jumpsSnap'
-  | 'playsThroughInjury';
+  | 'playsThroughInjury'
+  | 'mauler'
+  | 'iceVeins';
 
 export const MAX_TRAITS = 2;
 
@@ -52,6 +54,8 @@ export const TRAITS: Record<TraitId, TraitDef> = {
   bigHitter: { label: 'Big hitter', positions: ['LB', 'S', 'DL'], chance: (a) => 0.02 + 0.4 * ramp((a.aggression + a.strength) / 2, 12, 18) },
   goesForStrip: { label: 'Goes for the strip', positions: ['LB', 'DL', 'S', 'CB'], chance: (a) => 0.03 + 0.2 * ramp(a.aggression, 12, 18) },
   jumpsSnap: { label: 'Tries to jump the snap', positions: ['DL'], chance: (a) => 0.25 * ramp(a.aggression - a.concentration, 0, 8) },
+  mauler: { label: 'Mauler (finishes blocks)', positions: ['OL', 'TE'], chance: (a) => 0.03 + 0.35 * ramp((a.runBlocking + a.aggression) / 2, 11, 17) },
+  iceVeins: { label: 'Ice in his veins', positions: ['K', 'P'], chance: (a) => 0.03 + 0.4 * ramp((a.composure + a.concentration) / 2, 12, 17) },
   playsThroughInjury: {
     label: 'Plays through injuries',
     positions: 'all',

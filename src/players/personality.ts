@@ -35,9 +35,9 @@ export const PERSONALITY_TEXT: Record<Personality, string> = {
 };
 
 export function personality(h: Hidden, a: Pick<Attributes, 'leadership' | 'workRate' | 'composure'>): Personality {
-  if (h.professionalism >= 17 && h.temperament >= 13 && a.workRate >= 13) return 'Model Professional';
-  if (h.temperament <= 5) return 'Volatile';
-  if (a.leadership >= 17 && h.professionalism >= 12) return 'Born Leader';
+  if (h.professionalism >= 16 && h.temperament >= 12 && a.workRate >= 12) return 'Model Professional';
+  if (h.temperament <= 4) return 'Volatile';
+  if (a.leadership >= 15 && h.professionalism >= 11) return 'Born Leader';
   if (h.ambition >= 15 && h.loyalty <= 6) return 'Mercenary';
   if (h.professionalism >= 15) return 'Professional';
   if (h.professionalism <= 6 && a.workRate <= 8) return 'Low Determination';
