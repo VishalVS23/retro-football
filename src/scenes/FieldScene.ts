@@ -81,7 +81,8 @@ import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, t
 import { coachTip } from '../sim/fourthDown';
 import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStart, pickDefCall, stepBlitzer, teamAggression, type DefCallId } from '../sim/defCalls';
 import { rollFumble, rollRecovery } from '../sim/fumble';
-import { carryFor, pursuerFor, securityRatio, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
+import type { DiagramDefense } from '../ui/playDiagram';
+import { carryFor, edgeSign, lineEdge, pursuerFor, securityRatio, shedTimeFor, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
 import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
@@ -1987,14 +1988,18 @@ export class FieldScene extends Phaser.Scene {
    * Their defenders' names and who has the edge in each matchup, for the play-call diagram.
    * No arrows when ratings are switched off (everyone is a 10 then).
    */
-  private diagramMatchups(): { cover: string[]; safety: string; edge: number[] } | null {
+  private diagramMatchups(): DiagramDefense | null {
     const us = this.ourLineup;
     const them = this.theirLineup;
     if (!us || !them) return null;
+    const on = !!feel.ratings.enabled;
+    // A blocker has the edge when he's at least 2 points better than his rusher (same as the receivers).
+    const line = (run: boolean) => us.line.map((p, i) => (on ? edgeSign(lineEdge(p, them.rush[i], run, feel.ratings)) : 0));
     return {
       cover: them.cover.map((p) => p.lastName),
       safety: them.safety.lastName,
-      edge: us.skill.map((p, i) => (feel.ratings.enabled ? matchupEdge(p, them.cover[i]) : 0)),
+      edge: us.skill.map((p, i) => (on ? matchupEdge(p, them.cover[i]) : 0)),
+      line: { pass: line(false), run: line(true) },
     };
   }
 
@@ -2150,10 +2155,11 @@ export class FieldScene extends Phaser.Scene {
       this.wrDots[i].setPosition(r.runner.pos.x, r.runner.pos.y).setScale(1);
     });
     // Run blocking and pass blocking hold their man for different lengths of time.
+    // ...and each block holds for as long as our blocker wins his matchup (3e-b).
     const shed = play.run ? feel.runGame : feel.pocket;
-    this.rushers = this.form.rush.map((pos) => ({
+    this.rushers = this.form.rush.map((pos, i) => ({
       pos: { ...pos },
-      shedAt: shed.shedTime + (rng.next() * 2 - 1) * shed.shedTimeVariance,
+      shedAt: shedTimeFor(this.ourLineup?.line[i], this.theirLineup?.rush[i], !!play.run, shed, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
     }));
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
     this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));

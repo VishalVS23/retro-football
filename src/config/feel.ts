@@ -563,6 +563,15 @@ export const feel = {
     securityHalvingPoints: 5,
     /** Trait "Goes for the strip": fumble chance on his tackles x this. */
     stripFumbleBoost: 1.5,
+    /** The line (3e-b): a pass block holds this much longer per point of blocking edge (vs the average starters), shorter per point of deficit. */
+    passLinePerPoint: 0.06,
+    /** Same for run blocks. */
+    runLinePerPoint: 0.06,
+    /** Trait "Mauler": his run blocks hold this much longer. */
+    maulerRunScale: 1.15,
+    /** Trait "Tries to jump the snap": chance per snap he gets off early, and how much sooner (seconds) he's free of his block. */
+    jumpSnapChance: 0.2,
+    jumpSnapGain: 0.4,
   },
   juice: {
     hitPauseTime: 0.06,

@@ -9,10 +9,11 @@ import { generatePlayer } from '../players/generate';
 import { generateLeague, depthChart } from '../league/league';
 import { createRng } from './rng';
 import type { Position } from '../players/positions';
-import { ROLE_NORMS, carryFor, pursuerFor, roleRating, securityRatio, tackleFor, type CarrierRole, type TacklerRole } from './runRatings';
+import { ROLE_NORMS, carryFor, edgeSign, lineEdge, pursuerFor, roleRating, securityRatio, shedTimeFor, tackleFor, type Role } from './runRatings';
+import { simulatePass } from './passSim';
 
 /** A player exactly `delta` points above (below) the average starter at `role` in everything that matters here. */
-const mk = (pos: Position, role: CarrierRole | TacklerRole, delta: number) => {
+const mk = (pos: Position, role: Role, delta: number) => {
   const p = generatePlayer(createRng(7), { id: 1, position: pos, quality: 12, age: 26 });
   for (const [k, v] of Object.entries(ROLE_NORMS[role])) (p.attributes as Record<string, number>)[k] = Math.max(1, Math.min(20, Math.round(v! + delta)));
   p.traits = [];
@@ -24,8 +25,8 @@ const off = { ...feel.ratings, enabled: 0 };
 describe('role averages', () => {
   it('ROLE_NORMS matches the average starters the generator makes (within a point)', () => {
     const leagues = [11, 22, 33].map((s) => generateLeague(s * 1009));
-    const take: Record<CarrierRole | TacklerRole, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 2 };
-    for (const [role, norms] of Object.entries(ROLE_NORMS) as [CarrierRole | TacklerRole, Record<string, number>][]) {
+    const take: Record<Role, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 2, OL: 2 };
+    for (const [role, norms] of Object.entries(ROLE_NORMS) as [Role, Record<string, number>][]) {
       for (const [key, norm] of Object.entries(norms)) {
         const vals: number[] = [];
         for (const lg of leagues)
@@ -139,5 +140,81 @@ describe('balance: ball carriers vs tacklers', () => {
       expect(r).toBeLessThan(runs(name, team(0, 0)).avg - 0.4);
       expect(r).toBeGreaterThan(0.8);
     }
+  }, 60000);
+});
+
+// ---------- The line (3e-b) ----------
+
+const line = (d: number) => [mk('OL', 'OL', d), mk('OL', 'OL', d)];
+const rushers = (d: number) => [mk('DL', 'DL', d), mk('DL', 'DL', d)];
+
+describe('the line', () => {
+  it('average vs average = today; the blocker who wins holds longer; markers need a 2-point edge', () => {
+    const pk = feel.pocket;
+    const ol = mk('OL', 'OL', 0);
+    const dl = mk('DL', 'DL', 0);
+    expect(Math.abs(lineEdge(ol, dl, false, on))).toBeLessThan(1); // test players' ratings are whole numbers
+    expect(shedTimeFor(null, null, false, pk, 0, () => 0, on)).toBe(pk.shedTime);
+    expect(shedTimeFor(mk('OL', 'OL', 4), dl, false, pk, 0, () => 0, on)).toBeGreaterThan(pk.shedTime);
+    expect(shedTimeFor(ol, mk('DL', 'DL', 4), false, pk, 0, () => 0, on)).toBeLessThan(pk.shedTime);
+    expect(shedTimeFor(mk('OL', 'OL', 4), dl, false, pk, 0, () => 0, off)).toBe(pk.shedTime);
+    expect(edgeSign(1.9)).toBe(0);
+    expect(edgeSign(2)).toBe(1);
+    expect(edgeSign(-2)).toBe(-1);
+  });
+
+  it('traits: a mauler holds run blocks longer; a snap-jumper only rolls dice when he has the trait', () => {
+    const rg = feel.runGame;
+    const mauler = mk('OL', 'OL', 0);
+    mauler.traits = ['mauler'];
+    expect(shedTimeFor(mauler, null, true, rg, 0, () => 0, on)).toBeGreaterThan(shedTimeFor(mk('OL', 'OL', 0), null, true, rg, 0, () => 0, on));
+    let rolls = 0;
+    const roll = () => (rolls++, 0);
+    shedTimeFor(null, mk('DL', 'DL', 0), false, feel.pocket, 0, roll, on);
+    expect(rolls).toBe(0);
+    const jumper = mk('DL', 'DL', 0);
+    jumper.traits = ['jumpsSnap'];
+    expect(shedTimeFor(null, jumper, false, feel.pocket, 0, roll, on)).toBeLessThan(feel.pocket.shedTime);
+    expect(rolls).toBe(1);
+  });
+});
+
+const sackRate = (olD: number, dlD: number, at: number, call: 'man' | 'blitz' = 'man', name = 'Verticals') => {
+  let n = 0;
+  const play = PLAYS.find((p) => p.name === name)!;
+  for (let s = 1; s <= 100; s++) {
+    const r = simulatePass(play, { to: 0, throwAt: at, lead: 1 }, s * 7919, feel, 35, {
+      call,
+      line: line(olD),
+      defense: { cover: [null, null, null, null], safety: null, rush: rushers(dlD) },
+    });
+    if (r.sacked) n++;
+  }
+  return n;
+};
+
+describe('balance: the line', () => {
+  it('pocket: an awful line is sacked by ~2 s, an average one holds to ~2.5 s, a great one past 3 s', () => {
+    expect(sackRate(-4, 4, 2.1)).toBeGreaterThan(80);
+    expect(sackRate(0, 0, 2.4)).toBe(0);
+    expect(sackRate(0, 0, 3.0)).toBeGreaterThan(80);
+    expect(sackRate(4, -4, 3.0)).toBe(0);
+  }, 60000);
+
+  it('worst case, an awful line AND a blitz: a quick hitch still gets out', () => {
+    expect(sackRate(-4, 4, 1.1, 'blitz', 'Hitch Slant')).toBe(0);
+  }, 60000);
+
+  it('runs: a great line opens holes, an awful one gets the Dive stuffed (the Toss still works)', () => {
+    const avg = (name: string, o: number, d: number) => {
+      const play = PLAYS.find((p) => p.name === name)!;
+      let y = 0;
+      for (let s = 1; s <= 200; s++) y += simulateRun(play, s * 7919, feel, 2.5, 45, undefined, 'man', { line: line(o), rush: rushers(d) }).yards;
+      return y / 200;
+    };
+    const plain = avg('Dive', 0, 0);
+    expect(avg('Dive', 4, -4)).toBeGreaterThan(plain + 0.6);
+    expect(avg('Dive', -4, 4)).toBeLessThan(plain - 1);
+    expect(avg('Toss', -4, 4)).toBeGreaterThan(1);
   }, 60000);
 });

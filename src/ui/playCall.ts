@@ -11,7 +11,7 @@ import { TOTAL_LENGTH } from '../sim/field';
 import type { FourthChoice } from '../sim/fourthDown';
 import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
-import { playDiagramSvg } from './playDiagram';
+import { playDiagramSvg, type DiagramDefense } from './playDiagram';
 import type { DefCallId } from '../sim/defCalls';
 
 export interface PlayCallOptions {
@@ -44,7 +44,7 @@ export interface PlayCallOptions {
   /** Our players' last names for the big diagram (formation order); null = plain WR / RB / QB. */
   names: { qb: string; skill: string[] } | null;
   /** Their defenders' names and the matchup edges for the big diagram (see DiagramView.defense); null = plain CB / LB / S. */
-  matchups: { cover: string[]; safety: string; edge: number[] } | null;
+  matchups: DiagramDefense | null;
   /** At the line (PLAYS reopened before the snap): their defensive call, drawn in the diagram, with a read and a tip. null = in the huddle. */
   defenseRead: { call: DefCallId; name: string; tip: string } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */

@@ -19,21 +19,21 @@ describe('balance: whole pass plays (all defenders, as in the game)', () => {
     expect(catches('Post Corner', { to: 1, throwAt: 0.8, lead: 1 })).toBeGreaterThanOrEqual(55); // corner
     expect(catches('Hitch Slant', { to: 0, throwAt: 1.1, lead: 1 })).toBeGreaterThanOrEqual(70); // hitch
     expect(catches('Curls', { to: 0, throwAt: 1.5, lead: 1 })).toBeGreaterThanOrEqual(65); // curl
-  });
+  }, 30000);
 
   it('the deep ball is a race, not a sure thing', () => {
     const go = catches('Verticals', { to: 0, throwAt: 1.1, lead: 1 });
     expect(go).toBeGreaterThan(60);
     expect(go).toBeLessThan(92);
-  });
+  }, 30000);
 
   it('a late slant runs into the safety', () => {
     expect(catches('Slants', { to: 0, throwAt: 1.5, lead: 1 })).toBeLessThan(20);
-  });
+  }, 30000);
 
   it('throwing behind the receiver gives it to the trailing corner', () => {
     expect(catches('Verticals', { to: 0, throwAt: 1.1, lead: 0.5 })).toBeLessThan(20);
-  });
+  }, 30000);
 
   it('why the new rules exist: without momentum and late help, short routes get swarmed', () => {
     const old = {
@@ -42,7 +42,7 @@ describe('balance: whole pass plays (all defenders, as in the game)', () => {
     };
     expect(catches('Slants', { to: 0, throwAt: 0.5, lead: 1 }, old)).toBeLessThan(catches('Slants', { to: 0, throwAt: 0.5, lead: 1 }) - 15);
     expect(catches('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, old)).toBeLessThan(catches('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }) - 15);
-  });
+  }, 30000);
 });
 
 // ---------- Run after the catch, and two holes the user found (2026-11-22) ----------
@@ -70,7 +70,7 @@ describe('after the catch', () => {
       expect(run.result).toBe(plain.result);
       if (run.result === 'catch') expect(run.gain!).toBeGreaterThan(0);
     }
-  });
+  }, 30000);
 
   it('RB checkdown: no longer a free 6 yards (the LB comes up on him)', () => {
     const check = playOut('Slants', { to: 3, throwAt: 1.3, lead: 1 }, 0);

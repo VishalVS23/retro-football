@@ -7,9 +7,9 @@ import type { Feel } from '../config/feel';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { formation } from './formation';
 import { RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
-import { resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
+import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
 import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
-import { carryFor, pursuerFor, tackleFor } from './runRatings';
+import { carryFor, pursuerFor, shedTimeFor, tackleFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
@@ -36,8 +36,10 @@ export interface PassOptions {
   pressured?: boolean;
   /** Our skill players in formation order (wide top, slot, wide bottom, RB). Leave out = no receiver ratings. */
   offense?: (Player | null)[];
-  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety. Leave out = no defender ratings. */
-  defense?: { cover: (Player | null)[]; safety: Player | null };
+  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety and the two rushers. Leave out = no defender ratings. */
+  defense?: { cover: (Player | null)[]; safety: Player | null; rush?: (Player | null)[] };
+  /** Our two blockers (3e-b): line[i] blocks their rusher i. Leave out = average blocking. */
+  line?: (Player | null)[];
   /** Their defensive call (3d2). Default: normal man. */
   call?: DefCallId;
   /**
@@ -107,7 +109,10 @@ export function simulatePass(
   // The two pass rushers (only needed to chase after a catch; their own dice keep the pass rolls unchanged).
   const rng2 = createRng((seed ^ 0x5bd1e995) >>> 0);
   const pk = feel.pocket;
-  let rushers: Rusher[] = f.rush.map((pos) => ({ pos: { ...pos }, shedAt: pk.shedTime + (rng2.next() * 2 - 1) * pk.shedTimeVariance }));
+  let rushers: Rusher[] = f.rush.map((pos, i) => ({
+    pos: { ...pos },
+    shedAt: shedTimeFor(opts.line?.[i], def?.rush?.[i], false, pk, rng2.next() * 2 - 1, () => rng2.next(), R),
+  }));
   const rushP = { blockedSpeed: pk.rushBlockedSpeed, freeSpeed: pk.rushFreeSpeed, sackReachYards: pk.sackReachYards };
   let sacked = false;
   let t = 0;
@@ -117,6 +122,7 @@ export function simulatePass(
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
     const q = qbAt(t + dt);
     rushers = rushers.map((r) => stepRusher(r, q, t + dt, dt, rushP));
+    if (reachedQb(rushers, q, rushP)) sacked = true;
     if (blitz && Math.hypot(cover[RB].pos.x - q.x, cover[RB].pos.y - q.y) <= feel.pocket.sackReachYards) sacked = true;
   }
 
@@ -184,7 +190,7 @@ export function simulatePass(
       pursuerFor(def?.cover[i] ?? undefined, i === RB ? 'LB' : 'CB', { pos: { ...c.pos }, speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed, stunned: 0 }, R),
     ),
     pursuerFor(def?.safety ?? undefined, 'S', { pos: { ...safety }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
-    ...rushers.map((r) => pursuerFor(undefined, 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0 }, R)),
+    ...rushers.map((r, i) => pursuerFor(def?.rush?.[i] ?? undefined, 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0 }, R)),
   ];
   const carry = carryFor(catcher, role, { ...feel.running, runSpeed: isRb ? feel.runGame.rbRunSpeed : feel.running.runSpeed }, R);
   const params = {

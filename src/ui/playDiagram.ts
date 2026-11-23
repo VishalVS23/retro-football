@@ -30,9 +30,20 @@ export interface DiagramView {
    * linebacker; plus the safety) and the matchup edge for each of our skill players
    * (+1 = ours, shown as a green up-arrow; -1 = theirs, a red down-arrow; 0 = even, a grey dash).
    */
-  defense?: { cover: string[]; safety: string; edge: number[] };
+  defense?: DiagramDefense;
   /** Big diagram: line the defense up for this call (3d2; shown once you're at the line). Default: normal man. */
   call?: DefCallId;
+}
+
+/**
+ * Their defenders' names and the matchup edges (+1 ours, -1 theirs, 0 even): `edge` per skill
+ * player; `line` per blocker (3e-b), separately for pass and run plays (different ratings).
+ */
+export interface DiagramDefense {
+  cover: string[];
+  safety: string;
+  edge: number[];
+  line?: { pass: number[]; run: number[] };
 }
 
 /** Text from outside goes through this before landing in the SVG. */
@@ -196,6 +207,8 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null); // the backfield is too crowded for his name
   if (v.detailed && v.defense) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
+  const lineEdges = v.defense?.line?.[play.run ? 'run' : 'pass'];
+  if (v.detailed && lineEdges) f.block.forEach((b, i) => (s += edgeArrow(b, lineEdges[i] ?? 0)));
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

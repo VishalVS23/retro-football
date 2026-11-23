@@ -25,19 +25,21 @@ import type { CarryParams, Pursuer, TackleParams } from './carry';
 
 export type CarrierRole = 'QB' | 'RB' | 'WR';
 export type TacklerRole = 'CB' | 'LB' | 'S' | 'DL';
+export type Role = CarrierRole | TacklerRole | 'OL';
 
 /**
  * The average starter's rating at each role (measured over six generated leagues; a test keeps
  * this in step with the player generator).
  */
-export const ROLE_NORMS: Record<CarrierRole | TacklerRole, Partial<Record<AttributeKey, number>>> = {
+export const ROLE_NORMS: Record<Role, Partial<Record<AttributeKey, number>>> = {
   QB: { speed: 11.8, acceleration: 9.2, agility: 11.9, strength: 9.2, ballSecurity: 12.1 },
   RB: { speed: 12.6, acceleration: 12.6, agility: 12.6, strength: 12.2, ballSecurity: 12.7 },
   WR: { speed: 12.5, acceleration: 12.1, agility: 11.7, strength: 9.6, ballSecurity: 11.6 },
   CB: { speed: 12.6, agility: 11.7, tackling: 11.6, anticipation: 10.8 },
   LB: { speed: 12.7, agility: 9.4, tackling: 13.8, anticipation: 11.9 },
   S: { speed: 13.0, agility: 9.5, tackling: 13.2, anticipation: 11.5 },
-  DL: { speed: 11.7, agility: 7.9, tackling: 12.2, anticipation: 9.4 },
+  DL: { speed: 11.7, agility: 7.9, tackling: 12.2, anticipation: 9.4, passRush: 13.1, strength: 13.1 },
+  OL: { passBlocking: 13.6, runBlocking: 13.7, strength: 13.6 },
 };
 
 export interface RunRatingParams extends RatingSwitch {
@@ -63,7 +65,7 @@ export interface RunRatingParams extends RatingSwitch {
  * His rating as the game should use it: 10 = the average starter at this role. 10 when ratings are
  * switched off or nobody's there.
  */
-export function roleRating(p: Player | null | undefined, key: AttributeKey, role: CarrierRole | TacklerRole, r: RatingSwitch): number {
+export function roleRating(p: Player | null | undefined, key: AttributeKey, role: Role, r: RatingSwitch): number {
   if (!p || !r.enabled) return AVERAGE_RATING;
   return AVERAGE_RATING + p.attributes[key] - (ROLE_NORMS[role][key] ?? AVERAGE_RATING);
 }
@@ -110,4 +112,54 @@ export function pursuerFor(d: Player | null | undefined, role: TacklerRole, base
 /** The carrier's fumble chance multiplier from his ball security (1 = average at his role). */
 export function securityRatio(p: Player | null | undefined, role: CarrierRole, r: RunRatingParams): number {
   return halving(1, roleRating(p, 'ballSecurity', role, r), r.securityHalvingPoints, Infinity);
+}
+
+// ---------- The line (3e-b): each of our blockers vs the rusher across from him ----------
+
+export interface LineRatingParams extends RatingSwitch {
+  /** Pass play: how long he holds his man, + this share per point of blocking edge (- per point of deficit). */
+  passLinePerPoint: number;
+  /** Run play: same for run blocks. */
+  runLinePerPoint: number;
+  /** Trait "Mauler": his run blocks hold this much longer. */
+  maulerRunScale: number;
+  /** Trait "Tries to jump the snap": chance per snap he gets off the line early... */
+  jumpSnapChance: number;
+  /** ...and how much sooner (seconds) he's free of his block when he does. */
+  jumpSnapGain: number;
+}
+
+/**
+ * The blocking edge in this matchup, in rating points (+ = our blocker wins, - = their rusher).
+ * Pass: pass blocking vs pass rush (a little strength). Run: run blocking (+ strength) vs strength + tackling.
+ */
+export function lineEdge(ol: Player | null | undefined, dl: Player | null | undefined, run: boolean, r: RatingSwitch): number {
+  const q = (p: Player | null | undefined, key: AttributeKey, role: Role) => roleRating(p, key, role, r);
+  if (run) return 0.7 * q(ol, 'runBlocking', 'OL') + 0.3 * q(ol, 'strength', 'OL') - (0.6 * q(dl, 'strength', 'DL') + 0.4 * q(dl, 'tackling', 'DL'));
+  return q(ol, 'passBlocking', 'OL') - (0.8 * q(dl, 'passRush', 'DL') + 0.2 * q(dl, 'strength', 'DL'));
+}
+
+/** A matchup edge in points as a marker: +1 ours, -1 theirs, 0 even (within `threshold`). */
+export function edgeSign(points: number, threshold = 2): -1 | 0 | 1 {
+  return points >= threshold ? 1 : points <= -threshold ? -1 : 0;
+}
+
+/**
+ * When this rusher gets free of his block (seconds after the snap). `wobble` -1..1 is the usual
+ * random spread; `roll` is only used (one dice roll) when the rusher tries to jump the snap, so
+ * an ordinary snap rolls the dice exactly as before.
+ */
+export function shedTimeFor(
+  ol: Player | null | undefined,
+  dl: Player | null | undefined,
+  run: boolean,
+  base: { shedTime: number; shedTimeVariance: number },
+  wobble: number,
+  roll: () => number,
+  r: LineRatingParams,
+): number {
+  let t = base.shedTime * Math.max(0.25, 1 + lineEdge(ol, dl, run, r) * (run ? r.runLinePerPoint : r.passLinePerPoint));
+  if (run && has(ol, 'mauler', r)) t *= r.maulerRunScale;
+  if (has(dl, 'jumpsSnap', r) && roll() < r.jumpSnapChance) t -= r.jumpSnapGain;
+  return Math.max(0.1, t + wobble * base.shedTimeVariance);
 }

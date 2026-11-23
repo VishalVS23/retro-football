@@ -11,7 +11,7 @@ import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry
 import { laneSteer, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
 import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
-import { carryFor, pursuerFor, tackleFor } from './runRatings';
+import { carryFor, pursuerFor, shedTimeFor, tackleFor } from './runRatings';
 import type { Player } from '../players/player';
 
 /** Who's on the field (ratings, 3e-a). Anyone missing plays as an average starter. */
@@ -22,6 +22,8 @@ export interface RunPlayers {
   safety?: Player;
   /** DL1, DL2. */
   rush?: (Player | undefined)[];
+  /** Our OL1, OL2 (blocker i blocks rusher i). */
+  line?: (Player | undefined)[];
 }
 
 const dt = 1 / 60;
@@ -58,7 +60,10 @@ export function simulateRun(
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
   let cover = f.skill.map((s, i) => startCoverage(i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos), s.pos));
   const rg = feel.runGame;
-  let rushers = f.rush.map((pos) => ({ pos: { ...pos }, shedAt: rg.shedTime + (rng.next() * 2 - 1) * rg.shedTimeVariance }));
+  let rushers = f.rush.map((pos, i) => ({
+    pos: { ...pos },
+    shedAt: shedTimeFor(players.line?.[i], players.rush?.[i], true, rg, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
+  }));
   let t = 0;
   while (!reachedHandoff(runners[RB]) && t < 3) {
     t += dt;

@@ -13,6 +13,8 @@ export interface OffenseLineup {
   qb: Player;
   /** In formation order: wide top, slot top, wide bottom, RB (same as `formation().skill`). */
   skill: [Player, Player, Player, Player];
+  /** Our two blockers (OL1, OL2): blocker i blocks their rusher i (formation `block[i]` vs `rush[i]`). */
+  line: [Player, Player];
 }
 
 export interface DefenseLineup {
@@ -25,7 +27,7 @@ export interface DefenseLineup {
 
 export function offenseLineup(league: League, teamId: number): OffenseLineup {
   const c = depthChart(league, teamId);
-  return { qb: c.QB[0].player, skill: [c.WR[0].player, c.WR[2].player, c.WR[1].player, c.RB[0].player] };
+  return { qb: c.QB[0].player, skill: [c.WR[0].player, c.WR[2].player, c.WR[1].player, c.RB[0].player], line: [c.OL[0].player, c.OL[1].player] };
 }
 
 export function defenseLineup(league: League, teamId: number): DefenseLineup {
