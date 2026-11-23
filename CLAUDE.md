@@ -443,6 +443,8 @@ Stage 3 steps (approved 2026-11-21; still show a short plan for each step before
   - 3h-b. The tight end: lines up next to the line; routes Seam / Flat / Drag / Block (stays in: more pocket time, one fewer receiver); every play gets a TE route, 2 new TE plays, AUDIBLE cycles his routes, blocks on runs, name on field and diagram. LB2 covers him in man (rated).
   - 3h-c. Second safety: two-deep shell (each safety a half). Re-measure every route with `passSim` and retune. **User's choice needed: (A) deep balls about as easy as now, or (B) deep throws a bit harder overall (recommended; TE and short routes matter more).**
   - 3h-d. Ratings and sims catch up: the extra players count in `lineup.ts`, `driveRatings` (CPU drives / game sim), `passSim` / `runSim`; norms tests; average vs average stays put; re-run the best-vs-worst (~90%) check.
+  - 3h-b detail (user 2026-11-23): when the TE stays in to block, LB2 drops into the short middle OR blitzes, decided per snap by their coach (situation + aggression, like `pickDefCall`), with NO tell before the snap.
+  - After 3h (user agreed 2026-11-23): **zone calls, Cover 2 / Cover 3** (defense phase 2; today every call is man, only the safety plays a deep zone), picked by their coach like press / blitz, hinted on the LOOKS LIKE strip, every route re-measured. Then **formations from the playbook** (user chose playbook formations over dragging players): FLIP (mirror the play) + Trips / Bunch / Spread, each balance-checked. Free placement stays with the parked play designer (Stage 8).
   Risks noted: the line of scrimmage gets crowded on a phone (maybe smaller / dimmer linemen if names and markers overlap); no save format change (formations live in code).
 
 ### Next up (start of next session)
