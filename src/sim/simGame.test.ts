@@ -3,7 +3,10 @@ import { feel } from '../config/feel';
 import { generateLeague, depthChart, teamRatings, type League } from '../league/league';
 import { matchupMods, simTeam } from '../league/simTeams';
 import { NEUTRAL_MODS, SIM_NORMS, driveMods, unitEdges, type DriveMods } from './driveRatings';
-import { simulateGame } from './simGame';
+import { SIM_OT_START_T, SIM_START_T, freshGameState, simulateFrom, simulateGame, type SimGameState } from './simGame';
+import { newClock } from './clock';
+import { TOTAL_LENGTH } from './field';
+import { newGameStats, recordOurSimDrive, recordTheirDrive } from './gameStats';
 import { simulateOppDrive } from './oppDrive';
 import { createRng } from './rng';
 import type { Position } from '../players/positions';
@@ -118,10 +121,8 @@ describe('whole simulated games', () => {
     for (let s = 1; s <= 200; s++) {
       const a = simulateGame(input, createRng(s));
       expect(simulateGame(input, createRng(s)).score).toEqual(a.score);
-      if (a.ot < 3) {
-        const sum = [0, 1].map((side) => a.drives.filter((d) => d.side === side).reduce((t, d) => t + d.drive.points, 0));
-        expect(sum).toEqual(a.score);
-      }
+      const sum = [0, 1].map((side) => a.log.filter((d) => d.side === side).reduce((t, d) => t + d.points, 0));
+      expect(sum).toEqual(a.score);
       expect(a.score[0]).not.toBe(a.score[1]); // overtime always settles it
     }
   });
@@ -149,4 +150,68 @@ describe('whole simulated games', () => {
       expect(good.aWins).toBeLessThan(0.82);
     }
   }, 120000);
+});
+
+describe('carrying a game on from any moment (SIM TO END OF GAME)', () => {
+  const rules = { mods: [NEUTRAL_MODS, NEUTRAL_MODS] as [DriveMods, DriveMods], rules: feel.oppDrive, clock: feel.clock };
+  const base = (over: Partial<SimGameState> = {}): SimGameState => ({
+    ...freshGameState(0, feel.clock),
+    ...over,
+  });
+
+  it('from the opening kickoff it is exactly a whole game', () => {
+    for (let s = 1; s <= 50; s++) {
+      expect(simulateFrom(base(), rules, createRng(s))).toEqual(simulateGame({ ...rules, receives: 0 }, createRng(s)));
+    }
+  });
+
+  it('mid-game: keeps the score so far, plays to the end, and the box score adds up', () => {
+    for (let s = 1; s <= 300; s++) {
+      const start = base({ score: [14, 10], clock: { ...newClock(feel.clock), quarter: 3, timeLeft: 70 }, startT: 60, down: 3, firstDownT: 66 });
+      const r = simulateFrom(start, rules, createRng(s));
+      expect(r.score[0]).toBeGreaterThanOrEqual(14);
+      expect(r.score[1]).toBeGreaterThanOrEqual(10);
+      expect(r.score[0]).not.toBe(r.score[1]);
+      expect(r.log[0].side).toBe(0);
+      expect(r.log[0].drive!.startX).toBe(TOTAL_LENGTH - 60);
+      const sum = [0, 1].map((side) => r.log.filter((e) => e.side === side).reduce((t, e) => t + e.points, 0));
+      expect([14 + sum[0], 10 + sum[1]]).toEqual(r.score);
+      expect(r.log.every((e) => e.period >= 3)).toBe(true);
+      let g = newGameStats();
+      for (const e of r.log) if (e.drive) g = e.side === 0 ? recordOurSimDrive(g, e.drive) : recordTheirDrive(g, e.drive);
+      expect(g.qb.completions).toBeLessThanOrEqual(g.qb.attempts);
+      expect(g.qb.touchdowns).toBeLessThanOrEqual(r.log.filter((e) => e.side === 0 && e.drive?.result === 'touchdown').length);
+    }
+  });
+
+  it('a try still to take comes first, then the other side gets the ball at its 25', () => {
+    const r = simulateFrom(base({ score: [6, 0], startT: 108, tryPending: true }), rules, createRng(5));
+    expect(r.log[0].try?.kind).toBe('extraPoint');
+    expect(r.log[0].side).toBe(0);
+    expect(r.log[1].side).toBe(1);
+    expect(r.log[1].drive!.startX).toBe(TOTAL_LENGTH - SIM_START_T);
+  });
+
+  it('a touchdown at 0:00 of Q2: the try, then halftime, and the CPU gets the second-half kickoff', () => {
+    const start = base({ score: [6, 3], clock: { ...newClock(feel.clock), quarter: 2, timeLeft: 0 }, startT: 108, tryPending: true });
+    const r = simulateFrom(start, rules, createRng(9));
+    expect(r.log[0].try).toBeDefined();
+    expect(r.log[0].period).toBe(2);
+    expect(r.log[1].side).toBe(1);
+    expect(r.log[1].period).toBeGreaterThanOrEqual(3);
+  });
+
+  it('overtime in progress: our possession first, then theirs; the shootout settles it', () => {
+    for (let s = 1; s <= 200; s++) {
+      const ot = base({ score: [17, 17], clock: { ...newClock(feel.clock), quarter: 4, timeLeft: 0, ot: 1 }, startT: SIM_OT_START_T, otFirst: 0 });
+      const r = simulateFrom(ot, rules, createRng(s));
+      expect(r.score[0]).not.toBe(r.score[1]);
+      expect(r.ot).toBeGreaterThanOrEqual(1);
+      expect(r.log[0].side).toBe(0);
+      expect(r.log[0].period).toBe(5);
+      const shoot = simulateFrom(base({ score: [31, 31], clock: { ...newClock(feel.clock), quarter: 4, timeLeft: 0, ot: 3 }, startT: 108, tryPending: true, otFirst: 0 }), rules, createRng(s));
+      expect(shoot.log[0].try?.kind).toBe('twoPoint');
+      expect(shoot.score[0]).not.toBe(shoot.score[1]);
+    }
+  });
 });

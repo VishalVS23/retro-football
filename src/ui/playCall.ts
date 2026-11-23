@@ -52,6 +52,8 @@ export interface PlayCallOptions {
   defenseRead: { call: DefCallId; name: string; tip: string } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
+  /** SIM (3g): its menu's choices; picking one closes the screen and calls `onSim`. null = no SIM button. */
+  sim?: { options: { id: string; label: string; note?: string }[]; onSim: (id: string) => void } | null;
 }
 
 let close: (() => void) | null = null;
@@ -100,7 +102,17 @@ export function openPlayCall(o: PlayCallOptions) {
       <div class="pc-chip pc-chip-zone">ZONE: <b>${fieldZone(match.ballX)}</b></div>
       <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
       ${o.opponent ? `<div class="pc-chip pc-chip-fixed pc-chip-vs">VS ${o.opponent.abbr} <b>${starText(o.opponent.stars)}</b></div>` : ''}
+      ${o.sim ? '<button class="pc-chip pc-chip-fixed pc-sim" type="button" title="Let your coach play it out">SIM</button>' : ''}
     </div>
+    ${
+      o.sim
+        ? `<div class="pc-sim-menu" hidden><div class="pc-sim-box pc-panel">
+            <div class="pc-sim-title">SIMULATE</div>
+            ${o.sim.options.map((x) => `<button class="pc-btn pc-sim-opt" data-sim="${x.id}">${x.label}${x.note ? `<span class="pc-sim-note">${x.note}</span>` : ''}</button>`).join('')}
+            <button class="pc-btn pc-cancel pc-sim-cancel">CANCEL</button>
+          </div></div>`
+        : ''
+    }
     <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
@@ -204,7 +216,23 @@ export function openPlayCall(o: PlayCallOptions) {
     if (act === 'cancel') finish(o.onCancel);
     if (act === 'team') o.onTeam?.();
   });
+  // SIM menu: a small box over the screen; Esc / CANCEL closes it.
+  const simMenu = root.querySelector<HTMLDivElement>('.pc-sim-menu');
+  const showSim = (on: boolean) => {
+    if (simMenu) simMenu.hidden = !on;
+  };
+  root.querySelector('.pc-sim')?.addEventListener('click', () => showSim(true));
+  simMenu?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const id = t.closest<HTMLButtonElement>('[data-sim]')?.dataset.sim;
+    if (id) finish(() => o.sim?.onSim(id));
+    else if (t.closest('.pc-sim-cancel') || t === simMenu) showSim(false);
+  });
   const onKey = (e: KeyboardEvent) => {
+    if (simMenu && !simMenu.hidden) {
+      if (e.key === 'Escape') showSim(false);
+      return;
+    }
     if (e.key === 'Enter') finish(() => o.onExecute(selected, calledPlay()));
     if (e.key === 'Escape') finish(o.onCancel);
   };

@@ -73,13 +73,16 @@
     display: none; /* PASS / RUN: the opponent chip matters more */
   }
 }
+@media (max-width: 900px) {
+  .pc-chip-zone:has(~ .pc-chip-vs) {
+    display: none; /* the opponent chip and SIM matter more; the field position is on the diagram */
+  }
+}
 @media (max-width: 760px) {
   .pc-chip-off {
     display: none; /* always PASS for now; makes room on small phones */
   }
-  .pc-chip-zone:has(~ .pc-chip-vs) {
-    display: none; /* the opponent chip matters more; the field position is on the diagram */
-  }
+
 }
 .pc-chip b {
   color: var(--pc-gold);
@@ -319,4 +322,53 @@
 .pc-tip b {
   color: var(--pc-gold);
   font-weight: normal;
+}
+
+/* SIM (3g): a button at the end of the top bar, and its menu */
+.pc-sim {
+  font-family: inherit;
+  cursor: pointer;
+  color: #fff;
+  background: #6c3fc5;
+  border-color: #0b1a33;
+}
+.pc-sim:hover {
+  filter: brightness(1.15);
+}
+.pc-sim-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 12, 26, 0.6);
+}
+.pc-sim-menu[hidden] {
+  display: none;
+}
+.pc-sim-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  min-width: min(320px, 80vw);
+}
+.pc-sim-title {
+  text-align: center;
+  font-size: 11px;
+  color: #ffd166;
+  margin-bottom: 2px;
+}
+.pc-sim-opt {
+  background: #6c3fc5;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+}
+.pc-sim-note {
+  font-size: 7px;
+  color: #d9c8ff;
 }

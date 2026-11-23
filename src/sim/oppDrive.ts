@@ -112,6 +112,14 @@ export interface OppDriveStats {
   firstDowns: number;
   /** Times their QB was sacked. */
   sacks: number;
+  /** The QB's line on this drive (3g-B: our simmed drives count in our QB line). Picks count as attempts. */
+  attempts: number;
+  completions: number;
+  /** Yards on completions (sacks not taken off, unlike passYards). */
+  completionYards: number;
+  passTouchdowns: number;
+  /** Longest gain from scrimmage on the drive. */
+  longest: number;
 }
 
 /** The game situation the drive starts in. Scores are from OUR side (us / them). */
@@ -127,6 +135,9 @@ export interface OppDriveSituation {
    * and after a touchdown they kick, go for 2, or need no try at all, depending on the score.
    */
   overtime?: boolean;
+  /** Starting mid-series (3g-B: simming from the middle of our drive): the down, and the first-down line in the same coordinates as `startX`. Left out = 1st & 10. */
+  startDown?: number;
+  firstDownAtX?: number;
   /** Timeouts the offense / the defense may use this drive (left out = none). */
   offenseTimeouts?: number;
   defenseTimeouts?: number;
@@ -164,13 +175,13 @@ export function oppFieldGoalChance(distance: number, r: OppDriveRules, mods: Dri
 export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppDriveRules, rng: Rng, mods: DriveMods = NEUTRAL_MODS): OppDrive {
   const startT = clampSpot(toT(startX));
   let t = startT;
-  let down = 1;
-  let firstDownT = Math.min(t + YARDS_FOR_FIRST_DOWN, OPP_GOAL_X);
+  let down = Math.max(1, Math.min(4, Math.round(sit.startDown ?? 1)));
+  let firstDownT = sit.firstDownAtX !== undefined ? Math.min(OPP_GOAL_X, Math.max(t + 1, toT(sit.firstDownAtX))) : Math.min(t + YARDS_FOR_FIRST_DOWN, OPP_GOAL_X);
   let plays = 0;
   let seconds = 0;
   let bigPlay: OppDrive['bigPlay'] = null;
   let note: OppDriveNote = null;
-  const stats: OppDriveStats = { passYards: 0, rushYards: 0, firstDowns: 0, sacks: 0 };
+  const stats: OppDriveStats = { passYards: 0, rushYards: 0, firstDowns: 0, sacks: 0, attempts: 0, completions: 0, completionYards: 0, passTouchdowns: 0, longest: 0 };
   const timeoutsUsed = { offense: 0, defense: 0 };
   let offTimeouts = Math.max(0, sit.offenseTimeouts ?? 0);
   let defTimeouts = Math.max(0, sit.defenseTimeouts ?? 0);
@@ -262,6 +273,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     const run = rng.chance(hurry || risky ? r.hurryRunShare : milk ? r.milkRunShare : r.runShare);
     let gain: number;
     let stops = false;
+    let completed = false;
     if (run) {
       gain = rng.range(-r.runLossYards, r.runMaxYards) * strength * mods.runYards;
       if (rng.chance(oddsShift(r.bigRunChance, mods.bigRunSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
@@ -270,6 +282,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
         return done('fumble', t, ourBallAt(t + Math.max(0, gain)));
       }
     } else if (rng.chance(oddsShift(r.interceptionChance, pickSteps))) {
+      stats.attempts++;
       seconds += r.incompleteSeconds;
       // Picked off somewhere downfield.
       return done('interception', t, ourBallAt(t + rng.range(5, 20)));
@@ -277,9 +290,13 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       gain = -rng.range(r.sackMinYards, r.sackMaxYards);
       stats.sacks++;
     } else if (rng.chance(oddsShift(r.incompleteChance, -mods.completionSteps))) {
+      stats.attempts++;
       gain = 0;
       stops = true;
     } else {
+      stats.attempts++;
+      stats.completions++;
+      completed = true;
       gain = rng.range(r.passMinYards, r.passMaxYards) * strength * mods.passYards;
       if (rng.chance(oddsShift(r.bigPassChance, bigPassSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance)) {
@@ -302,6 +319,9 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     const counted = Math.round(Math.min(gain, OPP_GOAL_X - t)); // a gain only counts up to the goal line
     if (run) stats.rushYards += counted;
     else stats.passYards += counted;
+    if (completed) stats.completionYards += counted;
+    if (counted > stats.longest) stats.longest = counted;
+    if (completed && t + gain >= OPP_GOAL_X) stats.passTouchdowns++;
     if (counted >= BIG_PLAY_YARDS && (!bigPlay || counted > bigPlay.yards)) bigPlay = { kind: run ? 'run' : 'pass', yards: counted };
 
     const next = t + gain;

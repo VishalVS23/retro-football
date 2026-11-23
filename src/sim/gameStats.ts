@@ -99,22 +99,40 @@ export function recordEvent(g: GameStats, event: DriveEvent): GameStats {
   return g;
 }
 
-/** One simulated CPU drive. */
-export function recordTheirDrive(g: GameStats, d: OppDrive): GameStats {
-  const t = g.them;
+/** A side's team stats plus one simulated drive. */
+function addDrive(t: SideStats, d: OppDrive): SideStats {
   const turnover = d.result === 'interception' || d.result === 'fumble' ? 1 : 0;
   // Field goal tries and punts are plays in the drive sim, but not snaps from scrimmage here.
   const kicks = d.result === 'fieldGoal' || d.result === 'missedFieldGoal' || d.result === 'punt' ? 1 : 0;
   return {
+    plays: t.plays + Math.max(0, d.plays - kicks),
+    passYards: t.passYards + d.stats.passYards,
+    rushYards: t.rushYards + d.stats.rushYards,
+    firstDowns: t.firstDowns + d.stats.firstDowns,
+    turnovers: t.turnovers + turnover,
+    sacked: t.sacked + d.stats.sacks,
+  };
+}
+
+/** One simulated CPU drive. */
+export function recordTheirDrive(g: GameStats, d: OppDrive): GameStats {
+  return { ...g, them: addDrive(g.them, d) };
+}
+
+/** One of OUR drives that was simulated (SIM, 3g-B): team stats, our QB's line and the longest play. */
+export function recordOurSimDrive(g: GameStats, d: OppDrive): GameStats {
+  const s = d.stats;
+  return {
     ...g,
-    them: {
-      plays: t.plays + Math.max(0, d.plays - kicks),
-      passYards: t.passYards + d.stats.passYards,
-      rushYards: t.rushYards + d.stats.rushYards,
-      firstDowns: t.firstDowns + d.stats.firstDowns,
-      turnovers: t.turnovers + turnover,
-      sacked: t.sacked + d.stats.sacks,
+    us: addDrive(g.us, d),
+    qb: {
+      completions: g.qb.completions + s.completions,
+      attempts: g.qb.attempts + s.attempts,
+      yards: g.qb.yards + s.completionYards,
+      touchdowns: g.qb.touchdowns + s.passTouchdowns,
+      interceptions: g.qb.interceptions + (d.result === 'interception' ? 1 : 0),
     },
+    longest: Math.max(g.longest, s.longest),
   };
 }
 

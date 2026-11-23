@@ -50,6 +50,7 @@ import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
 import { NEUTRAL_MODS } from '../sim/driveRatings';
 import { matchupMods, simTeam } from '../league/simTeams';
+import { simulateFrom } from '../sim/simGame';
 import {
   HOLD_YARDS,
   OPP_GOAL_X,
@@ -86,7 +87,7 @@ import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
 import { carryFor, edgeSign, lineEdge, pursuerFor, securityRatio, shedTimeFor, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
-import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
+import { addPoints, newGameStats, recordEvent, recordOurPlay, recordOurSimDrive, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
 import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
 import {
@@ -1724,6 +1725,42 @@ export class FieldScene extends Phaser.Scene {
     this.resetPlay();
   }
 
+  /**
+   * SIM TO END OF GAME (3g-B): carry the game on from right here (our ball, the down and spot, any
+   * try still to take, overtime) with the drive sim, put every simmed drive in the box score, then
+   * the end screen. Our coach is neutral: the same rules as the CPU's.
+   */
+  private simToEnd() {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return;
+    const m = this.match;
+    const c = this.clock;
+    const result = simulateFrom(
+      {
+        score: [m.us, m.them],
+        clock: c,
+        timeouts: [c.timeouts, oppTimeoutsLeft(c, feel.clock)],
+        offense: 0,
+        startT: m.ballX,
+        ...(m.tryPending ? { tryPending: true } : { down: m.down, firstDownT: m.firstDownX }),
+        receives: 0, // we had the ball first; the CPU gets it to start the second half
+        otFirst: 0, // in overtime we always go first
+        otFirstDone: this.otOursDone,
+      },
+      { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel), rules: feel.oppDrive, clock: feel.clock },
+      getRngOrFallback(),
+    );
+    let stats = this.stats;
+    for (const e of result.log) {
+      if (e.drive) stats = e.side === 0 ? recordOurSimDrive(stats, e.drive) : recordTheirDrive(stats, e.drive);
+      stats = addPoints(stats, e.period, e.side === 0 ? e.points : 0, e.side === 1 ? e.points : 0);
+    }
+    this.stats = stats;
+    this.match = { ...m, us: result.score[0], them: result.score[1], tryPending: false, oppStartX: null };
+    this.clock = result.clock;
+    this.showFinal();
+  }
+
   /** Their offense's stars vs our defense's, for the drive summary. */
   private driveMatchup() {
     const l = this.league;
@@ -2345,6 +2382,10 @@ export class FieldScene extends Phaser.Scene {
       onPunt: () => this.startKick(true),
       tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
+      sim:
+        this.league && this.league.userTeamId !== null && this.opponentId !== null
+          ? { options: [{ id: 'game', label: 'SIM TO END OF GAME', note: 'YOUR COACH CALLS THE PLAYS' }], onSim: () => this.simToEnd() }
+          : null,
       ...this.diagramPeople(),
       defenseRead: this.callAtLine ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall] } : null,
     });

@@ -55,7 +55,7 @@ describe('their drives', () => {
       extraPointGood: null,
       bigPlay: null,
       note: null,
-      stats: { passYards: 20, rushYards: 5, firstDowns: 2, sacks: 1 },
+      stats: { passYards: 20, rushYards: 5, firstDowns: 2, sacks: 1, attempts: 0, completions: 0, completionYards: 0, passTouchdowns: 0, longest: 0 },
       timeoutsUsed: { offense: 0, defense: 0 },
     });
     let g = newGameStats();
