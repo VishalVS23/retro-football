@@ -132,3 +132,12 @@
   transform: translateY(2px);
   box-shadow: 0 1px 0 var(--ds-navy);
 }
+
+.ds-matchup {
+  font-size: 8px;
+  color: #9ec5ff;
+}
+.ds-matchup b {
+  color: var(--ds-gold);
+  font-weight: normal;
+}

@@ -68,9 +68,17 @@
 .pc-chip-fixed {
   flex-shrink: 0; /* down & distance and the clock always show in full */
 }
+@media (max-width: 1000px) {
+  .pc-chip-off:has(~ .pc-chip-vs) {
+    display: none; /* PASS / RUN: the opponent chip matters more */
+  }
+}
 @media (max-width: 760px) {
   .pc-chip-off {
     display: none; /* always PASS for now; makes room on small phones */
+  }
+  .pc-chip-zone:has(~ .pc-chip-vs) {
+    display: none; /* the opponent chip matters more; the field position is on the diagram */
   }
 }
 .pc-chip b {

@@ -184,3 +184,18 @@
   transform: translateY(2px);
   box-shadow: 0 1px 0 var(--ct-navy);
 }
+
+.ct-team:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ct-cancel {
+  font-family: inherit;
+  font-size: 9px;
+  padding: 9px 10px;
+  margin-right: 8px;
+  color: #fff;
+  background: #c0392b;
+  border: 3px solid #0b1a33;
+  cursor: pointer;
+}

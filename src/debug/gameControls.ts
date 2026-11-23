@@ -1,9 +1,11 @@
 /**
- * "Game" section in the ⚙ panel: NEW GAME (quit the game in progress) and CHANGE TEAM.
+ * "Game" section in the ⚙ panel: NEW GAME (quit the game in progress), CHANGE TEAM and CHOOSE
+ * OPPONENT (a new game against a team you pick, to test strong and weak opponents).
  * Testing tools until a proper in-game menu exists. The game scene listens for the events.
  */
 export const NEW_GAME_EVENT = 'rf-new-game';
 export const CHANGE_TEAM_EVENT = 'rf-change-team';
+export const CHOOSE_OPPONENT_EVENT = 'rf-choose-opponent';
 
 export function addGameControls(panel: HTMLElement) {
   const section = document.createElement('div');
@@ -13,10 +15,17 @@ export function addGameControls(panel: HTMLElement) {
     <div class="fp-buttons">
       <button type="button" data-game="new">New game</button>
       <button type="button" data-game="team">Change team</button>
+      <button type="button" data-game="opponent">Choose opponent</button>
     </div>`;
   section.addEventListener('click', (e) => {
     const act = (e.target as HTMLElement).closest<HTMLElement>('[data-game]')?.dataset.game;
     if (!act) return;
+    if (act === 'opponent') {
+      // The list has its own CANCEL; the game is only replaced once a team is picked.
+      panel.classList.remove('open');
+      window.dispatchEvent(new Event(CHOOSE_OPPONENT_EVENT));
+      return;
+    }
     const ask =
       act === 'new'
         ? 'Quit this game and start a new one? The current game is lost.'

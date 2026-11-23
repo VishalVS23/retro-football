@@ -3,6 +3,7 @@
  * "CPU BALL · OPP 25 / 8 PLAYS · 61 YDS · 0:48 / FIELD GOAL (37 YD) / YOU 7 - 3 CPU", a mini field
  * strip, and CONTINUE. The scene decides when it closes (CONTINUE, or on its own after a moment).
  */
+import { starText } from '../league/teamStars';
 import '@fontsource/press-start-2p/latin-400.css';
 import './driveSummary.css';
 import { HOLD_YARDS, OWN_GOAL_X, spotText } from '../sim/drive';
@@ -21,6 +22,8 @@ export interface DriveSummaryOptions {
   lastQuarter: boolean;
   /** An overtime possession: no "YOUR BALL" line (the period decides what's next). */
   overtime?: boolean;
+  /** Their offense's stars and our defense's (1-5), shown under the header. */
+  matchup?: { offense: number; defense: number };
   onContinue: () => void;
 }
 
@@ -86,6 +89,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   el.innerHTML = `
     <div class="ds-panel" role="dialog" aria-label="CPU drive summary">
       <div class="ds-head">${o.theirAbbr ?? 'CPU'} BALL · ${spotText(d.startX)}</div>
+      ${o.matchup ? `<div class="ds-matchup">${o.theirAbbr ?? 'CPU'} OFF <b>${starText(o.matchup.offense)}</b> VS YOUR DEF <b>${starText(o.matchup.defense)}</b></div>` : ''}
       <div class="ds-stats">${d.plays} PLAY${d.plays === 1 ? '' : 'S'} · ${d.yards} YDS${o.overtime ? '' : ` · ${clock(d.seconds)}`}</div>
       ${big}
       <div class="ds-field">

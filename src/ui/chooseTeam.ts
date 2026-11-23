@@ -5,6 +5,7 @@
 import '@fontsource/press-start-2p/latin-400.css';
 import './chooseTeam.css';
 import { teamLogoHtml } from './teamLogo';
+import { starText } from '../league/teamStars';
 
 export interface TeamChoice {
   id: number;
@@ -25,6 +26,8 @@ export interface ChooseTeamOptions {
   conferences: readonly string[];
   divisions: readonly (readonly string[])[];
   onPick: (teamId: number) => void;
+  /** Choosing an opponent instead of your team: other title and button, your own team can't be picked, CANCEL / Esc closes. */
+  opponent?: { ownTeamId: number; onCancel: () => void };
 }
 
 let close: (() => void) | null = null;
@@ -32,8 +35,6 @@ let close: (() => void) | null = null;
 export function closeChooseTeam() {
   close?.();
 }
-
-const starText = (n: number) => '*'.repeat(n) + '-'.repeat(5 - n);
 
 export function openChooseTeam(o: ChooseTeamOptions) {
   closeChooseTeam();
@@ -47,7 +48,7 @@ export function openChooseTeam(o: ChooseTeamOptions) {
             .filter((t) => t.conference === c && t.division === d)
             .map(
               (t) => `
-              <button class="ct-team" type="button" data-id="${t.id}">
+              <button class="ct-team" type="button" data-id="${t.id}"${o.opponent?.ownTeamId === t.id ? ' disabled' : ''}>
                 ${teamLogoHtml(t.abbr, t.color, 30)}
                 <span class="ct-names"><span class="ct-abbr">${t.abbr}</span><span class="ct-nick">${t.nickname}</span></span>
                 <span class="ct-stars" aria-label="${t.stars} of 5 stars">${starText(t.stars)}</span>
@@ -63,12 +64,13 @@ export function openChooseTeam(o: ChooseTeamOptions) {
   el.innerHTML = `
     <div class="ct-panel" role="dialog" aria-label="Choose your team">
       <div class="ct-head">
-        <div class="ct-title">CHOOSE YOUR TEAM</div>
-        <div class="ct-sub">More stars = a stronger roster. A weak team is a challenge.</div>
+        <div class="ct-title">${o.opponent ? 'CHOOSE OPPONENT' : 'CHOOSE YOUR TEAM'}</div>
+        <div class="ct-sub">${o.opponent ? 'Starts a new game against them. More stars = a stronger team.' : 'More stars = a stronger roster. A weak team is a challenge.'}</div>
       </div>
       <div class="ct-body">${conferences}</div>
       <div class="ct-foot">
         <div class="ct-picked">TAP A TEAM</div>
+        ${o.opponent ? '<button class="ct-cancel" type="button">CANCEL</button>' : ''}
         <button class="ct-go" type="button" disabled>PLAY &gt;</button>
       </div>
     </div>`;
@@ -94,7 +96,7 @@ export function openChooseTeam(o: ChooseTeamOptions) {
       text.append(name, r);
       pickedEl.append(text);
       go.disabled = false;
-      go.textContent = `PLAY AS ${picked.abbr} >`;
+      go.textContent = `${o.opponent ? 'PLAY VS' : 'PLAY AS'} ${picked.abbr} >`;
     }),
   );
   const confirm = () => {
@@ -104,6 +106,12 @@ export function openChooseTeam(o: ChooseTeamOptions) {
     o.onPick(id);
   };
   go.addEventListener('click', confirm);
+  const cancel = () => {
+    if (!o.opponent) return;
+    closeChooseTeam();
+    o.opponent.onCancel();
+  };
+  el.querySelector('.ct-cancel')?.addEventListener('click', cancel);
   // Taps never reach the field or the play calling screen underneath.
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
   // Enter = confirm. No key reaches the game while this is open (capture phase, runs first).
@@ -113,6 +121,10 @@ export function openChooseTeam(o: ChooseTeamOptions) {
     if (e.type === 'keydown' && e.key === 'Enter') {
       e.preventDefault();
       confirm();
+    }
+    if (e.type === 'keydown' && e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
     }
   };
   window.addEventListener('keydown', onKey, true);

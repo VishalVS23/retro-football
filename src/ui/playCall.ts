@@ -3,6 +3,7 @@
  * of cards with mini diagrams, and EXECUTE PLAY / AUDIBLE / CANCEL / TEAM buttons.
  * An HTML layer over the game, so text is crisp and the list scrolls natively.
  */
+import { starText } from '../league/teamStars';
 import '@fontsource/press-start-2p/latin-400.css';
 import './playCall.css';
 import type { GameState } from '../sim/drive';
@@ -18,6 +19,8 @@ export interface PlayCallOptions {
   match: GameState;
   /** Quarter and time, e.g. "Q2 1:05". */
   clock: string;
+  /** The opponent and their overall stars, e.g. { abbr: 'BAL', stars: 4 } (left out = no chip). */
+  opponent?: { abbr: string; stars: number } | null;
   /** Our timeouts left, and whether one can be called now (only while the clock is running). */
   timeoutsLeft: number;
   canTimeout: boolean;
@@ -94,8 +97,9 @@ export function openPlayCall(o: PlayCallOptions) {
     <div class="pc-top">
       <div class="pc-chip">PLAY CALL: <b>${downText(match)}</b></div>
       <div class="pc-chip pc-chip-fixed"><b>${o.clock}</b></div>
-      <div class="pc-chip">ZONE: <b>${fieldZone(match.ballX)}</b></div>
+      <div class="pc-chip pc-chip-zone">ZONE: <b>${fieldZone(match.ballX)}</b></div>
       <div class="pc-chip pc-chip-off">OFFENSE: <b class="pc-kind">PASS</b></div>
+      ${o.opponent ? `<div class="pc-chip pc-chip-fixed pc-chip-vs">VS ${o.opponent.abbr} <b>${starText(o.opponent.stars)}</b></div>` : ''}
     </div>
     <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">

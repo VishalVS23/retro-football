@@ -119,7 +119,8 @@ import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRat
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
-import { CHANGE_TEAM_EVENT, NEW_GAME_EVENT } from '../debug/gameControls';
+import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT } from '../debug/gameControls';
+import { teamStars, type TeamStars } from '../league/teamStars';
 
 // Placeholder colours only. The real art comes in stage 13.
 const COLORS = {
@@ -219,6 +220,8 @@ export class FieldScene extends Phaser.Scene {
   private ourLineup: OffenseLineup | null = null;
   private theirLineup: DefenseLineup | null = null;
   private ourKickers: KickingUnit | null = null;
+  /** Every team's 1-5 stars (overall / offense / defense), worked out when the teams are set. */
+  private stars: TeamStars[] | null = null;
   /** How far the current pass landed from where the QB aimed (his accuracy), in yards. */
   private throwMiss = 0;
   /** Last names under our skill players before the snap (formation order; the QB's is in the hint line). */
@@ -332,11 +335,14 @@ export class FieldScene extends Phaser.Scene {
     // ⚙ panel buttons (debug/gameControls.ts): quit to a new game, or pick another team.
     const onNewGame = () => this.startNewGame();
     const onChangeTeam = () => this.changeTeam();
+    const onChooseOpponent = () => this.chooseOpponent();
     window.addEventListener(NEW_GAME_EVENT, onNewGame);
     window.addEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
+    window.addEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
     this.events.once('shutdown', () => {
       window.removeEventListener(NEW_GAME_EVENT, onNewGame);
       window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
+      window.removeEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
     });
 
     // ⚙ Display switches (matchup arrows, names): redraw the names and an open play-call screen.
@@ -1718,6 +1724,13 @@ export class FieldScene extends Phaser.Scene {
     this.resetPlay();
   }
 
+  /** Their offense's stars vs our defense's, for the drive summary. */
+  private driveMatchup() {
+    const l = this.league;
+    if (!this.stars || !l || l.userTeamId === null || this.opponentId === null) return undefined;
+    return { offense: this.stars[this.opponentId].offense, defense: this.stars[l.userTeamId].defense };
+  }
+
   /** Their offense (and kicker / punter) vs our defense: the nudges on a CPU drive's dice (3g-A). */
   private cpuDriveMods() {
     const l = this.league;
@@ -1764,7 +1777,7 @@ export class FieldScene extends Phaser.Scene {
       closeDriveSummary();
       this.afterPlay();
     };
-    openDriveSummary({ drive, us: this.match.us, them: this.match.them, ourAbbr: this.ourAbbr(), theirAbbr: this.theirAbbr(), lastQuarter, onContinue: next });
+    openDriveSummary({ drive, us: this.match.us, them: this.match.them, ourAbbr: this.ourAbbr(), theirAbbr: this.theirAbbr(), lastQuarter, matchup: this.driveMatchup(), onContinue: next });
   }
 
   /** END OF Q1 / HALFTIME / FINAL / warning banner, then on to the next play (SKIP works too). */
@@ -1858,6 +1871,7 @@ export class FieldScene extends Phaser.Scene {
       theirAbbr: this.theirAbbr(),
       lastQuarter: false,
       overtime: true,
+      matchup: this.driveMatchup(),
       onContinue: () => {
         if (done) return;
         done = true;
@@ -1924,7 +1938,7 @@ export class FieldScene extends Phaser.Scene {
    * Throws away the game in progress (if any) and starts a fresh one against a new opponent:
    * PLAY AGAIN on the end screen, and NEW GAME / CHANGE TEAM in the ⚙ panel.
    */
-  private startNewGame() {
+  private startNewGame(opponentId?: number) {
     closePlayCall();
     closeDriveSummary();
     closeEndGame();
@@ -1941,7 +1955,10 @@ export class FieldScene extends Phaser.Scene {
     this.nextClock = null;
     this.playIndex = 0;
     this.autosave = true;
-    this.newOpponent();
+    if (opponentId !== undefined) {
+      this.opponentId = opponentId;
+      this.applyTeams();
+    } else this.newOpponent();
     void saveGameInProgress(null);
     this.updateScoreboard();
     this.resetPlay();
@@ -1958,12 +1975,26 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  /** The CHOOSE YOUR TEAM screen for this league; `onPick` gets the team id. */
-  private chooseTeam(league: League, onPick: (id: number) => void) {
+  /** ⚙ CHOOSE OPPONENT: pick who to play, then a fresh game against them (CANCEL keeps the current game). */
+  private chooseOpponent() {
+    const league = this.league;
+    if (!league || league.userTeamId === null) return;
+    const before = this.state;
+    this.chooseTeam(league, (id) => this.startNewGame(id), {
+      ownTeamId: league.userTeamId,
+      onCancel: () => {
+        if (before === 'calling') this.openCall();
+      },
+    });
+  }
+
+  /** The CHOOSE YOUR TEAM screen for this league; `onPick` gets the team id. `opponent` = choosing who to play instead. */
+  private chooseTeam(league: League, onPick: (id: number) => void, opponent?: { ownTeamId: number; onCancel: () => void }) {
     // Stars by rank: the top fifth of the league gets 5, the bottom fifth 1.
     const ratings = league.teams.map((t) => ({ id: t.id, r: teamRatings(league, t.id) }));
-    const rank = [...ratings].sort((a, b) => b.r.overall - a.r.overall).map((x) => x.id);
+    const stars = teamStars(league);
     openChooseTeam({
+      opponent,
       conferences: CONFERENCES,
       divisions: DIVISIONS,
       teams: league.teams.map((t) => {
@@ -1978,7 +2009,7 @@ export class FieldScene extends Phaser.Scene {
           division: t.division,
           offense: r.offense,
           defense: r.defense,
-          stars: 5 - Math.floor((rank.indexOf(t.id) * 5) / league.teams.length),
+          stars: stars[t.id].overall,
         };
       }),
       onPick,
@@ -2004,6 +2035,7 @@ export class FieldScene extends Phaser.Scene {
     this.ourLineup = offenseLineup(l, l.userTeamId);
     this.theirLineup = defenseLineup(l, this.opponentId);
     this.ourKickers = kickingUnit(l, l.userTeamId);
+    this.stars = teamStars(l);
     this.placeNameLabels();
     this.updateScoreboard();
   }
@@ -2278,6 +2310,7 @@ export class FieldScene extends Phaser.Scene {
     openPlayCall({
       match: this.match,
       clock: clockText(this.clock),
+      opponent: this.stars && this.opponentId !== null ? { abbr: this.theirAbbr(), stars: this.stars[this.opponentId].overall } : null,
       timeoutsLeft: this.clock.timeouts,
       canTimeout: canCallTimeout(this.clock),
       // TIMEOUT on the play calling screen: the clock stops, so no huddle runoff at the snap.
