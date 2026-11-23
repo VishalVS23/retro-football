@@ -10,7 +10,7 @@
 import type { Feel } from '../config/feel';
 import { OPP_GOAL_X, OWN_GOAL_X } from './drive';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
-import { formation } from './formation';
+import { formation, RETURN_LINE, RETURN_RUSH } from './formation';
 import { PUNTER_DEPTH, puntPath, resolvePunt, type PuntKick, type PuntPath } from './punting';
 import { canTackle, evadeSteer, startChase, stepChase, type ChaseParams, type ChaseState, type Pursuer } from './carry';
 import { createRng } from './rng';
@@ -73,7 +73,7 @@ export function coverageAt(losX: number, punter: Vec, p: Feel['puntReturn']): Co
   const man = (pos: Vec, speed: number, release: number): CoverageMan => ({ pos: { ...pos }, speed, release, laneY: (pos.y - mid) * p.laneSpreadRatio, held: 0 });
   return [
     ...f.skill.map((s, i) => (i === 0 || i === 2 ? man(s.pos, p.gunnerSpeed, 0) : man(s.pos, p.coverSpeed, p.coverReleaseTime))),
-    ...f.block.map((b) => man(b, p.lineSpeed, p.coverReleaseTime)),
+    ...RETURN_LINE.map((i) => man(f.block[i], p.lineSpeed, p.coverReleaseTime)),
     man(punter, p.punterSpeed, p.coverReleaseTime),
   ];
 }
@@ -81,7 +81,7 @@ export function coverageAt(losX: number, punter: Vec, p: Feel['puntReturn']): Co
 /** Their side at the snap (the corners and rushers), from the formation. */
 export function returnTeamAt(losX: number, feel: Feel): ReturnBlocker[] {
   const f = formation(losX);
-  const spots = [...f.skill.map((s) => ({ x: s.pos.x + feel.defense.cbCushionYards, y: s.pos.y })), ...f.rush.map((r) => ({ ...r }))];
+  const spots = [...f.skill.map((s) => ({ x: s.pos.x + feel.defense.cbCushionYards, y: s.pos.y })), ...RETURN_RUSH.map((i) => ({ ...f.rush[i] }))];
   return spots.map((pos) => ({ pos, used: false }));
 }
 

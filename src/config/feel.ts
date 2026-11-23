@@ -25,6 +25,10 @@ export const feel = {
     shedTime: 2.2,
     /** Random +/- spread on that time, per rusher, per play. */
     shedTimeVariance: 0.3,
+    /** The centre's help (3h-a): the rusher about to get free first is held this much longer. */
+    helpTime: 0.6,
+    /** How fast the centre slides over to help, yards per second (looks only). */
+    helpSlideSpeed: 4,
     /** Rusher speed while blocked / once free, yards per second. */
     rushBlockedSpeed: 1,
     rushFreeSpeed: 6,
@@ -147,6 +151,8 @@ export const feel = {
     /** Average time our blockers hold a defender on a run, and the random +/- on it (big = more stuffed runs). */
     shedTime: 1,
     shedTimeVariance: 0.7,
+    /** The centre's help on a run (3h-a): the defender about to get free first is held this much longer. */
+    helpTime: 0.4,
     /** How fast our blockers push held defenders back, yards per second. */
     driveSpeed: 1.2,
     /** Linebacker pauses this long after the handoff to read the run. */
@@ -571,7 +577,7 @@ export const feel = {
     /** The line (3e-b): a pass block holds this much longer per point of blocking edge (vs the average starters), shorter per point of deficit. */
     passLinePerPoint: 0.06,
     /** Same for run blocks. */
-    runLinePerPoint: 0.06,
+    runLinePerPoint: 0.04,
     /** Trait "Mauler": his run blocks hold this much longer. */
     maulerRunScale: 1.15,
     /** Trait "Tries to jump the snap": chance per snap he gets off early, and how much sooner (seconds) he's free of his block. */

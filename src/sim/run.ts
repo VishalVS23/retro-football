@@ -45,12 +45,14 @@ export interface RunBlockParams {
 
 /**
  * A defensive lineman on a run play, before the handoff: our blocker drives him back and away from
- * the running back until his shed time, then he goes after the running back.
+ * the running back until his shed time, then he goes after the running back. `holeY` = where the
+ * run crosses the line (3h-a): blocks push away from the hole, so the outside man on a Toss is
+ * sealed inside instead of being pushed into the lane. Leave out = away from the running back.
  */
-export function stepRunRusher(r: Rusher, rb: Vec, t: number, dt: number, p: RunBlockParams): Rusher {
+export function stepRunRusher(r: Rusher, rb: Vec, t: number, dt: number, p: RunBlockParams, holeY?: number): Rusher {
   if (t < r.shedAt) {
-    // Driven back and to the side, away from the running back (opening the hole).
-    const away = Math.sign(r.pos.y - rb.y);
+    // Driven back and to the side, away from the hole (opening it).
+    const away = Math.sign(r.pos.y - (holeY ?? rb.y));
     return { ...r, pos: { x: r.pos.x + p.driveSpeed * dt, y: r.pos.y + away * p.driveSpeed * dt } };
   }
   const d = Math.hypot(rb.x - r.pos.x, rb.y - r.pos.y);

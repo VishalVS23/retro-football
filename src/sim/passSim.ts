@@ -9,7 +9,7 @@ import { formation } from './formation';
 import { RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
 import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
-import { carryFor, pursuerFor, shedTimeFor, tackleFor } from './runRatings';
+import { carryFor, lineShedTimes, pursuerFor, tackleFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
@@ -36,9 +36,9 @@ export interface PassOptions {
   pressured?: boolean;
   /** Our skill players in formation order (wide top, slot, wide bottom, RB). Leave out = no receiver ratings. */
   offense?: (Player | null)[];
-  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety and the two rushers. Leave out = no defender ratings. */
+  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety and the four rushers. Leave out = no defender ratings. */
   defense?: { cover: (Player | null)[]; safety: Player | null; rush?: (Player | null)[] };
-  /** Our two blockers (3e-b): line[i] blocks their rusher i. Leave out = average blocking. */
+  /** Our five blockers (3h-a), formation order: `BLOCKER_OF[i]` blocks their rusher i. Leave out = average blocking. */
   line?: (Player | null)[];
   /** Their defensive call (3d2). Default: normal man. */
   call?: DefCallId;
@@ -106,13 +106,11 @@ export function simulatePass(
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
   type Cov = (typeof cover)[number];
   const stepLb = (c: Cov, tt: number): Cov => ({ ...c, pos: stepBlitzer(c.pos, qbAt(tt), tt, dt, feel) });
-  // The two pass rushers (only needed to chase after a catch; their own dice keep the pass rolls unchanged).
+  // The pass rush (own dice, so the pass rolls the same whatever the line does).
   const rng2 = createRng((seed ^ 0x5bd1e995) >>> 0);
   const pk = feel.pocket;
-  let rushers: Rusher[] = f.rush.map((pos, i) => ({
-    pos: { ...pos },
-    shedAt: shedTimeFor(opts.line?.[i], def?.rush?.[i], false, pk, rng2.next() * 2 - 1, () => rng2.next(), R),
-  }));
+  const sheds = lineShedTimes(opts.line, def?.rush, false, pk, () => rng2.next(), R);
+  let rushers: Rusher[] = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
   const rushP = { blockedSpeed: pk.rushBlockedSpeed, freeSpeed: pk.rushFreeSpeed, sackReachYards: pk.sackReachYards };
   let sacked = false;
   let t = 0;

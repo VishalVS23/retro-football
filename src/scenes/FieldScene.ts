@@ -13,7 +13,7 @@ import {
   type Vec,
 } from '../sim/throw';
 import { PLAYS, RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
-import { laneSteer, reachedHandoff, stepRunRusher } from '../sim/run';
+import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from '../sim/run';
 import {
   blockerSpot,
   closestRusher,
@@ -44,7 +44,7 @@ import {
   type Pursuer,
   type Trailer,
 } from '../sim/carry';
-import { formation } from '../sim/formation';
+import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, SLOT } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
@@ -102,7 +102,7 @@ import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStar
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
-import { carryFor, edgeSign, lineEdge, pursuerFor, securityRatio, shedTimeFor, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
+import { blockerEdges, carryFor, edgeSign, lineShedTimes, pointOfAttack, pursuerFor, securityRatio, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordOurSimDrive, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
 import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
@@ -164,7 +164,7 @@ const COLORS = {
 const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
 const PRESSURE_COLOR = 0xff3b3b;
-const RUSHER_COUNT = 2;
+const LINEMAN_RADIUS = 0.8; // linemen drawn a little smaller: nine of them across ~10 yards
 const SKILL_COUNT = 4; // three receivers + the running back (index RB), each with his own man defender
 // Camera height before the throw: a bit above the middle, toward the two-receiver side, which also
 // leaves room under the scoreboard. (Layout, not feel: it follows the formation.)
@@ -213,6 +213,8 @@ export class FieldScene extends Phaser.Scene {
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
+  /** Which rusher the centre is helping on this snap (3h-a). */
+  private helped = 0;
   private receivers: Receiver[] = [];
   private targetIndex = 0; // the receiver the ball in the air is meant for
   private rushers: Rusher[] = [];
@@ -302,12 +304,12 @@ export class FieldScene extends Phaser.Scene {
     this.aimG = this.add.graphics().setDepth(4);
     this.shadow = this.add.ellipse(0, 0, 1, 0.6, COLORS.shadow, 0.35).setDepth(1);
     this.qb = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.team).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
-    const dot = (color: number) => this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
+    const dot = (color: number, radius = PLAYER_RADIUS) => this.add.circle(0, 0, radius, color).setStrokeStyle(0.2, COLORS.outline).setDepth(2);
     this.wrDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.team));
     this.cbDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.defense));
     this.safety = dot(COLORS.defense);
-    this.rusherDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.defense));
-    this.blockerDots = Array.from({ length: RUSHER_COUNT }, () => dot(COLORS.team));
+    this.rusherDots = Array.from({ length: BLOCKER_OF.length }, () => dot(COLORS.defense, LINEMAN_RADIUS));
+    this.blockerDots = Array.from({ length: BLOCKER_OF.length + 1 }, () => dot(COLORS.team, LINEMAN_RADIUS));
     this.ball = this.add.ellipse(0, 0, 1, 0.7, COLORS.ball).setStrokeStyle(0.08, COLORS.outline).setDepth(3);
 
     this.label = this.add
@@ -918,11 +920,13 @@ export class FieldScene extends Phaser.Scene {
     this.returnerDot = dot;
     const ic = feel.interception;
     const chase = (d: Phaser.GameObjects.Arc, speed: number): Pursuer => ({ pos: { x: d.x, y: d.y }, speed, stunned: 0 });
-    this.chaserDots = [...this.wrDots, this.qb, ...this.blockerDots];
+    // Only the two guards chase (returns were tuned with a two-man line); the rest stay put.
+    const linemen = RETURN_LINE.map((i) => this.blockerDots[i]);
+    this.chaserDots = [...this.wrDots, this.qb, ...linemen];
     this.ret = startChase(at, [
       ...this.wrDots.map((d) => chase(d, ic.wrChaseSpeed)),
       chase(this.qb, ic.qbChaseSpeed),
-      ...this.blockerDots.map((d) => chase(d, ic.olChaseSpeed)),
+      ...linemen.map((d) => chase(d, ic.olChaseSpeed)),
     ]);
     this.qb.setStrokeStyle(0.2, COLORS.outline);
     this.updateLabel();
@@ -1150,11 +1154,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private coverageDots() {
-    return [...this.wrDots, ...this.blockerDots, this.qb];
+    return [...this.wrDots, ...RETURN_LINE.map((i) => this.blockerDots[i]), this.qb];
   }
 
   private returnTeamDots() {
-    return [...this.cbDots, ...this.rusherDots];
+    return [...this.cbDots, ...RETURN_RUSH.map((i) => this.rusherDots[i])];
   }
 
   /** The punt tap: the punt play starts (flight, returner, coverage; rules in sim/puntReturn.ts). */
@@ -1435,7 +1439,7 @@ export class FieldScene extends Phaser.Scene {
     // Pass play: they rush the QB. Run play: our blockers drive them back, and once free they go for the RB.
     this.rushers = this.rushers.map((r) =>
       run
-        ? stepRunRusher(r, rbPos, this.playTime, dt, { driveSpeed: feel.runGame.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed })
+        ? stepRunRusher(r, rbPos, this.playTime, dt, { driveSpeed: feel.runGame.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, pathYAt(this.receivers[RB].path, this.match.ballX))
         : stepRusher(r, this.qbPos, this.playTime, dt, p),
     );
     this.rushers.forEach((r, i) => {
@@ -1443,9 +1447,24 @@ export class FieldScene extends Phaser.Scene {
       // Blocker stays in front of his man until beaten, then is left where he was.
       if (!isFree(r, this.playTime)) {
         const spot = blockerSpot(r, run ? { x: r.pos.x - 5, y: r.pos.y } : this.qbPos, PLAYER_RADIUS * 2);
-        this.blockerDots[i].setPosition(spot.x, spot.y);
+        this.blockerDots[BLOCKER_OF[i]].setPosition(spot.x, spot.y);
       }
     });
+    this.stepCentre(this.rushers[this.helped], run ? { x: this.rushers[this.helped].pos.x - 5, y: this.rushers[this.helped].pos.y } : this.qbPos, dt);
+  }
+
+  /** The centre slides over to help on the block he's doubling (until that rusher gets free). */
+  private stepCentre(r: { pos: Vec; held?: number; shedAt?: number } | undefined, toward: Vec, dt: number) {
+    if (!r) return;
+    const engaged = r.shedAt !== undefined ? !isFree(r as { pos: Vec; shedAt: number }, this.playTime) : (r.held ?? 0) > 0;
+    if (!engaged) return;
+    const spot = blockerSpot({ pos: r.pos, shedAt: 0 }, toward, PLAYER_RADIUS * 2);
+    const side = Math.sign(FIELD_WIDTH / 2 - r.pos.y) || 1; // beside the main blocker, on the inside
+    const target = { x: spot.x - 0.3, y: spot.y + side * LINEMAN_RADIUS * 1.7 };
+    const c = this.blockerDots[CENTRE];
+    const d = Math.hypot(target.x - c.x, target.y - c.y);
+    const step = Math.min(d, feel.pocket.helpSlideSpeed * dt);
+    if (d > 0) c.setPosition(c.x + ((target.x - c.x) / d) * step, c.y + ((target.y - c.y) / d) * step);
   }
 
   /** Our ball carrier's running, with his ratings (speed, agility, acceleration). */
@@ -1571,9 +1590,11 @@ export class FieldScene extends Phaser.Scene {
       this.pursuerDots[i].setPosition(d.pos.x, d.pos.y).setAlpha(d.stunned > 0 ? 0.45 : 1);
       if (i >= firstRusher && (d.held ?? 0) > 0) {
         const spot = blockerSpot({ pos: d.pos, shedAt: 0 }, { x: d.pos.x - 5, y: d.pos.y }, PLAYER_RADIUS * 2);
-        this.blockerDots[i - firstRusher].setPosition(spot.x, spot.y);
+        this.blockerDots[BLOCKER_OF[i - firstRusher]].setPosition(spot.x, spot.y);
       }
     });
+    const helped = this.chase.pursuers[firstRusher + this.helped];
+    if (helped) this.stepCentre(helped, { x: helped.pos.x - 5, y: helped.pos.y }, dt);
     this.cameraFocus = { x: c.x + feel.camera.leadYards, y: c.y };
     if (step.missed) this.floatText(c.x, c.y - 2, step.missed === 'juked' ? 'JUKED!' : 'BROKE IT!', '#7ec8e3');
     if (step.end) this.endRun(step.end, step.tackler);
@@ -2184,9 +2205,12 @@ export class FieldScene extends Phaser.Scene {
     const players = lu.skill;
     const show = this.state === 'presnap' || this.state === 'calling';
     this.nameLabels.forEach((t, i) => {
+      // The slot's name goes to his left: the line is right below him (3h-a).
+      const left = i === SLOT;
       t.setText(players[i].lastName.toUpperCase())
         .setScale(feel.ratings.nameSize / 48)
-        .setPosition(dots[i].x, dots[i].y + PLAYER_RADIUS + 0.2)
+        .setOrigin(left ? 1 : 0.5, left ? 0.5 : 0)
+        .setPosition(left ? dots[i].x - PLAYER_RADIUS - 0.3 : dots[i].x, left ? dots[i].y : dots[i].y + PLAYER_RADIUS + 0.2)
         .setVisible(show && feel.ratings.nameSize > 0 && displayPrefs().names);
     });
   }
@@ -2212,7 +2236,7 @@ export class FieldScene extends Phaser.Scene {
     if (!us || !them) return null;
     const on = !!feel.ratings.enabled;
     // A blocker has the edge when he's at least 2 points better than his rusher (same as the receivers).
-    const line = (run: boolean) => us.line.map((p, i) => (on ? edgeSign(lineEdge(p, them.rush[i], run, feel.ratings)) : 0));
+    const line = (run: boolean) => blockerEdges(us.line, them.rush, run, feel.ratings).map((e) => (on ? edgeSign(e) : 0));
     return {
       cover: them.cover.map((p) => p.lastName),
       safety: them.safety.lastName,
@@ -2375,11 +2399,12 @@ export class FieldScene extends Phaser.Scene {
     });
     // Run blocking and pass blocking hold their man for different lengths of time.
     // ...and each block holds for as long as our blocker wins his matchup (3e-b).
+    // The centre (3h-a) helps whoever is about to get free first.
     const shed = play.run ? feel.runGame : feel.pocket;
-    this.rushers = this.form.rush.map((pos, i) => ({
-      pos: { ...pos },
-      shedAt: shedTimeFor(this.ourLineup?.line[i], this.theirLineup?.rush[i], !!play.run, shed, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
-    }));
+    const hole = play.run ? pointOfAttack(this.form.rush.map((r) => r.y), pathYAt(this.receivers[RB].path, this.match.ballX)) : undefined;
+    const sheds = lineShedTimes(this.ourLineup?.line, this.theirLineup?.rush, !!play.run, shed, () => rng.next(), feel.ratings, hole);
+    this.helped = sheds.helped;
+    this.rushers = this.form.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
     this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
     this.qbPos = { ...qbStart };

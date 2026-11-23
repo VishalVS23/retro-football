@@ -17,6 +17,7 @@
  * below 0 or above 1 however big the gap. Every effect counts once: agility vs agility decides
  * jukes, strength vs tackling decides broken tackles.
  */
+import { BLOCKER_OF, CENTRE } from './formation';
 import type { AttributeKey } from '../players/attributes';
 import type { Player } from '../players/player';
 import type { TraitId } from '../players/traits';
@@ -162,4 +163,62 @@ export function shedTimeFor(
   if (run && has(ol, 'mauler', r)) t *= r.maulerRunScale;
   if (has(dl, 'jumpsSnap', r) && roll() < r.jumpSnapChance) t -= r.jumpSnapGain;
   return Math.max(0.1, t + wobble * base.shedTimeVariance);
+}
+
+/** When each rusher gets free (3h-a), and which one the centre helped. */
+export interface LineSheds {
+  shedAt: number[];
+  helped: number;
+}
+
+/**
+ * The whole line for one snap: each rusher i vs his blocker `BLOCKER_OF[i]` (shedTimeFor, dice
+ * rolled in that order), then the centre helps: on a pass whoever is about to get free first, on a
+ * run the man at the point of attack (`helpOn`, the rusher nearest the hole). That block holds
+ * `helpTime` longer (more if the centre wins that matchup, less if he loses it).
+ */
+export function lineShedTimes(
+  line: readonly (Player | null | undefined)[] | undefined,
+  rush: readonly (Player | null | undefined)[] | undefined,
+  run: boolean,
+  base: { shedTime: number; shedTimeVariance: number; helpTime: number },
+  rng: () => number,
+  r: LineRatingParams,
+  helpOn?: number,
+): LineSheds {
+  const shedAt = BLOCKER_OF.map((b, i) => shedTimeFor(line?.[b], rush?.[i], run, base, rng() * 2 - 1, rng, r));
+  let helped = 0;
+  shedAt.forEach((t, i) => {
+    if (t < shedAt[helped]) helped = i;
+  });
+  if (helpOn !== undefined) helped = helpOn;
+  shedAt[helped] += base.helpTime * Math.max(0.25, 1 + lineEdge(line?.[CENTRE], rush?.[helped], run, r) * (run ? r.runLinePerPoint : r.passLinePerPoint));
+  return { shedAt, helped };
+}
+
+/** Index of the rusher nearest the hole (a run's point of attack): `rushY` = their y at the snap. */
+export function pointOfAttack(rushY: readonly number[], holeY: number): number {
+  let best = 0;
+  rushY.forEach((y, i) => {
+    if (Math.abs(y - holeY) < Math.abs(rushY[best] - holeY)) best = i;
+  });
+  return best;
+}
+
+/** Each rusher's matchup with his own blocker, in rating points (rusher order). */
+export function pairEdges(line: readonly (Player | null | undefined)[], rush: readonly (Player | null | undefined)[], run: boolean, r: RatingSwitch): number[] {
+  return BLOCKER_OF.map((b, i) => lineEdge(line[b], rush[i], run, r));
+}
+
+/**
+ * A marker edge for each of our five blockers (formation order): his own rusher's matchup; the
+ * centre's is against the rusher with the toughest matchup (the one he'll most likely help on).
+ */
+export function blockerEdges(line: readonly (Player | null | undefined)[], rush: readonly (Player | null | undefined)[], run: boolean, r: RatingSwitch): number[] {
+  const pairs = pairEdges(line, rush, run, r);
+  const out = new Array<number>(line.length).fill(0);
+  BLOCKER_OF.forEach((b, i) => (out[b] = pairs[i]));
+  const worst = pairs.indexOf(Math.min(...pairs));
+  out[CENTRE] = lineEdge(line[CENTRE], rush[worst], run, r);
+  return out;
 }

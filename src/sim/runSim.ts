@@ -8,10 +8,10 @@ import { formation } from './formation';
 import { RB, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage } from './defense';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
-import { laneSteer, reachedHandoff, stepRunRusher } from './run';
+import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
 import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
-import { carryFor, pursuerFor, shedTimeFor, tackleFor } from './runRatings';
+import { carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor } from './runRatings';
 import type { Player } from '../players/player';
 
 /** Who's on the field (ratings, 3e-a). Anyone missing plays as an average starter. */
@@ -20,9 +20,9 @@ export interface RunPlayers {
   /** Their corners and linebacker, in formation order (CB1, CB3, CB2, LB1). */
   cover?: (Player | undefined)[];
   safety?: Player;
-  /** DL1, DL2. */
+  /** Their four rushers, formation order. */
   rush?: (Player | undefined)[];
-  /** Our OL1, OL2 (blocker i blocks rusher i). */
+  /** Our five blockers, formation order (`BLOCKER_OF[i]` blocks rusher i). */
   line?: (Player | undefined)[];
 }
 
@@ -60,10 +60,9 @@ export function simulateRun(
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
   let cover = f.skill.map((s, i) => startCoverage(i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos), s.pos));
   const rg = feel.runGame;
-  let rushers = f.rush.map((pos, i) => ({
-    pos: { ...pos },
-    shedAt: shedTimeFor(players.line?.[i], players.rush?.[i], true, rg, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
-  }));
+  const holeY = pathYAt(paths[RB], losX);
+  const sheds = lineShedTimes(players.line, players.rush, true, rg, () => rng.next(), feel.ratings, pointOfAttack(f.rush.map((r) => r.y), holeY));
+  let rushers = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
   let t = 0;
   while (!reachedHandoff(runners[RB]) && t < 3) {
     t += dt;
@@ -72,7 +71,7 @@ export function simulateRun(
     cover = cover.map((c, i) =>
       blitz && i === RB ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) } : stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover),
     );
-    rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }));
+    rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
   }
   const tk = feel.tackling;
   const R = feel.ratings;

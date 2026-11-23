@@ -46,4 +46,11 @@ describe('lineups', () => {
     expect(d.cover).toEqual([c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player]);
     expect(d.safety).toBe(c.S[0].player);
   });
+
+  it('the lines (3h-a): five blockers LT LG C RG RT = OL1 OL4 OL3 OL5 OL2; four rushers edge, inside, inside, edge = DL1 DL3 DL4 DL2', () => {
+    const c = depthChart(league, 2);
+    expect(offenseLineup(league, 2).line).toEqual([c.OL[0], c.OL[3], c.OL[2], c.OL[4], c.OL[1]].map((s) => s.player));
+    expect(defenseLineup(league, 2).rush).toEqual([c.DL[0], c.DL[2], c.DL[3], c.DL[1]].map((s) => s.player));
+    expect(new Set(offenseLineup(league, 2).line).size).toBe(5);
+  });
 });

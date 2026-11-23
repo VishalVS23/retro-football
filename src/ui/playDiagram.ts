@@ -5,7 +5,7 @@
  */
 import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
-import { formation } from '../sim/formation';
+import { formation, SLOT } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, routePath, type PlayDef } from '../sim/routes';
@@ -135,10 +135,27 @@ function edgeArrow(p: Vec, edge: number): string {
   return `<polygon points="${pts}" fill="${edge > 0 ? C.edgeUs : C.edgeThem}" stroke="${C.outline}" stroke-width="0.25"/>`;
 }
 
-function player(p: Vec, color: string, label: string | null, above = false): string {
-  let s = `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="0.95" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
+/**
+ * A lineman's matchup (3h-a): a green ring = our blocker wins it, red = he loses it, nothing = even.
+ * (Arrows like the receivers' don't fit: five blockers 2 yards apart, right in front of the QB.)
+ */
+function lineRing(p: Vec, edge: number): string {
+  if (!edge) return '';
+  return `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="1.2" fill="none" stroke="${edge > 0 ? C.edgeUs : C.edgeThem}" stroke-width="0.38"/>`;
+}
+
+/** Where a player's label goes: under him, over him, or to his left (the slot and QB: the line is right below them). */
+type LabelSpot = 'below' | 'above' | 'left';
+
+const LINEMAN_R = 0.8;
+
+function player(p: Vec, color: string, label: string | null, spot: LabelSpot = 'below', r = 0.95): string {
+  let s = `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="${r}" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
   if (label) {
-    s += `<text x="${n(p.x)}" y="${n(above ? p.y - 1.5 : p.y + 2.5)}" font-size="1.05" text-anchor="middle" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
+    const left = spot === 'left';
+    const x = left ? p.x - r - 0.4 : p.x;
+    const y = left ? p.y + 0.4 : spot === 'above' ? p.y - 1.5 : p.y + 2.5;
+    s += `<text x="${n(x)}" y="${n(y)}" font-size="1.05" text-anchor="${left ? 'end' : 'middle'}" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
   }
   return s;
 }
@@ -198,20 +215,20 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     const dn = v.defense;
     const dl = (name: string | undefined, fallback: string) => (name ? esc(name.toUpperCase()) : fallback);
     const call = v.call ?? 'man';
-    f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), !!dn)));
+    f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
     s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
     s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.safety, 'S'));
-    f.rush.forEach((r) => (s += player(r, C.defense, null))); // linemen unlabelled: too tightly packed
+    f.rush.forEach((r) => (s += player(r, C.defense, null, 'below', LINEMAN_R))); // linemen unlabelled: too tightly packed
   }
-  f.block.forEach((b) => (s += player(b, C.offense, null)));
+  f.block.forEach((b) => (s += player(b, C.offense, null, 'below', LINEMAN_R)));
   const nm = v.names;
-  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null)));
+  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null, i === SLOT ? 'left' : 'below')));
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
-  s += player(f.qb, C.offense, v.detailed ? 'QB' : null); // the backfield is too crowded for his name
+  s += player(f.qb, C.offense, v.detailed ? 'QB' : null, 'left'); // the backfield is too crowded for his name
   const arrows = v.detailed && v.defense && v.defense.arrows !== false;
   if (arrows) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
   const lineEdges = v.defense?.line?.[play.run ? 'run' : 'pass'];
-  if (arrows && lineEdges) f.block.forEach((b, i) => (s += edgeArrow(b, lineEdges[i] ?? 0)));
+  if (arrows && lineEdges) f.block.forEach((b, i) => (s += lineRing(b, lineEdges[i] ?? 0)));
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

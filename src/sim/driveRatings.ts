@@ -20,7 +20,7 @@ import type { Player } from '../players/player';
 import type { Position } from '../players/positions';
 import type { DefenseLineup, KickingUnit, OffenseLineup } from '../league/lineup';
 import { AVERAGE_RATING, halving, type RatingSwitch } from './ratings';
-import { lineEdge } from './runRatings';
+import { pairEdges } from './runRatings';
 import { kickRating, kickerRules, punterRules, type KickRatingParams } from './kickRatings';
 import type { KickRules } from './kicking';
 import type { PuntRules } from './punting';
@@ -116,7 +116,7 @@ export function unitEdges(o: OffenseLineup, d: DefenseLineup, r: SimRatingParams
   const receivers = mean([wr1, wr3, wr2].map((w) => edgeOf(w, 'WR', ['speed', 'routeRunning', 'hands'], r)));
   const cover = 0.75 * mean(corners.map((c) => edgeOf(c, 'CB', ['speed', 'manCoverage', 'ballSkills'], r))) + 0.25 * edgeOf(d.safety, 'S', ['speed', 'zoneCoverage', 'ballSkills'], r);
   const ballSkills = 0.75 * mean(corners.map((c) => edgeOf(c, 'CB', ['ballSkills'], r))) + 0.25 * edgeOf(d.safety, 'S', ['ballSkills'], r);
-  const line = (run: boolean) => (r.enabled ? mean(o.line.map((ol, i) => lineEdge(ol, d.rush[i], run, r))) : 0);
+  const line = (run: boolean) => (r.enabled ? mean(pairEdges(o.line, d.rush, run, r)) : 0);
   const tacklers = mean([edgeOf(d.cover[3], 'LB', ['tackling'], r), edgeOf(d.safety, 'S', ['tackling'], r), mean(corners.map((c) => edgeOf(c, 'CB', ['tackling'], r)))]);
   const runner = edgeOf(rb, 'RB', ['speed', 'agility', 'strength'], r);
   return {

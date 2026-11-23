@@ -9,7 +9,22 @@ import { generatePlayer } from '../players/generate';
 import { generateLeague, depthChart } from '../league/league';
 import { createRng } from './rng';
 import type { Position } from '../players/positions';
-import { ROLE_NORMS, carryFor, edgeSign, lineEdge, pursuerFor, roleRating, securityRatio, shedTimeFor, tackleFor, type Role } from './runRatings';
+import {
+  ROLE_NORMS,
+  blockerEdges,
+  carryFor,
+  edgeSign,
+  lineEdge,
+  lineShedTimes,
+  pointOfAttack,
+  pursuerFor,
+  roleRating,
+  securityRatio,
+  shedTimeFor,
+  tackleFor,
+  type Role,
+} from './runRatings';
+import { BLOCKER_OF, CENTRE, formation } from './formation';
 import { simulatePass } from './passSim';
 
 /** A player exactly `delta` points above (below) the average starter at `role` in everything that matters here. */
@@ -25,7 +40,7 @@ const off = { ...feel.ratings, enabled: 0 };
 describe('role averages', () => {
   it('ROLE_NORMS matches the average starters the generator makes (within a point)', () => {
     const leagues = [11, 22, 33].map((s) => generateLeague(s * 1009));
-    const take: Record<Role, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 2, OL: 2 };
+    const take: Record<Role, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 4, OL: 5 };
     for (const [role, norms] of Object.entries(ROLE_NORMS) as [Role, Record<string, number>][]) {
       for (const [key, norm] of Object.entries(norms)) {
         const vals: number[] = [];
@@ -105,7 +120,7 @@ const team = (rbD: number, defD: number): RunPlayers => ({
   rb: mk('RB', 'RB', rbD),
   cover: [mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('LB', 'LB', defD)],
   safety: mk('S', 'S', defD),
-  rush: [mk('DL', 'DL', defD), mk('DL', 'DL', defD)],
+  rush: Array.from({ length: 4 }, () => mk('DL', 'DL', defD)),
 });
 function runs(name: string, players: RunPlayers | undefined) {
   const play = PLAYS.find((p) => p.name === name)!;
@@ -146,8 +161,8 @@ describe('balance: ball carriers vs tacklers', () => {
 
 // ---------- The line (3e-b) ----------
 
-const line = (d: number) => [mk('OL', 'OL', d), mk('OL', 'OL', d)];
-const rushers = (d: number) => [mk('DL', 'DL', d), mk('DL', 'DL', d)];
+const line = (d: number) => Array.from({ length: 5 }, () => mk('OL', 'OL', d));
+const rushers = (d: number) => Array.from({ length: 4 }, () => mk('DL', 'DL', d));
 
 describe('the line', () => {
   it('average vs average = today; the blocker who wins holds longer; markers need a 2-point edge', () => {
@@ -193,6 +208,60 @@ const sackRate = (olD: number, dlD: number, at: number, call: 'man' | 'blitz' = 
   }
   return n;
 };
+
+describe('the line, 5 on 4 (3h-a)', () => {
+  const pk = feel.pocket;
+  it('five blockers, four rushers; each rusher has his own blocker and the centre is spare', () => {
+    const f = formation(35);
+    expect(f.block).toHaveLength(5);
+    expect(f.rush).toHaveLength(4);
+    expect(new Set(BLOCKER_OF).size).toBe(4);
+    expect(BLOCKER_OF).not.toContain(CENTRE);
+    // Each rusher's blocker is the one nearest him (no crossed blocks).
+    f.rush.forEach((r, i) => {
+      const nearest = f.block.map((b) => Math.abs(b.y - r.y)).reduce((best, d, j, all) => (d < all[best] ? j : best), 0);
+      expect(nearest === BLOCKER_OF[i] || Math.abs(f.block[nearest].y - r.y) === Math.abs(f.block[BLOCKER_OF[i]].y - r.y)).toBe(true);
+    });
+  });
+
+  it('the centre helps whoever is about to get free first (pass), or the man at the hole (run)', () => {
+    const wobbles = [0.5, -0.9, 0.2, 0.1]; // rusher 1 is the quickest
+    const seq = () => {
+      let k = 0;
+      return () => (wobbles[k++ % 4] + 1) / 2; // rng() * 2 - 1 = the wobble
+    };
+    const plain = BLOCKER_OF.map((_, i) => pk.shedTime + wobbles[i] * pk.shedTimeVariance);
+    const pass = lineShedTimes(undefined, undefined, false, pk, seq(), off);
+    expect(pass.helped).toBe(1);
+    pass.shedAt.forEach((t, i) => expect(t).toBeCloseTo(plain[i] + (i === 1 ? pk.helpTime : 0)));
+    expect(lineShedTimes(undefined, undefined, false, pk, seq(), off, 3).helped).toBe(3);
+  });
+
+  it('a centre who wins his matchup helps more', () => {
+    const r0 = () => 0.5;
+    const rush = Array.from({ length: 4 }, () => mk('DL', 'DL', 0));
+    const avg = [0, 0, 0, 0, 0].map(() => mk('OL', 'OL', 0));
+    const goodC = [...avg];
+    goodC[CENTRE] = mk('OL', 'OL', 4);
+    const a = lineShedTimes(avg, rush, false, pk, r0, on);
+    const b = lineShedTimes(goodC, rush, false, pk, r0, on);
+    expect(b.shedAt[b.helped]).toBeGreaterThan(a.shedAt[a.helped]);
+  });
+
+  it('point of attack = the rusher nearest the hole; markers: each blocker vs his man, the centre vs the toughest one', () => {
+    const f = formation(35);
+    expect(pointOfAttack(f.rush.map((r) => r.y), f.rush[3].y + 2)).toBe(3);
+    expect(pointOfAttack(f.rush.map((r) => r.y), f.rush[1].y)).toBe(1);
+    const line = [0, 0, 0, 0, 0].map(() => mk('OL', 'OL', 0));
+    const rush = [0, 0, 0, 0].map(() => mk('DL', 'DL', 0));
+    rush[2] = mk('DL', 'DL', 5); // a star inside rusher
+    const e = blockerEdges(line, rush, false, on);
+    expect(e).toHaveLength(5);
+    expect(edgeSign(e[BLOCKER_OF[2]])).toBe(-1);
+    expect(edgeSign(e[CENTRE])).toBe(-1); // the centre's matchup is against him too
+    expect(edgeSign(e[BLOCKER_OF[0]])).toBe(0);
+  });
+});
 
 describe('balance: the line', () => {
   it('pocket: an awful line is sacked by ~2 s, an average one holds to ~2.5 s, a great one past 3 s', () => {
