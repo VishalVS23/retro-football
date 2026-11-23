@@ -381,9 +381,8 @@ export class FieldScene extends Phaser.Scene {
     // Keyboard: SPACE while aiming switches normal/bullet (a mouse has no second thumb).
     // SPACE also kicks when the kick meter is up.
     this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE).on('down', () => (this.state === 'kickAim' ? this.kick() : this.toggleBullet()));
-    // D while running: dive (QB: slide), like a forward flick on the phone.
-    this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.D).on('down', () => this.goDown());
-    // Arrow keys move the ball carrier: hold Up/Down = steer, quick tap = juke, Right = dive / slide.
+    // Arrow keys or WASD move the ball carrier: hold Up/Down (W/S) = steer, quick tap = juke,
+    // Right (D) = dive / slide, like a forward flick on the phone.
     // Plain window listeners (not Phaser keys) so arrows still work on the ⚙ panel's sliders.
     const onKeyDown = (e: KeyboardEvent) => this.onArrowDown(e);
     const onKeyUp = (e: KeyboardEvent) => this.onArrowUp(e);
@@ -573,9 +572,18 @@ export class FieldScene extends Phaser.Scene {
     return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement;
   }
 
+  /** Arrow keys and WASD (by key position, so it works on any keyboard layout). */
+  private static moveKey(e: KeyboardEvent): 'up' | 'down' | 'right' | null {
+    if (e.ctrlKey || e.metaKey || e.altKey) return null;
+    if (e.key === 'ArrowUp' || e.code === 'KeyW') return 'up';
+    if (e.key === 'ArrowDown' || e.code === 'KeyS') return 'down';
+    if (e.key === 'ArrowRight' || e.code === 'KeyD') return 'right';
+    return null;
+  }
+
   private onArrowDown(e: KeyboardEvent) {
     if (FieldScene.typingInPanel()) return;
-    const key = e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : e.key === 'ArrowRight' ? 'right' : null;
+    const key = FieldScene.moveKey(e);
     if (!key) return;
     e.preventDefault(); // no page scrolling
     if (e.repeat) return;
@@ -588,8 +596,8 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private onArrowUp(e: KeyboardEvent) {
-    const key = e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : null;
-    if (!key) return;
+    const key = FieldScene.moveKey(e);
+    if (key !== 'up' && key !== 'down') return;
     const pressed = this.arrowDown[key];
     this.arrowDown[key] = null;
     if (pressed === null || this.state !== 'run') return;
