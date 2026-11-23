@@ -72,7 +72,8 @@ function okClock(c: unknown): c is ClockState {
     isBool(c.running) &&
     isInt(c.timeouts, 0) &&
     isBool(c.warned) &&
-    (c.ot === undefined || isInt(c.ot, 0))
+    (c.ot === undefined || isInt(c.ot, 0)) &&
+    (c.oppTimeouts === undefined || isInt(c.oppTimeouts, 0))
   );
 }
 

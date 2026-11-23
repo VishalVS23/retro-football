@@ -11,6 +11,8 @@ import { coachTip } from './fourthDown';
 import { fieldGoalDistance } from './kicking';
 import { TOTAL_LENGTH } from './field';
 import type { Rng } from './rng';
+import { NEUTRAL_MODS, type DriveMods } from './driveRatings';
+import { oddsShift } from './ratings';
 
 export interface OppDriveRules {
   /** 1 = average offense. Scales every gain (later: their team ratings). */
@@ -65,10 +67,15 @@ export interface OppDriveRules {
   /** In Q2 with this many seconds or fewer left and further than `halfKneelYards` from our goal: kneel out the half. */
   halfKneelTime: number;
   halfKneelYards: number;
+  /** Two scores behind in Q4 (down by this many or more): more passes, more deep shots (and more picks). */
+  riskMargin: number;
+  /** ...doublings of the big-pass-play odds and of the interception odds while taking risks. */
+  riskBigPlaySteps: number;
+  riskPickSteps: number;
 }
 
 /** How they managed the clock on this drive (shown on the summary). */
-export type OppDriveNote = 'hurryUp' | 'runClock' | 'kneel' | null;
+export type OppDriveNote = 'hurryUp' | 'runClock' | 'kneel' | 'risky' | null;
 
 export type OppDriveResult = 'touchdown' | 'fieldGoal' | 'missedFieldGoal' | 'punt' | 'interception' | 'fumble' | 'downs' | 'endOfHalf';
 
@@ -95,6 +102,8 @@ export interface OppDrive {
   note: OppDriveNote;
   /** Box-score numbers for the end-of-game screen (gains count up to the goal line; sacks count against passing). */
   stats: OppDriveStats;
+  /** Timeouts called during the drive: by the offense (hurry-up) and by the defense (stopping a team running the clock). */
+  timeoutsUsed: { offense: number; defense: number };
 }
 
 export interface OppDriveStats {
@@ -118,6 +127,9 @@ export interface OppDriveSituation {
    * and after a touchdown they kick, go for 2, or need no try at all, depending on the score.
    */
   overtime?: boolean;
+  /** Timeouts the offense / the defense may use this drive (left out = none). */
+  offenseTimeouts?: number;
+  defenseTimeouts?: number;
 }
 
 /** After a score the other side starts at its 25 (no kickoffs yet: always a touchback). */
@@ -137,15 +149,19 @@ function halfSecondsLeft(sit: OppDriveSituation) {
 }
 
 /** Make chance of a field goal of `distance` yards. */
-export function oppFieldGoalChance(distance: number, r: OppDriveRules): number {
-  if (distance > r.fgRangeYards) return 0;
-  if (distance <= r.fgSureYards) return r.fgSureChance;
-  const u = (distance - r.fgSureYards) / Math.max(1, r.fgRangeYards - r.fgSureYards);
-  return r.fgSureChance + (r.fgLongChance - r.fgSureChance) * u;
+export function oppFieldGoalChance(distance: number, r: OppDriveRules, mods: DriveMods = NEUTRAL_MODS): number {
+  const range = r.fgRangeYards + mods.fgRangeYards;
+  if (distance > range) return 0;
+  if (distance <= r.fgSureYards) return oddsShift(r.fgSureChance, mods.fgSteps);
+  const u = (distance - r.fgSureYards) / Math.max(1, range - r.fgSureYards);
+  return oddsShift(r.fgSureChance + (r.fgLongChance - r.fgSureChance) * u, mods.fgSteps);
 }
 
-/** One opponent drive from `startX` (our coordinates). */
-export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppDriveRules, rng: Rng): OppDrive {
+/**
+ * One opponent drive from `startX` (our coordinates). `mods` = their offense vs our defense
+ * (driveRatings.ts); left out = an average matchup.
+ */
+export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppDriveRules, rng: Rng, mods: DriveMods = NEUTRAL_MODS): OppDrive {
   const startT = clampSpot(toT(startX));
   let t = startT;
   let down = 1;
@@ -155,6 +171,9 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   let bigPlay: OppDrive['bigPlay'] = null;
   let note: OppDriveNote = null;
   const stats: OppDriveStats = { passYards: 0, rushYards: 0, firstDowns: 0, sacks: 0 };
+  const timeoutsUsed = { offense: 0, defense: 0 };
+  let offTimeouts = Math.max(0, sit.offenseTimeouts ?? 0);
+  let defTimeouts = Math.max(0, sit.defenseTimeouts ?? 0);
   const ot = !!sit.overtime;
   const halfLeft = ot ? Infinity : halfSecondsLeft(sit);
   const strength = Math.max(0.1, r.strength);
@@ -180,6 +199,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     bigPlay,
     note,
     stats: { ...stats },
+    timeoutsUsed: { ...timeoutsUsed },
     ...(tryKind ? { tryKind } : {}),
   });
   // Our ball after they give it up at their-frame spot `t2` (in our end zone = touchback at our 20).
@@ -189,7 +209,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   const kickFieldGoal = () => {
     plays++;
     seconds += r.incompleteSeconds;
-    if (rng.chance(oppFieldGoalChance(fieldGoalDistance(t), r))) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
+    if (rng.chance(oppFieldGoalChance(fieldGoalDistance(t), r, mods))) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
     // Missed: our ball at the spot of the kick, or our 20 if that's further out.
     return done('missedFieldGoal', t, Math.min(t - 7, OPP_GOAL_X - 20));
   };
@@ -199,7 +219,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     const clock = now();
     const left = halfLeft - seconds; // seconds left in the half (or the game)
     const fgDist = fieldGoalDistance(t);
-    const inRange = fgDist <= r.fgRangeYards;
+    const inRange = fgDist <= r.fgRangeYards + mods.fgRangeYards;
 
     // Take a knee: ahead in Q4 with enough kneel-downs left to run out the game, or nothing doing at the end of Q2.
     const kneelsLeft = 4 - down;
@@ -223,44 +243,60 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       if (tip?.choice === 'punt') {
         plays++;
         seconds += r.incompleteSeconds;
-        return done('punt', t, ourBallAt(t + rng.range(r.puntNetMinYards, r.puntNetMaxYards)));
+        return done('punt', t, ourBallAt(t + rng.range(r.puntNetMinYards, r.puntNetMaxYards) + mods.puntNetYards));
       }
     }
 
     // A play. Behind late: hurry-up (and the two-minute drill before halftime). Ahead in Q4: run the clock.
     const hurry = !ot && (clock.quarter === 4 && margin < 0 && clock.timeLeft <= r.hurryTime) || (clock.quarter === 2 && clock.timeLeft <= r.halfHurryTime);
     const milk = !ot && clock.quarter === 4 && margin > 0;
+    // Two scores down in Q4: more passes and deeper shots (more big plays, more picks).
+    const risky = !ot && clock.quarter === 4 && margin <= -r.riskMargin;
     if (hurry) note = 'hurryUp';
     else if (milk) note = 'runClock';
+    else if (risky) note = 'risky';
     const playSeconds = hurry ? r.hurryPlaySeconds : milk ? r.milkPlaySeconds : r.playSeconds;
+    const bigPassSteps = mods.bigPassSteps + (risky ? r.riskBigPlaySteps : 0);
+    const pickSteps = mods.pickSteps + (risky ? r.riskPickSteps : 0);
     plays++;
-    const run = rng.chance(hurry ? r.hurryRunShare : milk ? r.milkRunShare : r.runShare);
+    const run = rng.chance(hurry || risky ? r.hurryRunShare : milk ? r.milkRunShare : r.runShare);
     let gain: number;
     let stops = false;
     if (run) {
-      gain = rng.range(-r.runLossYards, r.runMaxYards) * strength;
-      if (rng.chance(r.bigRunChance)) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
-      if (rng.chance(r.fumbleChance)) {
+      gain = rng.range(-r.runLossYards, r.runMaxYards) * strength * mods.runYards;
+      if (rng.chance(oddsShift(r.bigRunChance, mods.bigRunSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
+      if (rng.chance(r.fumbleChance * mods.fumbleRatio)) {
         seconds += playSeconds;
         return done('fumble', t, ourBallAt(t + Math.max(0, gain)));
       }
-    } else if (rng.chance(r.interceptionChance)) {
+    } else if (rng.chance(oddsShift(r.interceptionChance, pickSteps))) {
       seconds += r.incompleteSeconds;
       // Picked off somewhere downfield.
       return done('interception', t, ourBallAt(t + rng.range(5, 20)));
-    } else if (rng.chance(r.sackChance)) {
+    } else if (rng.chance(oddsShift(r.sackChance, mods.sackSteps))) {
       gain = -rng.range(r.sackMinYards, r.sackMaxYards);
       stats.sacks++;
-    } else if (rng.chance(r.incompleteChance)) {
+    } else if (rng.chance(oddsShift(r.incompleteChance, -mods.completionSteps))) {
       gain = 0;
       stops = true;
     } else {
-      gain = rng.range(r.passMinYards, r.passMaxYards) * strength;
-      if (rng.chance(r.bigPassChance)) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
+      gain = rng.range(r.passMinYards, r.passMaxYards) * strength * mods.passYards;
+      if (rng.chance(oddsShift(r.bigPassChance, bigPassSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance)) {
         seconds += playSeconds;
         return done('fumble', t, ourBallAt(t + gain));
       }
+    }
+    // Clock still running after the play: the side that wants it stopped may call a timeout
+    // (the offense in its hurry-up, the defense when they're running the clock on it).
+    if (!stops && hurry && offTimeouts > 0) {
+      offTimeouts--;
+      timeoutsUsed.offense++;
+      stops = true;
+    } else if (!stops && milk && defTimeouts > 0) {
+      defTimeouts--;
+      timeoutsUsed.defense++;
+      stops = true;
     }
     seconds += stops ? r.incompleteSeconds : playSeconds;
     const counted = Math.round(Math.min(gain, OPP_GOAL_X - t)); // a gain only counts up to the goal line

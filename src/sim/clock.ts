@@ -31,6 +31,8 @@ export interface ClockState {
   running: boolean;
   /** Our timeouts left this half. */
   timeouts: number;
+  /** The CPU's timeouts left this half (3g-A; missing = a full set, e.g. in a game saved before 3g). */
+  oppTimeouts?: number;
   /** The warning has already been given this quarter. */
   warned: boolean;
   /** Overtime period (1 = OT, 2 = 2OT...); 0 or missing = regulation. Overtime is untimed. */
@@ -42,6 +44,11 @@ export type ClockEvent = 'warning' | 'endQuarter' | 'halftime' | 'final' | null;
 
 export function newClock(r: ClockRules): ClockState {
   return { quarter: 1, timeLeft: r.quarterLength, running: false, timeouts: timeoutsPerHalf(r), warned: false };
+}
+
+/** The CPU's timeouts left this half. */
+export function oppTimeoutsLeft(c: ClockState, r: ClockRules): number {
+  return c.oppTimeouts ?? timeoutsPerHalf(r);
 }
 
 function timeoutsPerHalf(r: ClockRules) {
@@ -126,6 +133,7 @@ function endOfQuarter(c: ClockState, r: ClockRules): { clock: ClockState; event:
       timeLeft: r.quarterLength,
       running: false,
       timeouts: halftime ? timeoutsPerHalf(r) : c.timeouts,
+      oppTimeouts: halftime ? timeoutsPerHalf(r) : oppTimeoutsLeft(c, r),
       warned: false,
     },
     event: halftime ? 'halftime' : 'endQuarter',

@@ -486,6 +486,11 @@ export const feel = {
     /** End of Q2 with this many seconds or fewer left and further than halfKneelYards from our goal: they kneel out the half. */
     halfKneelTime: 20,
     halfKneelYards: 60,
+    /** Two scores down in Q4 (by this many or more): more passes, deeper shots. */
+    riskMargin: 9,
+    /** ...doublings of the big-pass odds and of the interception odds while taking risks. */
+    riskBigPlaySteps: 0.6,
+    riskPickSteps: 0.6,
   },
   clock: {
     /** Game seconds per quarter (user's choice: 2 minutes). */
@@ -584,6 +589,27 @@ export const feel = {
     puntYardsPerPoint: 1.5,
     /** Punt green zone width per kick-accuracy point (fewer shanks). */
     puntGreenPerPoint: 0.05,
+    /**
+     * Simulated drives (3g-A): unit matchups nudge the CPU drive dice, against the average starters.
+     * Every unit edge is scaled by simEdgeScale (the units add up over a whole game), then capped at simEdgeCap points (so upsets stay possible).
+     */
+    simEdgeScale: 0.4,
+    simEdgeCap: 2.5,
+    /** Completions: doublings of the catch odds per point of passing edge (QB accuracy + receivers vs coverage). */
+    simCompletionOddsPerPoint: 0.16,
+    /** Yards per catch / per run: share per point of passing / running edge. */
+    simPassYardsPerPoint: 0.07,
+    simRunYardsPerPoint: 0.11,
+    /** Big plays: doublings of the odds per point of edge. */
+    simBigPlayOddsPerPoint: 0.15,
+    /** Interceptions: halvings of the odds per point of QB decisions over the defenders' ball skills. */
+    simPickOddsPerPoint: 0.12,
+    /** Sacks: halvings of the odds per point of pass-blocking edge. */
+    simSackOddsPerPoint: 0.15,
+    /** Field goals: doublings of the make odds per point of kick accuracy. */
+    simKickOddsPerPoint: 0.15,
+    /** Share of the punter's extra distance that survives the return. */
+    simPuntNetShare: 0.7,
   },
   juice: {
     hitPauseTime: 0.06,

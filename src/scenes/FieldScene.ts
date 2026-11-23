@@ -48,6 +48,8 @@ import { formation } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
+import { NEUTRAL_MODS } from '../sim/driveRatings';
+import { matchupMods, simTeam } from '../league/simTeams';
 import {
   HOLD_YARDS,
   OPP_GOAL_X,
@@ -94,6 +96,7 @@ import {
   clockText,
   endPlay,
   newClock,
+  oppTimeoutsLeft,
   playStopsClock,
   runOff,
   tickPlay,
@@ -1715,6 +1718,13 @@ export class FieldScene extends Phaser.Scene {
     this.resetPlay();
   }
 
+  /** Their offense (and kicker / punter) vs our defense: the nudges on a CPU drive's dice (3g-A). */
+  private cpuDriveMods() {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return NEUTRAL_MODS;
+    return matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel)[1];
+  }
+
   /**
    * A simulated CPU drive: dice-sim it, take its time off the clock, then show the summary.
    * CONTINUE moves on: any clock break (END OF Q1 / HALFTIME / FINAL), then our play.
@@ -1724,12 +1734,21 @@ export class FieldScene extends Phaser.Scene {
     const c = this.clock;
     const drive = simulateOppDrive(
       startX,
-      { quarter: c.quarter, timeLeft: c.timeLeft, quarterLength: feel.clock.quarterLength, us: this.match.us, them: this.match.them },
+      {
+        quarter: c.quarter,
+        timeLeft: c.timeLeft,
+        quarterLength: feel.clock.quarterLength,
+        us: this.match.us,
+        them: this.match.them,
+        offenseTimeouts: oppTimeoutsLeft(c, feel.clock), // the CPU may use its own timeouts (never yours)
+      },
       feel.oppDrive,
       getRngOrFallback(),
+      this.cpuDriveMods(),
     );
     const lastQuarter = c.quarter === 4;
-    const r = runOff(c, drive.seconds, feel.clock);
+    const used = { ...c, oppTimeouts: oppTimeoutsLeft(c, feel.clock) - drive.timeoutsUsed.offense };
+    const r = runOff(used, drive.seconds, feel.clock);
     this.setClock(r.clock, r.event);
     this.pendingBreak = r.event;
     const after = applyOppDrive(this.match, drive);
@@ -1825,7 +1844,7 @@ export class FieldScene extends Phaser.Scene {
     this.state = 'oppDrive';
     const m = this.match;
     const sit = { quarter: 5, timeLeft: 1e6, quarterLength: feel.clock.quarterLength, us: m.us, them: m.them, overtime: true };
-    const drive = simulateOppDrive(OWN_GOAL_LINE_X + 25, sit, feel.oppDrive, rng);
+    const drive = simulateOppDrive(OWN_GOAL_LINE_X + 25, sit, feel.oppDrive, rng, this.cpuDriveMods());
     this.stats = addPoints(recordTheirDrive(this.stats, drive), this.statPeriod(), 0, drive.points);
     this.match = { ...m, them: m.them + drive.points };
     this.updateScoreboard();

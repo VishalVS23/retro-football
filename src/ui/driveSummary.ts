@@ -76,7 +76,7 @@ export function openDriveSummary(o: DriveSummaryOptions) {
   const lo = Math.min(d.startX, d.endX);
   const hi = Math.max(d.startX, d.endX);
   const notes = [
-    d.note ? { hurryUp: 'HURRY-UP OFFENSE', runClock: 'RUNNING DOWN THE CLOCK', kneel: 'TOOK A KNEE' }[d.note] : '',
+    d.note ? { hurryUp: 'HURRY-UP OFFENSE', runClock: 'RUNNING DOWN THE CLOCK', kneel: 'TOOK A KNEE', risky: 'TAKING SHOTS DOWNFIELD' }[d.note] : '',
     d.bigPlay ? `BIG PLAY: ${d.bigPlay.yards} YD ${d.bigPlay.kind === 'run' ? 'RUN' : 'PASS'}` : '',
   ].filter(Boolean);
   const big = notes.length ? `<div class="ds-big">${notes.join('<br>')}</div>` : '';

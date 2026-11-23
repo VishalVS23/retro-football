@@ -56,6 +56,7 @@ describe('their drives', () => {
       bigPlay: null,
       note: null,
       stats: { passYards: 20, rushYards: 5, firstDowns: 2, sacks: 1 },
+      timeoutsUsed: { offense: 0, defense: 0 },
     });
     let g = newGameStats();
     g = recordTheirDrive(g, d('punt', 6));
