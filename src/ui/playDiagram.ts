@@ -144,16 +144,19 @@ function lineRing(p: Vec, edge: number): string {
   return `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="1.2" fill="none" stroke="${edge > 0 ? C.edgeUs : C.edgeThem}" stroke-width="0.38"/>`;
 }
 
-/** Where a player's label goes: under him, over him, or to his left (the slot and QB: the line is right below them). */
-type LabelSpot = 'below' | 'above' | 'left';
+/**
+ * Where a player's label goes: under him, over him, or to his left (the slot and QB: the line is
+ * right below them). 'leftFar' = left of his matchup marker too (the slot: markers sit at x - 2.1).
+ */
+type LabelSpot = 'below' | 'above' | 'left' | 'leftFar';
 
 const LINEMAN_R = 0.8;
 
 function player(p: Vec, color: string, label: string | null, spot: LabelSpot = 'below', r = 0.95): string {
   let s = `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="${r}" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
   if (label) {
-    const left = spot === 'left';
-    const x = left ? p.x - r - 0.4 : p.x;
+    const left = spot === 'left' || spot === 'leftFar';
+    const x = spot === 'leftFar' ? p.x - 3.3 : left ? p.x - r - 0.4 : p.x;
     const y = left ? p.y + 0.4 : spot === 'above' ? p.y - 1.5 : p.y + 2.5;
     s += `<text x="${n(x)}" y="${n(y)}" font-size="1.05" text-anchor="${left ? 'end' : 'middle'}" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
   }
@@ -222,7 +225,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   }
   f.block.forEach((b) => (s += player(b, C.offense, null, 'below', LINEMAN_R)));
   const nm = v.names;
-  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null, i === SLOT ? 'left' : 'below')));
+  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null, i === SLOT ? 'leftFar' : 'below')));
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null, 'left'); // the backfield is too crowded for his name
   const arrows = v.detailed && v.defense && v.defense.arrows !== false;

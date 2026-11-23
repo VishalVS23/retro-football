@@ -69,7 +69,7 @@ export function closePlayCall() {
 // Diagram windows, in field yards. Across the field we show the band the routes use; along the
 // field, as many yards as fit the box's shape, starting a few yards behind the line of scrimmage.
 // Minis use a fixed length instead, centred in the card (no empty field on the right).
-const BIG: DiagramWindow = { y0: 4.5, h: 45, behind: 10 }; // tall enough for Out routes on both sides
+const BIG: DiagramWindow = { y0: 4.5, h: 45, behind: 14 }; // tall enough for Out routes on both sides; 14 yd behind fits the slot's name left of him (3h-a)
 const MINI: DiagramWindow = { y0: 10, h: 34, behind: 4, w: 42 };
 interface DiagramWindow {
   y0: number;
