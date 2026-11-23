@@ -3,11 +3,13 @@
  *
  * A simulated drive (oppDrive.ts) rolls dice per snap. Here the two teams' players on the field
  * turn into small nudges on those dice, one per unit matchup:
- * - passing: QB accuracy + receivers (speed, route running, hands) vs corners and safety (speed,
- *   coverage, ball skills) = completions, yards per catch, big pass plays;
- * - picks: QB decisions vs the defenders' ball skills;
- * - sacks: our two blockers vs their two rushers (the same line edge as the arcade game, 3e-b);
- * - running: RB (speed, agility, strength) + run blocking vs tackling = yards per run, breakaways;
+ * - passing: QB accuracy + receivers (three WRs, the TE at half weight: speed, route running, hands)
+ *   vs coverage (corners on the WRs, LB2 on the TE, both safeties over the top) = completions,
+ *   yards per catch, big pass plays;
+ * - picks: QB decisions vs the corners' and safeties' ball skills;
+ * - sacks: our five blockers vs their four rushers (the same line edge as the arcade game, 3e-b / 3h-a);
+ * - running: RB (speed, agility, strength) + run blocking (the line, the TE a little) vs tackling
+ *   (corners, both linebackers, both safeties) = yards per run, breakaways;
  * - fumbles: the RB's ball security; field goals and punts: the kicker's and punter's ratings (3f).
  *
  * ANCHOR: every rating counts against the average starter at that position (as in 3e / 3f), so two
@@ -30,9 +32,11 @@ export const SIM_NORMS: Partial<Record<Position, Partial<Record<AttributeKey, nu
   QB: { shortAccuracy: 13.1, mediumAccuracy: 13.2, deepAccuracy: 12.6, decisions: 11.3 },
   WR: { speed: 12.6, routeRunning: 12.9, hands: 12.9 },
   RB: { speed: 12.6, agility: 12.6, strength: 12.2, ballSecurity: 12.7 },
+  TE: { speed: 12.0, routeRunning: 12.1, hands: 12.3, runBlocking: 12.5 },
   CB: { speed: 12.6, manCoverage: 13.0, ballSkills: 12.1, tackling: 11.6 },
-  S: { speed: 13.0, zoneCoverage: 13.7, ballSkills: 12.9, tackling: 13.2 },
-  LB: { tackling: 13.8 },
+  // Both safeties and both linebackers (3h-d), so these are the S1 + S2 and LB1 + LB2 averages.
+  S: { speed: 12.4, zoneCoverage: 13.1, ballSkills: 12.3, tackling: 12.7 },
+  LB: { manCoverage: 12.2, tackling: 13.3 },
 };
 
 export interface SimRatingParams extends KickRatingParams {
@@ -55,6 +59,10 @@ export interface SimRatingParams extends KickRatingParams {
   simKickOddsPerPoint: number;
   /** Share of the punter's extra distance that survives the return (net punt yards). */
   simPuntNetShare: number;
+  /** The TE's weight as a receiver next to the three WRs (1 = a whole WR), and LB2's next to the corners (3h-d). */
+  simTeWeight: number;
+  /** Share of the run blocking that is the TE's (the rest: the line). */
+  simTeBlockShare: number;
   /** Every this many ball-security points above average halves the RB's fumbles. */
   securityHalvingPoints: number;
 }
@@ -110,20 +118,34 @@ export interface SimOffense {
 /** The unit edges, in rating points (+ = the offense's favour), each capped. */
 export function unitEdges(o: OffenseLineup, d: DefenseLineup, r: SimRatingParams) {
   const cap = (x: number) => Math.max(-r.simEdgeCap, Math.min(r.simEdgeCap, x * r.simEdgeScale));
-  const [wr1, wr3, wr2, rb] = o.skill;
+  const [wr1, wr3, wr2, rb, te] = o.skill;
   const corners = d.cover.slice(0, 3);
+  const lbs = d.cover.slice(3, 5);
+  const safeties = [d.safety, d.safety2];
   const qbAccuracy = edgeOf(o.qb, 'QB', ['shortAccuracy', 'mediumAccuracy', 'deepAccuracy'], r);
-  const receivers = mean([wr1, wr3, wr2].map((w) => edgeOf(w, 'WR', ['speed', 'routeRunning', 'hands'], r)));
-  const cover = 0.75 * mean(corners.map((c) => edgeOf(c, 'CB', ['speed', 'manCoverage', 'ballSkills'], r))) + 0.25 * edgeOf(d.safety, 'S', ['speed', 'zoneCoverage', 'ballSkills'], r);
-  const ballSkills = 0.75 * mean(corners.map((c) => edgeOf(c, 'CB', ['ballSkills'], r))) + 0.25 * edgeOf(d.safety, 'S', ['ballSkills'], r);
+  // The TE is a receiver at half a WR's weight (3h-d); LB2 covers him, the corners the WRs.
+  const tw = r.simTeWeight;
+  const wrEdge = mean([wr1, wr3, wr2].map((w) => edgeOf(w, 'WR', ['speed', 'routeRunning', 'hands'], r)));
+  const receivers = (3 * wrEdge + tw * edgeOf(te, 'TE', ['speed', 'routeRunning', 'hands'], r)) / (3 + tw);
+  const cornerCover = mean(corners.map((c) => edgeOf(c, 'CB', ['speed', 'manCoverage', 'ballSkills'], r)));
+  const man = (3 * cornerCover + tw * edgeOf(d.cover[4], 'LB', ['speed', 'manCoverage'], r)) / (3 + tw);
+  const deep = mean(safeties.map((s) => edgeOf(s, 'S', ['speed', 'zoneCoverage', 'ballSkills'], r)));
+  const cover = 0.75 * man + 0.25 * deep;
+  const ballSkills = 0.75 * mean(corners.map((c) => edgeOf(c, 'CB', ['ballSkills'], r))) + 0.25 * mean(safeties.map((s) => edgeOf(s, 'S', ['ballSkills'], r)));
   const line = (run: boolean) => (r.enabled ? mean(pairEdges(o.line, d.rush, run, r)) : 0);
-  const tacklers = mean([edgeOf(d.cover[3], 'LB', ['tackling'], r), edgeOf(d.safety, 'S', ['tackling'], r), mean(corners.map((c) => edgeOf(c, 'CB', ['tackling'], r)))]);
+  // On runs the TE helps the edge a little.
+  const runLine = (1 - r.simTeBlockShare) * line(true) + r.simTeBlockShare * edgeOf(te, 'TE', ['runBlocking'], r);
+  const tacklers = mean([
+    mean(lbs.map((l) => edgeOf(l, 'LB', ['tackling'], r))),
+    mean(safeties.map((s) => edgeOf(s, 'S', ['tackling'], r))),
+    mean(corners.map((c) => edgeOf(c, 'CB', ['tackling'], r))),
+  ]);
   const runner = edgeOf(rb, 'RB', ['speed', 'agility', 'strength'], r);
   return {
     pass: cap(0.5 * qbAccuracy + 0.5 * receivers - cover),
     picks: cap(edgeOf(o.qb, 'QB', ['decisions'], r) - ballSkills),
     passBlock: cap(line(false)),
-    run: cap(0.5 * runner + 0.5 * line(true) - tacklers),
+    run: cap(0.5 * runner + 0.5 * runLine - tacklers),
     security: edgeOf(rb, 'RB', ['ballSecurity'], r),
   };
 }

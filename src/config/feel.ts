@@ -667,6 +667,10 @@ export const feel = {
     simKickOddsPerPoint: 0.15,
     /** Share of the punter's extra distance that survives the return. */
     simPuntNetShare: 0.7,
+    /** Simulated drives (3h-d): the TE counts as a receiver at this share of a WR (LB2 covering him likewise next to the corners)... */
+    simTeWeight: 0.5,
+    /** ...and as this share of the run blocking (the line the rest). */
+    simTeBlockShare: 0.15,
   },
   juice: {
     hitPauseTime: 0.06,

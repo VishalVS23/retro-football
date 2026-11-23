@@ -1,7 +1,7 @@
 /**
  * The players a simulated game needs from each team (3g-A), and the drive nudges for a matchup.
- * Pure logic. Only these players count for now (the same ones as on the arcade field); 11-on-11
- * (step 3h) adds the tight end and the rest through the lineup lists.
+ * Pure logic. The same 11-on-11 as the arcade field (3h-d): QB, RB, TE, 3 WR, 5 OL vs 3 CB, 2 LB,
+ * 2 S, 4 DL, plus the kicker and punter.
  */
 import type { League } from './league';
 import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type KickingUnit, type OffenseLineup } from './lineup';

@@ -34,7 +34,7 @@ const ranked = (lg: League) => lg.teams.map((t) => ({ id: t.id, r: teamRatings(l
 
 describe('drive ratings', () => {
   it('SIM_NORMS matches the starters the generator makes (within a point)', () => {
-    const take: Partial<Record<Position, number>> = { QB: 1, RB: 1, WR: 3, CB: 3, S: 1, LB: 1 };
+    const take: Partial<Record<Position, number>> = { QB: 1, RB: 1, TE: 1, WR: 3, CB: 3, S: 2, LB: 2 };
     for (const [pos, norms] of Object.entries(SIM_NORMS) as [Position, Record<string, number>][]) {
       for (const [key, norm] of Object.entries(norms)) {
         const vals = leagues.flatMap((lg) => lg.teams.flatMap((t) => depthChart(lg, t.id)[pos].slice(0, take[pos]).map((s) => (s.player.attributes as Record<string, number>)[key])));
@@ -62,6 +62,33 @@ describe('drive ratings', () => {
     const [aMods, bMods] = matchupMods(best, worst, feel);
     expect(aMods.completionSteps).toBeGreaterThan(bMods.completionSteps);
     expect(aMods.runYards).toBeGreaterThan(bMods.runYards);
+  });
+
+  it('11-on-11 (3h-d): the TE, LB2 and S2 count in the simmed drives', () => {
+    const lg = leagues[0];
+    const mid = ranked(lg)[16].id;
+    const t = simTeam(lg, mid);
+    const opp = simTeam(lg, ranked(lg)[15].id);
+    const boost = (p: (typeof t.offense.skill)[number], keys: string[], v: number) => {
+      const q = { ...p, attributes: { ...p.attributes } };
+      for (const k of keys) (q.attributes as Record<string, number>)[k] = v;
+      return q;
+    };
+    const plain = unitEdges(t.offense, opp.defense, on);
+    // A star TE: better passing and running.
+    const te = { ...t.offense, skill: [...t.offense.skill] as typeof t.offense.skill };
+    te.skill[4] = boost(te.skill[4], ['speed', 'routeRunning', 'hands', 'runBlocking'], 19);
+    const withTe = unitEdges(te, opp.defense, on);
+    expect(withTe.pass).toBeGreaterThan(plain.pass);
+    expect(withTe.run).toBeGreaterThan(plain.run);
+    // Their star LB2 and S2: worse passing (and running) for us.
+    const def = { ...opp.defense, cover: [...opp.defense.cover] as typeof opp.defense.cover };
+    def.cover[4] = boost(def.cover[4], ['speed', 'manCoverage', 'tackling'], 19);
+    def.safety2 = boost(def.safety2, ['speed', 'zoneCoverage', 'ballSkills', 'tackling'], 19);
+    const vsStars = unitEdges(t.offense, def, on);
+    expect(vsStars.pass).toBeLessThan(plain.pass);
+    expect(vsStars.picks).toBeLessThan(plain.picks);
+    expect(vsStars.run).toBeLessThan(plain.run);
   });
 
   it('a better offense scores more per drive; no nudges = exactly the old dice', () => {
