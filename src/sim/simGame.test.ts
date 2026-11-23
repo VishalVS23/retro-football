@@ -215,3 +215,82 @@ describe('carrying a game on from any moment (SIM TO END OF GAME)', () => {
     }
   });
 });
+
+describe('stopping early (SIM TO END OF QUARTER / SIM THIS DRIVE)', () => {
+  const rules = { mods: [NEUTRAL_MODS, NEUTRAL_MODS] as [DriveMods, DriveMods], rules: feel.oppDrive, clock: feel.clock };
+  const q = (quarter: 1 | 2 | 3 | 4, timeLeft: number) => ({ ...newClock(feel.clock), quarter, timeLeft });
+  const at = (over: Partial<SimGameState>): SimGameState => ({ ...freshGameState(0, feel.clock), ...over });
+
+  it('a drive paused at 0:00 plays exactly like the full drive up to that point', () => {
+    const sit = { quarter: 1, timeLeft: 40, quarterLength: 120, us: 0, them: 0 };
+    for (let s = 1; s <= 400; s++) {
+      const full = simulateOppDrive(85, sit, feel.oppDrive, createRng(s));
+      const paused = simulateOppDrive(85, { ...sit, stopAfterSeconds: 40 }, feel.oppDrive, createRng(s));
+      if (full.seconds <= 40 && full.result !== 'endOfHalf') expect(paused).toEqual(full);
+      else if (paused.result !== 'quarterEnd') {
+        // The last play started before 0:00 and ended the drive: same drive, the clock stops at 0:00.
+        expect({ ...paused, seconds: full.seconds }).toEqual(full);
+        expect(paused.seconds).toBe(40);
+      } else {
+        expect(paused.seconds).toBe(40);
+        expect(paused.series!.down).toBeGreaterThanOrEqual(1);
+        expect(paused.points).toBe(0);
+      }
+    }
+  });
+
+  it('end of Q1: stops at 0:00 exactly; a drive still going carries on at the same down in Q2', () => {
+    let carried = 0;
+    for (let s = 1; s <= 300; s++) {
+      const r = simulateFrom(at({ clock: q(1, 90), startT: 40, down: 2, firstDownT: 47 }), rules, createRng(s), 'quarter');
+      expect(r.over).toBe(false);
+      expect(r.event).toBe('endQuarter');
+      expect(r.next!.clock.quarter).toBe(2);
+      expect(r.next!.clock.timeLeft).toBe(feel.clock.quarterLength);
+      expect(r.log.every((e) => e.period === 1)).toBe(true);
+      const last = r.log[r.log.length - 1].drive!;
+      if (last.result === 'quarterEnd') {
+        carried++;
+        expect(r.next!.offense).toBe(r.log[r.log.length - 1].side);
+        expect(r.next!.down).toBe(last.series!.down);
+      }
+    }
+    expect(carried).toBeGreaterThan(50);
+  });
+
+  it('end of Q2: halftime, and the CPU gets the second-half kickoff; Q4: the game ends or overtime is next', () => {
+    for (let s = 1; s <= 200; s++) {
+      const half = simulateFrom(at({ clock: q(2, 70), startT: 50 }), rules, createRng(s), 'quarter');
+      expect(half.event).toBe('halftime');
+      expect(half.next!.offense).toBe(1);
+      expect(half.next!.startT).toBe(SIM_START_T);
+      expect(half.next!.timeouts).toEqual([feel.clock.timeoutsPerHalf, feel.clock.timeoutsPerHalf]);
+      const end = simulateFrom(at({ score: [10, 10], clock: q(4, 60), startT: 50 }), rules, createRng(s), 'quarter');
+      if (end.score[0] === end.score[1]) expect(end.toOvertime).toBe(true);
+      else expect(end.over).toBe(true);
+    }
+  });
+
+  it('this drive only: one possession of ours, then the CPU has the ball', () => {
+    for (let s = 1; s <= 300; s++) {
+      const r = simulateFrom(at({ clock: q(3, 100), startT: 45, down: 1, firstDownT: 55 }), rules, createRng(s), 'drive');
+      expect(r.log).toHaveLength(1);
+      expect(r.log[0].side).toBe(0);
+      expect(r.over).toBe(false);
+      expect(r.next!.offense).toBe(1);
+    }
+  });
+
+  it('quarter after quarter adds up to a whole game', () => {
+    for (let s = 1; s <= 100; s++) {
+      const rng = createRng(s);
+      let state: SimGameState | null = freshGameState(0, feel.clock);
+      let r = simulateFrom(state, rules, rng, 'quarter');
+      for (let i = 0; i < 6 && r.next; i++) {
+        state = r.next;
+        r = simulateFrom(state, rules, rng, 'quarter');
+      }
+      expect(r.over || r.toOvertime).toBe(true);
+    }
+  });
+});

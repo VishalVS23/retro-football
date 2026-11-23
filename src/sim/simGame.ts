@@ -67,8 +67,19 @@ export interface SimLogEntry {
   try?: { kind: 'extraPoint' | 'twoPoint'; good: boolean };
 }
 
+/** How far to sim: to the end of the game, to 0:00 of the current quarter, or just the current possession. */
+export type SimStop = 'game' | 'quarter' | 'drive';
+
 export interface SimGameResult {
   score: [number, number];
+  /** The game is finished (always true for 'game'). */
+  over: boolean;
+  /** Stopped before the end: the game as it stands now (null when over, or when overtime is next). */
+  next: SimGameState | null;
+  /** Regulation ended tied and the sim stopped there: overtime comes next (the caller starts it). */
+  toOvertime: boolean;
+  /** The clock break that ended the sim, if any (END OF Q1, HALFTIME, FINAL). */
+  event: ClockEvent;
   /** Overtime periods played (0 = none), counting any played before the sim started. */
   ot: number;
   log: SimLogEntry[];
@@ -90,8 +101,8 @@ export function simulateGame(input: SimGameInput, rng: Rng): SimGameResult {
   return simulateFrom(freshGameState(input.receives, input.clock), input, rng);
 }
 
-/** Carries a game on from `state` to the end. */
-export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng): SimGameResult {
+/** Carries a game on from `state`: to the end, to 0:00 of the current quarter, or for one possession (`stop`). */
+export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng, stop: SimStop = 'game'): SimGameResult {
   const { rules, clock: cr, mods } = input;
   const score: [number, number] = [...state.score];
   const timeouts: [number, number] = [...state.timeouts];
@@ -103,9 +114,24 @@ export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng): Si
   let firstDownT = state.firstDownT;
   let tryPending = !!state.tryPending;
   const period = () => (clock.ot ? 4 + clock.ot : clock.quarter);
+  const startSide = state.offense;
+  /** Where things stand now (for a sim that stops early). */
+  const nowState = (): SimGameState => ({
+    score: [...score],
+    clock: { ...clock },
+    timeouts: [...timeouts],
+    offense,
+    startT,
+    ...(down !== undefined ? { down } : {}),
+    ...(firstDownT !== undefined ? { firstDownT } : {}),
+    receives: state.receives,
+    ...(state.otFirst !== undefined ? { otFirst: state.otFirst } : {}),
+  });
+  const finished = (event: ClockEvent): SimGameResult => ({ score, over: true, next: null, toOvertime: false, event, ot: clock.ot ?? 0, log, clock });
+  const paused = (event: ClockEvent): SimGameResult => ({ score, over: false, next: nowState(), toOvertime: false, event, ot: clock.ot ?? 0, log, clock });
 
   /** One possession from `fromT` (with any mid-series down carried in). */
-  const runDrive = (side: Side, fromT: number): OppDrive => {
+  const runDrive = (side: Side, fromT: number, stopAfterSeconds?: number): OppDrive => {
     const d = other(side);
     const ot = !!clock.ot;
     const drive = simulateOppDrive(
@@ -121,6 +147,7 @@ export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng): Si
         defenseTimeouts: ot ? 0 : timeouts[d],
         ...(down !== undefined ? { startDown: down } : {}),
         ...(firstDownT !== undefined ? { firstDownAtX: TOTAL_LENGTH - firstDownT } : {}),
+        ...(stopAfterSeconds !== undefined ? { stopAfterSeconds } : {}),
       },
       rules,
       rng,
@@ -161,24 +188,39 @@ export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng): Si
           event = r.event;
         }
       } else {
-        const drive = runDrive(offense, startT);
+        // SIM TO END OF QUARTER in Q1 / Q3: a drive pauses at 0:00 and carries on next quarter.
+        const pauseAt = stop === 'quarter' && (clock.quarter === 1 || clock.quarter === 3) ? clock.timeLeft : undefined;
+        const side = offense;
+        const drive = runDrive(side, startT, pauseAt);
         const r = runOff(clock, drive.seconds, cr);
-        // Points belong to the quarter the drive ended in (the half / the game ends at 0:00 of Q2 / Q4).
-        const endQuarter = r.event === 'halftime' ? 2 : r.event === 'final' ? 4 : r.clock.quarter;
-        log.push({ side: offense, period: endQuarter, points: drive.points, drive });
+        // Points belong to the quarter the drive ended in: the next one only if it ran past 0:00 (Q1 into Q2, Q3 into Q4).
+        const carriedOver = r.event === 'endQuarter' && drive.seconds > clock.timeLeft;
+        log.push({ side, period: carriedOver ? r.clock.quarter : clock.quarter, points: drive.points, drive });
         clock = r.clock;
         event = r.event;
-        offense = other(offense);
-        startT = drive.ourStartX;
+        if (drive.result === 'quarterEnd' && drive.series) {
+          // Same side keeps the ball, at the same down and distance (its own frame).
+          startT = TOTAL_LENGTH - drive.endX;
+          down = drive.series.down;
+          firstDownT = TOTAL_LENGTH - drive.series.firstDownX;
+        } else {
+          offense = other(side);
+          startT = drive.ourStartX;
+        }
+        if (stop === 'drive' && side === startSide && event !== 'halftime' && event !== 'final') return paused(event);
       }
       if (event === 'final') break;
       if (event === 'halftime') {
         timeouts[0] = timeouts[1] = cr.timeoutsPerHalf;
         offense = other(state.receives);
         startT = SIM_START_T;
+        down = firstDownT = undefined;
       }
+      if (stop === 'quarter' && (event === 'endQuarter' || event === 'halftime')) return paused(event);
+      if (stop === 'drive' && event === 'halftime') return paused(event);
     }
-    if (score[0] !== score[1]) return { score, ot: 0, log, clock };
+    if (score[0] !== score[1]) return finished('final');
+    if (stop !== 'game') return { score, over: false, next: null, toOvertime: true, event: 'final', ot: 0, log, clock };
     clock = { ...clock, ot: 1, timeLeft: 0, running: false };
     offense = state.otFirst ?? state.receives;
     startT = SIM_OT_START_T;
@@ -209,5 +251,5 @@ export function simulateFrom(state: SimGameState, input: SimRules, rng: Rng): Si
     clock = { ...clock, ot: p + 1 };
     offense = first;
   }
-  return { score, ot: clock.ot ?? 0, log, clock };
+  return finished(null);
 }

@@ -50,7 +50,22 @@ import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
 import { NEUTRAL_MODS } from '../sim/driveRatings';
 import { matchupMods, simTeam } from '../league/simTeams';
-import { simulateFrom } from '../sim/simGame';
+import { simulateFrom, type SimGameState, type SimStop } from '../sim/simGame';
+import { closeSimRecap, openSimRecap, type RecapRow } from '../ui/simRecap';
+import type { OppDriveResult } from '../sim/oppDrive';
+
+/** Recap wording for each simulated drive's result. */
+const SIM_RESULT_TEXT: Record<OppDriveResult, string> = {
+  touchdown: 'TOUCHDOWN',
+  fieldGoal: 'FIELD GOAL',
+  missedFieldGoal: 'MISSED FG',
+  punt: 'PUNT',
+  interception: 'INTERCEPTION',
+  fumble: 'FUMBLE LOST',
+  downs: 'TURNOVER ON DOWNS',
+  endOfHalf: 'END OF HALF',
+  quarterEnd: 'DRIVE GOES ON',
+};
 import {
   HOLD_YARDS,
   OPP_GOAL_X,
@@ -66,6 +81,7 @@ import {
   downText,
   newGame,
   spotText,
+  YARDS_FOR_FIRST_DOWN,
   type DriveEvent,
   type GameState,
   type PlayOutcome,
@@ -1725,40 +1741,111 @@ export class FieldScene extends Phaser.Scene {
     this.resetPlay();
   }
 
-  /**
-   * SIM TO END OF GAME (3g-B): carry the game on from right here (our ball, the down and spot, any
-   * try still to take, overtime) with the drive sim, put every simmed drive in the box score, then
-   * the end screen. Our coach is neutral: the same rules as the CPU's.
-   */
-  private simToEnd() {
-    const l = this.league;
-    if (!l || l.userTeamId === null || this.opponentId === null) return;
+  /** The game right now, for the simulator: our ball on the play calling screen (down, spot, any try to take, overtime). */
+  private simStateNow(): SimGameState {
     const m = this.match;
     const c = this.clock;
-    const result = simulateFrom(
-      {
-        score: [m.us, m.them],
-        clock: c,
-        timeouts: [c.timeouts, oppTimeoutsLeft(c, feel.clock)],
-        offense: 0,
-        startT: m.ballX,
-        ...(m.tryPending ? { tryPending: true } : { down: m.down, firstDownT: m.firstDownX }),
-        receives: 0, // we had the ball first; the CPU gets it to start the second half
-        otFirst: 0, // in overtime we always go first
-        otFirstDone: this.otOursDone,
-      },
-      { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel), rules: feel.oppDrive, clock: feel.clock },
-      getRngOrFallback(),
-    );
+    return {
+      score: [m.us, m.them],
+      clock: c,
+      timeouts: [c.timeouts, oppTimeoutsLeft(c, feel.clock)],
+      offense: 0,
+      startT: m.ballX,
+      ...(m.tryPending ? { tryPending: true } : { down: m.down, firstDownT: m.firstDownX }),
+      receives: 0, // we had the ball first; the CPU gets it to start the second half
+      otFirst: 0, // in overtime we always go first
+      otFirstDone: this.otOursDone,
+    };
+  }
+
+  /** What the SIM button offers right now (3g-B / 3g-C). In overtime or on a try: only the whole game. */
+  private simOptions() {
+    const simple = !!this.clock.ot || this.match.tryPending;
+    return [
+      ...(simple ? [] : [{ id: 'drive', label: 'SIM THIS DRIVE', note: 'THEN BACK TO YOU' }]),
+      ...(simple ? [] : [{ id: 'quarter', label: `SIM TO END OF Q${this.clock.quarter}`, note: 'STOPS AT 0:00' }]),
+      { id: 'game', label: 'SIM TO END OF GAME', note: 'YOUR COACH CALLS THE PLAYS' },
+    ];
+  }
+
+  /**
+   * SIM (3g): carry the game on with the drive sim (our coach is neutral: the same rules as the
+   * CPU's) to the end of the game, to 0:00 of this quarter, or for this possession. Every simmed drive
+   * goes in the box score. A whole game ends on the end screen; otherwise a recap, then play goes on
+   * from wherever the sim stopped (our ball, their drive mid-series, or overtime).
+   */
+  private runSim(stop: SimStop, from: SimGameState = this.simStateNow()) {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return;
+    const result = simulateFrom(from, { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel), rules: feel.oppDrive, clock: feel.clock }, getRngOrFallback(), stop);
     let stats = this.stats;
     for (const e of result.log) {
       if (e.drive) stats = e.side === 0 ? recordOurSimDrive(stats, e.drive) : recordTheirDrive(stats, e.drive);
       stats = addPoints(stats, e.period, e.side === 0 ? e.points : 0, e.side === 1 ? e.points : 0);
     }
     this.stats = stats;
-    this.match = { ...m, us: result.score[0], them: result.score[1], tryPending: false, oppStartX: null };
-    this.clock = result.clock;
-    this.showFinal();
+    this.match = { ...this.match, us: result.score[0], them: result.score[1], tryPending: false, oppStartX: null };
+    this.nextClock = null;
+    this.finishBreak = null;
+    this.pendingBreak = null;
+    const next = result.next;
+    this.clock = next ? { ...next.clock, timeouts: next.timeouts[0], oppTimeouts: next.timeouts[1] } : result.clock;
+    this.updateScoreboard();
+    if (result.over) {
+      this.showFinal();
+      return;
+    }
+    this.state = 'oppDrive'; // nothing on the field reacts while the recap is up
+    this.updateLabel();
+    const title =
+      result.toOvertime
+        ? 'END OF REGULATION'
+        : result.event === 'halftime'
+          ? 'HALFTIME'
+          : stop === 'quarter' && result.event === 'endQuarter'
+            ? `END OF Q${this.clock.quarter - 1}`
+            : 'DRIVE SIMMED';
+    let nextText = 'OVERTIME NEXT';
+    let carryOn = () => this.startOvertime(1);
+    if (next && next.offense === 0) {
+      const x = next.startT;
+      const firstDownX = next.firstDownT ?? Math.min(x + YARDS_FOR_FIRST_DOWN, OPP_GOAL_X);
+      const down = Math.max(1, Math.min(4, next.down ?? 1)) as GameState['down'];
+      this.match = { ...this.match, ballX: x, down, firstDownX, tryPending: false, oppStartX: null };
+      nextText = `YOUR BALL · ${downText(this.match)} · ${spotText(x)}`;
+      carryOn = () => this.resetPlay();
+    } else if (next) {
+      const startX = TOTAL_LENGTH - next.startT;
+      const series = next.down !== undefined && next.firstDownT !== undefined ? { down: next.down, firstDownX: TOTAL_LENGTH - next.firstDownT } : undefined;
+      nextText = `${this.theirAbbr()} BALL · ${spotText(startX)}`;
+      carryOn = () => this.runOppDrive(startX, series);
+    }
+    this.updateScoreboard();
+    const ours = this.ourAbbr();
+    const theirs = this.theirAbbr();
+    const rows: RecapRow[] = result.log.map((e) => {
+      const mine = e.side === 0;
+      if (!e.drive) {
+        const good = !!e.try?.good;
+        return { abbr: mine ? ours : theirs, result: `${e.try?.kind === 'twoPoint' ? '2-PT TRY' : 'EXTRA POINT'} ${good ? 'GOOD' : 'NO GOOD'}`, detail: '', tone: good === mine ? 'good' : 'bad' };
+      }
+      const d = e.drive;
+      const text = SIM_RESULT_TEXT[d.result] + (d.result === 'touchdown' && d.extraPointGood === false ? ' (NO XP)' : '');
+      const scored = d.points > 0;
+      const lost = d.result === 'interception' || d.result === 'fumble' || d.result === 'downs';
+      const tone: RecapRow['tone'] = scored || lost ? ((scored ? mine : !mine) ? 'good' : 'bad') : '';
+      const t = Math.round(d.seconds);
+      return { abbr: mine ? ours : theirs, result: text, detail: `${d.plays} PL · ${d.yards} YDS · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, tone };
+    });
+    openSimRecap({
+      title,
+      rows,
+      score: `${ours} ${this.match.us} - ${this.match.them} ${theirs}`,
+      next: nextText,
+      onContinue: carryOn,
+      // SIM NEXT QUARTER: carry straight on from where it stopped.
+      ...(stop === 'quarter' && next ? { onSimNext: () => this.runSim('quarter', next) } : {}),
+    });
   }
 
   /** Their offense's stars vs our defense's, for the drive summary. */
@@ -1779,7 +1866,7 @@ export class FieldScene extends Phaser.Scene {
    * A simulated CPU drive: dice-sim it, take its time off the clock, then show the summary.
    * CONTINUE moves on: any clock break (END OF Q1 / HALFTIME / FINAL), then our play.
    */
-  private runOppDrive(startX: number) {
+  private runOppDrive(startX: number, series?: { down: number; firstDownX: number }) {
     this.state = 'oppDrive';
     const c = this.clock;
     const drive = simulateOppDrive(
@@ -1791,6 +1878,8 @@ export class FieldScene extends Phaser.Scene {
         us: this.match.us,
         them: this.match.them,
         offenseTimeouts: oppTimeoutsLeft(c, feel.clock), // the CPU may use its own timeouts (never yours)
+        // Carrying on a drive a quarter sim stopped at 0:00 (3g-C).
+        ...(series ? { startDown: series.down, firstDownAtX: series.firstDownX } : {}),
       },
       feel.oppDrive,
       getRngOrFallback(),
@@ -1978,6 +2067,7 @@ export class FieldScene extends Phaser.Scene {
   private startNewGame(opponentId?: number) {
     closePlayCall();
     closeDriveSummary();
+    closeSimRecap();
     closeEndGame();
     closeTeamScreen();
     closeResumeGame();
@@ -2199,6 +2289,7 @@ export class FieldScene extends Phaser.Scene {
   private loadGame(g: SavedGame) {
     closePlayCall();
     closeDriveSummary();
+    closeSimRecap();
     closeEndGame();
     this.match = g.match;
     this.clock = g.clock;
@@ -2384,7 +2475,7 @@ export class FieldScene extends Phaser.Scene {
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
       sim:
         this.league && this.league.userTeamId !== null && this.opponentId !== null
-          ? { options: [{ id: 'game', label: 'SIM TO END OF GAME', note: 'YOUR COACH CALLS THE PLAYS' }], onSim: () => this.simToEnd() }
+          ? { options: this.simOptions(), onSim: (id) => this.runSim(id as SimStop) }
           : null,
       ...this.diagramPeople(),
       defenseRead: this.callAtLine ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall] } : null,

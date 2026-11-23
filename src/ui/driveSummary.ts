@@ -62,6 +62,8 @@ function resultLine(d: OppDrive, lastQuarter: boolean): { text: string; tone: ''
     case 'endOfHalf':
       if (d.note === 'kneel' && lastQuarter) return { text: 'RAN OUT THE CLOCK', tone: 'bad' };
       return { text: lastQuarter ? 'END OF GAME' : 'END OF HALF', tone: '' };
+    case 'quarterEnd': // only from a quarter sim, never on this screen
+      return { text: 'END OF QUARTER', tone: '' };
   }
 }
 

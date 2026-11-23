@@ -77,7 +77,8 @@ export interface OppDriveRules {
 /** How they managed the clock on this drive (shown on the summary). */
 export type OppDriveNote = 'hurryUp' | 'runClock' | 'kneel' | 'risky' | null;
 
-export type OppDriveResult = 'touchdown' | 'fieldGoal' | 'missedFieldGoal' | 'punt' | 'interception' | 'fumble' | 'downs' | 'endOfHalf';
+/** 'quarterEnd' = stopped at 0:00 of the quarter mid-drive (SIM TO END OF QUARTER, only when `stopAfterSeconds` is given): the drive carries on next quarter. */
+export type OppDriveResult = 'touchdown' | 'fieldGoal' | 'missedFieldGoal' | 'punt' | 'interception' | 'fumble' | 'downs' | 'endOfHalf' | 'quarterEnd';
 
 export interface OppDrive {
   result: OppDriveResult;
@@ -104,6 +105,8 @@ export interface OppDrive {
   stats: OppDriveStats;
   /** Timeouts called during the drive: by the offense (hurry-up) and by the defense (stopping a team running the clock). */
   timeoutsUsed: { offense: number; defense: number };
+  /** Only for 'quarterEnd': the down and the first-down line (same coordinates as `endX`) to carry on from. */
+  series?: { down: number; firstDownX: number };
 }
 
 export interface OppDriveStats {
@@ -138,6 +141,8 @@ export interface OppDriveSituation {
   /** Starting mid-series (3g-B: simming from the middle of our drive): the down, and the first-down line in the same coordinates as `startX`. Left out = 1st & 10. */
   startDown?: number;
   firstDownAtX?: number;
+  /** Stop at 0:00 of the quarter, mid-drive, after this many seconds (SIM TO END OF QUARTER in Q1 / Q3). Left out = play the drive out. */
+  stopAfterSeconds?: number;
   /** Timeouts the offense / the defense may use this drive (left out = none). */
   offenseTimeouts?: number;
   defenseTimeouts?: number;
@@ -187,6 +192,8 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   let defTimeouts = Math.max(0, sit.defenseTimeouts ?? 0);
   const ot = !!sit.overtime;
   const halfLeft = ot ? Infinity : halfSecondsLeft(sit);
+  /** SIM TO END OF QUARTER: pause here (only matters when it comes before the end of the half). */
+  const stopAt = ot ? Infinity : (sit.stopAfterSeconds ?? Infinity);
   const strength = Math.max(0.1, r.strength);
   /** Their lead (negative = behind). The score can't change during the drive. */
   const margin = sit.them - sit.us;
@@ -201,7 +208,8 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     result,
     plays,
     yards: Math.round(endT - startT),
-    seconds: Math.min(seconds, halfLeft),
+    // A play that starts before 0:00 still finishes, but the quarter (or half) ends at 0:00.
+    seconds: Math.min(seconds, halfLeft, stopAt),
     startX: toX(startT),
     endX: toX(endT),
     ourStartX: toX(ourStartT),
@@ -226,6 +234,10 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   };
 
   for (;;) {
+    if (seconds >= stopAt && stopAt < halfLeft) {
+      seconds = stopAt;
+      return { ...done('quarterEnd', t, t), series: { down, firstDownX: toX(firstDownT) } };
+    }
     if (seconds >= halfLeft) return done('endOfHalf', t, ourBallAt(t));
     const clock = now();
     const left = halfLeft - seconds; // seconds left in the half (or the game)
