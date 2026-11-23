@@ -572,6 +572,18 @@ export const feel = {
     /** Trait "Tries to jump the snap": chance per snap he gets off early, and how much sooner (seconds) he's free of his block. */
     jumpSnapChance: 0.2,
     jumpSnapGain: 0.4,
+    /** Kickers (3f), against the average starting K / P. Field goal range, yards per kick-power point. */
+    kickRangePerPoint: 1.4,
+    /** Green zone width per kick-accuracy point (field goals and extra points). */
+    kickGreenPerPoint: 0.07,
+    /** Pressure kick (Q4 last 2 min in a one-score game, or OT): the meter is this much faster for an average kicker... */
+    pressureMeterSpeedUp: 0.3,
+    /** ...halved per this many points of composure + concentration above average (doubled below). */
+    pressureHalvingPoints: 5,
+    /** Punter: yards in the air per kick-power point. */
+    puntYardsPerPoint: 1.5,
+    /** Punt green zone width per kick-accuracy point (fewer shanks). */
+    puntGreenPerPoint: 0.05,
   },
   juice: {
     hitPauseTime: 0.06,

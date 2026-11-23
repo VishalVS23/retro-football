@@ -34,3 +34,14 @@ export function defenseLineup(league: League, teamId: number): DefenseLineup {
   const c = depthChart(league, teamId);
   return { cover: [c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player], safety: c.S[0].player, rush: [c.DL[0].player, c.DL[1].player] };
 }
+
+/** The team's starting kicker and punter (K1, P1). */
+export interface KickingUnit {
+  k: Player;
+  p: Player;
+}
+
+export function kickingUnit(league: League, teamId: number): KickingUnit {
+  const c = depthChart(league, teamId);
+  return { k: c.K[0].player, p: c.P[0].player };
+}

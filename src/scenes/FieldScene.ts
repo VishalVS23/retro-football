@@ -108,7 +108,8 @@ import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
-import { defenseLineup, offenseLineup, type DefenseLineup, type OffenseLineup } from '../league/lineup';
+import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type KickingUnit, type OffenseLineup } from '../league/lineup';
+import { isPressureKick, kickerRules, pressureSweep, punterRules } from '../sim/kickRatings';
 import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRatings';
@@ -214,6 +215,7 @@ export class FieldScene extends Phaser.Scene {
   /** Who is on the field (from the depth charts), once both teams are known. */
   private ourLineup: OffenseLineup | null = null;
   private theirLineup: DefenseLineup | null = null;
+  private ourKickers: KickingUnit | null = null;
   /** How far the current pass landed from where the QB aimed (his accuracy), in yards. */
   private throwMiss = 0;
   /** Last names under our skill players before the snap (formation order; the QB's is in the hint line). */
@@ -1026,9 +1028,12 @@ export class FieldScene extends Phaser.Scene {
     }
     if (r.event === 'warning') this.showBanner(this.warningText());
     this.kickKind = punt ? 'punt' : this.match.tryPending ? 'extraPoint' : 'fieldGoal';
-    this.kickDistance = punt ? feel.punting.centreYards : fieldGoalDistance(this.match.ballX);
-    const diff = punt ? { green: feel.punting.green, sweepTime: feel.punting.sweepTime } : kickDifficulty(this.kickDistance, feel.kicking);
-    this.kickSweep = diff.sweepTime;
+    const pr = this.punterRules();
+    this.kickDistance = punt ? pr.centreYards : fieldGoalDistance(this.match.ballX);
+    const diff = punt ? { green: pr.green, sweepTime: pr.sweepTime } : kickDifficulty(this.kickDistance, this.kickRules());
+    const kicker = punt ? this.ourKickers?.p : this.ourKickers?.k;
+    const pressure = isPressureKick({ quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, margin: this.match.us - this.match.them, overtime: !!this.clock.ot });
+    this.kickSweep = pressureSweep(diff.sweepTime, kicker, pressure, feel.ratings);
     this.kickTime = 0;
     this.state = 'kickAim';
     // The holder's spot, 7 yd behind the line (punter: 15 yd); the QB stands in as the kicker for now.
@@ -1050,7 +1055,11 @@ export class FieldScene extends Phaser.Scene {
     const m = this.kickMeter;
     if (m) {
       const what = this.kickKind === 'extraPoint' ? 'EXTRA POINT' : 'FIELD GOAL';
-      m.querySelector('.km-title')!.textContent = punt ? 'PUNT · RED = SHANK' : `${what} · ${this.kickDistance} YD`;
+      const who = kicker && feel.ratings.enabled && displayPrefs().names ? `${kicker.lastName.toUpperCase()} · ` : '';
+      const title = punt ? 'PUNT · RED = SHANK' : `${what} · ${this.kickDistance} YD`;
+      m.querySelector('.km-title')!.textContent = who + title;
+      m.querySelector('.km-hint')!.textContent = pressure ? 'PRESSURE KICK! TAP IN THE GREEN' : 'TAP IN THE GREEN';
+      m.classList.toggle('pressure', pressure);
       const green = m.querySelector<HTMLDivElement>('.km-green')!;
       green.style.left = `${((1 - diff.green) / 2) * 100}%`;
       green.style.width = `${diff.green * 100}%`;
@@ -1059,6 +1068,16 @@ export class FieldScene extends Phaser.Scene {
     }
     this.stepMeter(0);
     this.updateLabel();
+  }
+
+  /** Our kicker's meter: his range and green zone (rules in sim/kickRatings.ts). */
+  private kickRules() {
+    return kickerRules(this.ourKickers?.k, feel.kicking, feel.ratings);
+  }
+
+  /** Our punter's distance and green zone. */
+  private punterRules() {
+    return punterRules(this.ourKickers?.p, feel.punting, feel.ratings);
   }
 
   private kickSpot(): Vec {
@@ -1080,7 +1099,7 @@ export class FieldScene extends Phaser.Scene {
       this.punt();
       return;
     }
-    const k = resolveKick(this.kickDistance, meterPosition(this.kickTime, this.kickSweep), feel.kicking);
+    const k = resolveKick(this.kickDistance, meterPosition(this.kickTime, this.kickSweep), this.kickRules());
     if (this.kickKind === 'fieldGoal') {
       this.clock = tickPlay(this.clock, feel.kicking.clockRunoff); // extra points are untimed
       this.updateScoreboard();
@@ -1093,7 +1112,7 @@ export class FieldScene extends Phaser.Scene {
     const endX = k.result === 'short' ? from.x + k.carry : TOTAL_LENGTH + 3;
     const u = (endX - from.x) / Math.max(1, TOTAL_LENGTH - from.x);
     const to = { x: endX, y: from.y + (postY - from.y) * u };
-    const kc = feel.kicking;
+    const kc = this.kickRules();
     const far = Math.max(0, Math.min(1, (this.kickDistance - kc.nearYards) / Math.max(1, kc.maxRangeYards - kc.nearYards)));
     const duration = kc.nearFlightTime + (kc.farFlightTime - kc.nearFlightTime) * far;
     this.kickFlight = { from, to, t: 0, duration: Math.max(0.1, duration), result: k.result };
@@ -1123,7 +1142,7 @@ export class FieldScene extends Phaser.Scene {
     const at = (d: Phaser.GameObjects.Arc) => ({ x: d.x, y: d.y });
     const cover = coverageAt(this.match.ballX, this.kickSpot(), feel.puntReturn).map((c, i) => ({ ...c, pos: at(this.coverageDots()[i]) }));
     const team = this.returnTeamDots().map((d) => ({ pos: at(d), used: false }));
-    this.puntPlay = startPuntPlay(this.match.ballX, meterPosition(this.kickTime, this.kickSweep), feel, roll, cover, team);
+    this.puntPlay = startPuntPlay(this.match.ballX, meterPosition(this.kickTime, this.kickSweep), { ...feel, punting: this.punterRules() }, roll, cover, team);
     this.puntPlay.returner = at(this.safety);
     this.state = 'kickFlight';
     this.qb.setStrokeStyle(0.2, COLORS.outline);
@@ -1965,6 +1984,7 @@ export class FieldScene extends Phaser.Scene {
     [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
     this.ourLineup = offenseLineup(l, l.userTeamId);
     this.theirLineup = defenseLineup(l, this.opponentId);
+    this.ourKickers = kickingUnit(l, l.userTeamId);
     this.placeNameLabels();
     this.updateScoreboard();
   }
@@ -2235,7 +2255,7 @@ export class FieldScene extends Phaser.Scene {
     if (atLine !== undefined) this.callAtLine = atLine;
     this.state = 'calling';
     this.updateLabel();
-    const fgRange = inFieldGoalRange(this.match.ballX, feel.kicking);
+    const fgRange = inFieldGoalRange(this.match.ballX, this.kickRules());
     openPlayCall({
       match: this.match,
       clock: clockText(this.clock),
