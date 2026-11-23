@@ -107,6 +107,14 @@ import {
   lb2Job,
   lb2ZoneSpot,
   linebacker2Start,
+  pickShell,
+  safetyBaseReaction,
+  safetyParamsFor,
+  safetyRunRead,
+  safetyStart,
+  SHELL_NAMES,
+  SHELL_TIPS,
+  type ShellId,
   linebackerStart,
   pickDefCall,
   stepBlitzer,
@@ -224,8 +232,13 @@ export class FieldScene extends Phaser.Scene {
   private wrDots: Phaser.GameObjects.Arc[] = []; // receivers, then the RB (index RB)
   private cbDots: Phaser.GameObjects.Arc[] = []; // cornerbacks, then the linebacker (index RB)
   private carrierDot: Phaser.GameObjects.Arc | null = null; // whoever has the ball after a catch
-  private safety!: Phaser.GameObjects.Arc;
+  private safety!: Phaser.GameObjects.Arc; // S1 (also the punt returner)
   private safetyPos: Vec = { x: 0, y: 0 };
+  /** S2 (3h-c): the bottom-half safety in a two-deep look, the robber in one deep + robber. */
+  private safety2!: Phaser.GameObjects.Arc;
+  private safety2Pos: Vec = { x: 0, y: 0 };
+  /** Their safety look this snap (3h-c), rolled with the defensive call; readable from where the safeties stand. */
+  private shell: ShellId = 'twoDeep';
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -347,6 +360,7 @@ export class FieldScene extends Phaser.Scene {
     this.wrDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.team));
     this.cbDots = Array.from({ length: SKILL_COUNT }, () => dot(COLORS.defense));
     this.safety = dot(COLORS.defense);
+    this.safety2 = dot(COLORS.defense);
     this.rusherDots = Array.from({ length: BLOCKER_OF.length }, () => dot(COLORS.defense, LINEMAN_RADIUS));
     this.blockerDots = Array.from({ length: BLOCKER_OF.length + 1 }, () => dot(COLORS.team, LINEMAN_RADIUS));
     this.ball = this.add.ellipse(0, 0, 1, 0.7, COLORS.ball).setStrokeStyle(0.08, COLORS.outline).setDepth(3);
@@ -858,7 +872,7 @@ export class FieldScene extends Phaser.Scene {
     const base = this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance;
     const radius = this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards;
     const off = this.ourLineup?.skill ?? [null, null, null, null, null];
-    const def = this.theirLineup ? [...this.theirLineup.cover, this.theirLineup.safety] : [null, null, null, null, null, null];
+    const def = this.theirLineup ? [...this.theirLineup.cover, this.theirLineup.safety, this.theirLineup.safety2] : [null, null, null, null, null, null, null];
     const m = def.map((p) => contestMods(p, R));
     return {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
@@ -888,7 +902,7 @@ export class FieldScene extends Phaser.Scene {
     const th = this.currentThrow!;
     const wrSpots = this.receivers.map((_, i) => (i === TE && this.teBlocks() ? OFF_FIELD : this.receiverPosition(i)));
     // Every defender in coverage can contest: the three cornerbacks and the deep safety.
-    const cbSpots = [...this.receivers.map((r) => r.coverage.pos), { ...this.safetyPos }];
+    const cbSpots = [...this.receivers.map((r) => r.coverage.pos), { ...this.safetyPos }, { ...this.safety2Pos }];
     this.aimG.clear();
     this.state = 'result';
 
@@ -909,7 +923,7 @@ export class FieldScene extends Phaser.Scene {
     let result = pass.result;
     const wrPos = wrSpots[pass.receiver];
     const cbPos = cbSpots[pass.defender];
-    const cbDot = [...this.cbDots, this.safety][pass.defender];
+    const cbDot = [...this.cbDots, this.safety, this.safety2][pass.defender];
 
     // A catch only counts with the catcher's feet (centre of his circle) in bounds.
     const catcher = result === 'catch' ? wrPos : result === 'interception' ? cbPos : null;
@@ -1465,24 +1479,16 @@ export class FieldScene extends Phaser.Scene {
 
     // Safety: sits deep, shading toward the side with more receivers, stays deeper than the deepest
     // receiver; breaks on the ball once it's thrown (after a moment to read it).
-    const d = feel.defense;
-    const db = feel.tackling.dbPursuitSpeed;
-    this.safetyPos = stepSafety(
-      this.safetyPos,
-      this.receivers.map((r) => r.runner.pos),
-      dt,
-      {
-        baseX: this.safetyDepthX(),
-        maxX: TOTAL_LENGTH - 1,
-        cushionYards: d.safetyCushionYards,
-        driftSpeed: db * d.safetyDriftRatio,
-        bailSpeed: db * d.safetyBailRatio,
-        ballReactionTime: safetyReadTime(this.theirLineup?.safety, d.safetyBallReactionTime, feel.ratings),
-        ballSpeed: db * d.safetyBallSpeedRatio,
-      },
-      ball,
-    );
+    // Both safeties play this snap's look (3h-c): two deep over the halves, or one deep + a robber.
+    const wrs = this.receivers.map((r) => r.runner.pos);
+    const sp = (k: 0 | 1) => {
+      const who = k ? this.theirLineup?.safety2 : this.theirLineup?.safety;
+      return safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, safetyBaseReaction(feel, this.shell, k), feel.ratings));
+    };
+    this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball);
+    this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball);
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
+    this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y);
 
     const p = this.rushParams();
     const run = this.calledPlay.run;
@@ -1634,12 +1640,14 @@ export class FieldScene extends Phaser.Scene {
           coveredByLinebacker(i) ? 'LB' : 'CB',
         ),
       ),
-      rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0 }, them?.safety, 'S'),
+      // Two-deep safeties read pass first on a run play (3h-c).
+      rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) : 0 }, them?.safety, 'S'),
+      rated({ pos: { ...this.safety2Pos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) : 0 }, them?.safety2, 'S'),
       ...this.rushers.map((r, i) =>
         rated({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 }, them?.rush[i], 'DL'),
       ),
     ]);
-    this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
+    this.pursuerDots = [...this.cbDots, this.safety, this.safety2, ...this.rusherDots];
     // Everyone else stops his route and follows the play (the carrier's own entry is ignored).
     this.trailers = this.receivers.map((r, i) => ({ pos: { x: this.wrDots[i].x, y: this.wrDots[i].y }, speed: r.runner.speed, dir: { ...r.runner.dir } }));
     this.updateLabel();
@@ -1762,7 +1770,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private defenseSpots() {
-    return [...this.cbDots, this.safety, ...this.rusherDots].map((d) => ({ x: d.x, y: d.y }));
+    return [...this.cbDots, this.safety, this.safety2, ...this.rusherDots].map((d) => ({ x: d.x, y: d.y }));
   }
 
   /**
@@ -2263,7 +2271,7 @@ export class FieldScene extends Phaser.Scene {
     const ours = hexToNumber(k.ours);
     const theirs = hexToNumber(k.theirs);
     [this.qb, ...this.wrDots, ...this.blockerDots].forEach((d) => d.setFillStyle(ours));
-    [...this.cbDots, this.safety, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
+    [...this.cbDots, this.safety, this.safety2, ...this.rusherDots].forEach((d) => d.setFillStyle(theirs));
     this.ourLineup = offenseLineup(l, l.userTeamId);
     this.theirLineup = defenseLineup(l, this.opponentId);
     this.ourKickers = kickingUnit(l, l.userTeamId);
@@ -2324,6 +2332,7 @@ export class FieldScene extends Phaser.Scene {
     return {
       cover: them.cover.map((p) => p.lastName),
       safety: them.safety.lastName,
+      safety2: them.safety2.lastName,
       edge: us.skill.map((p, i) => (on ? matchupEdge(p, them.cover[i]) : 0)),
       line: { pass: line(false), run: line(true) },
     };
@@ -2423,10 +2432,6 @@ export class FieldScene extends Phaser.Scene {
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
 
-  /** The safety's spot: deep behind the line, but never past the back of the end zone. */
-  private safetyDepthX() {
-    return Math.min(this.match.ballX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1);
-  }
 
   /**
    * Lines everyone up for the next snap with the called play. With `call` (the default, after
@@ -2443,6 +2448,7 @@ export class FieldScene extends Phaser.Scene {
     if (call) {
       this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
       this.lb2Roll = rng.next();
+      this.shell = feel.defCalls.enabled ? pickShell(this.defSituation(), feel, rng.next()) : 'twoDeep';
     }
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -2473,9 +2479,11 @@ export class FieldScene extends Phaser.Scene {
     this.aimDrag = null;
     this.underPressure = false;
     this.aimG.clear();
-    this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.ball, this.shadow]);
-    this.safetyPos = { x: this.safetyDepthX(), y: FIELD_WIDTH / 2 };
+    this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.safety2, this.ball, this.shadow]);
+    this.safetyPos = safetyStart(feel, this.match.ballX, this.shell, 0);
+    this.safety2Pos = safetyStart(feel, this.match.ballX, this.shell, 1);
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
+    this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y).setAlpha(1).setScale(1);
     [...this.cbDots, ...this.rusherDots, ...this.wrDots, this.qb, ...this.blockerDots].forEach((d) => d.setAlpha(1));
     this.steerTouch = null;
     this.steer = 0;
@@ -2611,7 +2619,9 @@ export class FieldScene extends Phaser.Scene {
           ? { options: this.simOptions(), onSim: (id) => this.runSim(id as SimStop) }
           : null,
       ...this.diagramPeople(),
-      defenseRead: this.callAtLine ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall] } : null,
+      defenseRead: this.callAtLine
+        ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall], shell: this.shell, shellName: SHELL_NAMES[this.shell], shellTip: SHELL_TIPS[this.shell] }
+        : null,
     });
   }
 

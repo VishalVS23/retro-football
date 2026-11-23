@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { feel } from '../config/feel';
 import { PLAYS } from './routes';
 import { simulatePass, type PassShot } from './passSim';
+import type { ShellId } from './defCalls';
 
 const play = (name: string) => PLAYS.find((p) => p.name === name)!;
 
-/** Catches out of 200 snaps (corner speeds rolled per snap, like the game). */
-function catches(name: string, shot: PassShot, f = feel) {
+/**
+ * Catches out of 200 snaps (corner speeds rolled per snap, like the game). Default safety look:
+ * one deep + robber (3h-c), the closest to the single deep safety these numbers were tuned with.
+ */
+function catches(name: string, shot: PassShot, f = feel, shell: ShellId = 'robber') {
   let n = 0;
-  for (let s = 1; s <= 200; s++) if (simulatePass(play(name), shot, s * 7919, f).result === 'catch') n++;
+  for (let s = 1; s <= 200; s++) if (simulatePass(play(name), shot, s * 7919, f, 35, { shell }).result === 'catch') n++;
   return n / 2; // percent
 }
 
@@ -48,11 +52,11 @@ describe('balance: whole pass plays (all defenders, as in the game)', () => {
 // ---------- Run after the catch, and two holes the user found (2026-11-22) ----------
 
 /** Catch rate and average gain (yards from the line) over 300 snaps, average QB (with his misses). */
-function playOut(name: string, shot: PassShot, jukeYards: number) {
+function playOut(name: string, shot: PassShot, jukeYards: number, shell: ShellId = 'robber') {
   let caught = 0;
   let gain = 0;
   for (let s = 1; s <= 300; s++) {
-    const r = simulatePass(play(name), shot, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards } });
+    const r = simulatePass(play(name), shot, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards }, shell });
     if (!r.sacked && r.result === 'catch') {
       caught++;
       gain += r.gain!;
@@ -80,11 +84,13 @@ describe('after the catch', () => {
     expect(check.rate).toBeGreaterThan(70);
   }, 60000);
 
-  it('late dig across the field: good, but no sure thing (the safety drives on it)', () => {
-    const dig = playOut('Crossers', { to: 0, throwAt: 1.8, lead: 1 }, 2.5);
-    expect(dig.rate).toBeLessThan(80);
-    expect(dig.rate).toBeGreaterThan(50);
-    expect(dig.gain).toBeGreaterThan(10);
+  it('late dig across the field: open against two deep, the robber sits on it (3h-c; one safety used to make it ~70%)', () => {
+    const open = playOut('Crossers', { to: 0, throwAt: 1.8, lead: 1 }, 2.5, 'twoDeep');
+    const robbed = playOut('Crossers', { to: 0, throwAt: 1.8, lead: 1 }, 2.5, 'robber');
+    expect(open.rate).toBeGreaterThan(60);
+    expect(open.gain).toBeGreaterThan(10);
+    expect(robbed.rate).toBeLessThan(open.rate - 25);
+    expect((open.rate + robbed.rate) / 2).toBeLessThan(80); // over a game: good, but no sure thing
   }, 60000);
 });
 
@@ -110,8 +116,35 @@ describe('balance: the tight end', () => {
   it('his short routes work; a ball near a blocking TE never counts as his', () => {
     expect(catches('TE Drag', { to: 4, throwAt: 1.0, lead: 1 })).toBeGreaterThan(75);
     expect(catches('Curls', { to: 4, throwAt: 0.9, lead: 1 })).toBeGreaterThan(30); // his flat
-    // The deep seam into the single safety is a gamble until the second safety (3h-c); thrown late, a real shot.
-    expect(catches('TE Seam', { to: 4, throwAt: 1.8, lead: 1 })).toBeGreaterThan(25);
+    // The seam splits two deep safeties (3h-c); into one deep + robber it's a gamble (see the safety-look tests).
+    expect(catches('TE Seam', { to: 4, throwAt: 1.2, lead: 1 }, feel, 'twoDeep')).toBeGreaterThan(35);
     for (let s = 1; s <= 30; s++) expect(simulatePass(play('Crossers'), { to: 4, throwAt: 1.0, lead: 1 }, s, feel).result).not.toBe('catch');
+  }, 60000);
+});
+
+// ---------- Safety looks (3h-c) ----------
+
+describe('balance: the two safety looks', () => {
+  const go = { to: 0, throwAt: 1.1, lead: 1 };
+  const seam = { to: 4, throwAt: 1.2, lead: 1 };
+  const lateSlant = { to: 0, throwAt: 1.5, lead: 1 };
+  it('two deep: the deep ball outside gets harder, but the middle opens (seam, late slant, dig)', () => {
+    expect(catches('Verticals', go, feel, 'twoDeep')).toBeLessThan(catches('Verticals', go, feel, 'robber') - 10);
+    expect(catches('Verticals', go, feel, 'twoDeep')).toBeGreaterThan(40); // harder, never hopeless
+    expect(catches('TE Seam', seam, feel, 'twoDeep')).toBeGreaterThan(35);
+    expect(catches('Slants', lateSlant, feel, 'twoDeep')).toBeGreaterThan(50);
+  }, 60000);
+
+  it('one deep + robber: the middle is jammed (seam, late slant), the deep ball outside is the throw', () => {
+    expect(catches('TE Seam', seam, feel, 'robber')).toBeLessThan(20);
+    expect(catches('Slants', lateSlant, feel, 'robber')).toBeLessThan(20);
+    expect(catches('Crossers', { to: 0, throwAt: 1.6, lead: 1 }, feel, 'robber')).toBeLessThan(catches('Crossers', { to: 0, throwAt: 1.6, lead: 1 }, feel, 'twoDeep') - 15);
+    expect(catches('Verticals', go, feel, 'robber')).toBeGreaterThan(60);
+  }, 60000);
+
+  it('short routes play the same against both looks', () => {
+    for (const [name, shot] of [['Hitch Slant', { to: 0, throwAt: 1.1, lead: 1 }], ['Slants', { to: 0, throwAt: 0.5, lead: 1 }], ['Curls', { to: 0, throwAt: 1.5, lead: 1 }]] as const) {
+      expect(Math.abs(catches(name, shot, feel, 'twoDeep') - catches(name, shot, feel, 'robber'))).toBeLessThan(8);
+    }
   }, 60000);
 });

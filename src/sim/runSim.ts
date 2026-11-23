@@ -3,14 +3,13 @@
  * Used by the balance tests now, and a starting point for the league sim (stage 4).
  */
 import type { Feel } from '../config/feel';
-import { FIELD_WIDTH } from './field';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage } from './defense';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { cornerStart, coverParams, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { cornerStart, coverParams, safetyRunRead, safetyStart, type ShellId, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
@@ -20,6 +19,8 @@ export interface RunPlayers {
   /** Their corners and linebackers, in formation order (CB1, CB3, CB2, LB1, LB2). */
   cover?: (Player | undefined)[];
   safety?: Player;
+  /** S2, the bottom-half safety (3h-c). */
+  safety2?: Player;
   /** Their four rushers, formation order. */
   rush?: (Player | undefined)[];
   /** Our five blockers, formation order (`BLOCKER_OF[i]` blocks rusher i). */
@@ -29,7 +30,6 @@ export interface RunPlayers {
 }
 
 const dt = 1 / 60;
-const mid = FIELD_WIDTH / 2;
 
 /**
  * Headless run play, built from the same pure pieces the game uses: everyone lines up, the RB
@@ -52,6 +52,7 @@ export function simulateRun(
   holdSteer?: number | ((t: number) => number),
   call: DefCallId = 'man',
   players: RunPlayers = {},
+  shell: ShellId = 'twoDeep',
 ): { yards: number; by: number; broken: number } {
   const rng = createRng(seed);
   const f = formation(losX);
@@ -95,7 +96,9 @@ export function simulateRun(
         R,
       ),
     ),
-    pursuerFor(players.safety, 'S', { pos: { x: losX + d.safetyDepthYards, y: mid }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
+    ...([0, 1] as const).map((k) =>
+      pursuerFor(k ? players.safety2 : players.safety, 'S', { pos: safetyStart(feel, losX, shell, k), speed: tk.dbPursuitSpeed, stunned: 0, wait: safetyRunRead(feel, shell) }, R),
+    ),
     ...rushers.map((r, i) =>
       pursuerFor(players.rush?.[i], 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) }, R),
     ),

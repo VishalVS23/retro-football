@@ -11,6 +11,9 @@ import {
   coverParams,
   lb2BlitzChance,
   lb2Job,
+  pickShell,
+  safetyStart,
+  shellWeights,
   linebacker2Start,
   linebackerStart,
   pickDefCall,
@@ -96,6 +99,32 @@ describe('LB2 when our tight end stays in to block (3h-b)', () => {
   });
 });
 
+describe('safety looks (3h-c)', () => {
+  it('both looks come up; long yardage and a late lead = more two deep, short yardage and the red zone = more robber', () => {
+    const share = (s: DefSituation) => {
+      const w = shellWeights(s, feel);
+      return w.twoDeep / (w.twoDeep + w.robber);
+    };
+    expect(share(base)).toBeGreaterThan(0.3);
+    expect(share(base)).toBeLessThan(0.7);
+    expect(share({ ...base, down: 3, toGo: 12 })).toBeGreaterThan(share(base));
+    expect(share({ ...base, quarter: 4, timeLeft: 60, lead: 7 })).toBeGreaterThan(share(base));
+    expect(share({ ...base, down: 3, toGo: 1 })).toBeLessThan(share(base));
+    expect(share({ ...base, ballX: 100 })).toBeLessThan(share(base));
+    expect(pickShell(base, feel, 0)).toBe('twoDeep');
+    expect(pickShell(base, feel, 0.999)).toBe('robber');
+  });
+
+  it('readable before the snap: two deep = both safeties deep and wide; robber = one deep in the middle, one shallow', () => {
+    const [a, b] = [safetyStart(feel, 40, 'twoDeep', 0), safetyStart(feel, 40, 'twoDeep', 1)];
+    expect(a.y).toBeLessThan(b.y - 10);
+    expect(a.x).toBe(b.x);
+    const [deep, robber] = [safetyStart(feel, 40, 'robber', 0), safetyStart(feel, 40, 'robber', 1)];
+    expect(deep.y).toBeCloseTo(robber.y);
+    expect(robber.x).toBeLessThan(deep.x - 3);
+  });
+});
+
 describe('how each call lines up and plays', () => {
   it('press corners line up close, off corners far, normal in between; the blitzing LB creeps up', () => {
     const wr = { x: 40, y: 10 };
@@ -134,14 +163,14 @@ const play = (name: string) => PLAYS.find((p) => p.name === name)!;
 function catches(name: string, shot: PassShot, call: DefCallId) {
   let n = 0;
   for (let s = 1; s <= 200; s++) {
-    const r = simulatePass(play(name), shot, s * 7919, feel, 35, { call });
+    const r = simulatePass(play(name), shot, s * 7919, feel, 35, { call, shell: 'robber' }); // one deep, as tuned (3h-c)
     if (!r.sacked && r.result === 'catch') n++;
   }
   return n / 2;
 }
 const sacks = (name: string, shot: PassShot, call: DefCallId) => {
   let n = 0;
-  for (let s = 1; s <= 50; s++) if (simulatePass(play(name), shot, s * 7919, feel, 35, { call }).sacked) n++;
+  for (let s = 1; s <= 50; s++) if (simulatePass(play(name), shot, s * 7919, feel, 35, { call, shell: 'robber' }).sacked) n++;
   return n * 2;
 };
 const SLANT_QUICK: PassShot = { to: 0, throwAt: 0.5, lead: 1 };

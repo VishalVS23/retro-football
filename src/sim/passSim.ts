@@ -4,7 +4,6 @@
  * resolved. Used by the balance tests to measure how open each route gets.
  */
 import type { Feel } from '../config/feel';
-import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
@@ -15,12 +14,11 @@ import { createRng } from './rng';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
-import { cornerStart, coverParams, lb2ZoneSpot, linebacker2Start, linebackerStart, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
+import { cornerStart, coverParams, lb2ZoneSpot, safetyBaseReaction, safetyParamsFor, safetyStart, type ShellId, linebacker2Start, linebackerStart, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
 
 const dt = 1 / 60;
 /** Where a player who can't catch the ball (the TE in to block) is put for the catch check. */
 const OFF_FIELD: Vec = { x: -1000, y: -1000 };
-const mid = FIELD_WIDTH / 2;
 
 export interface PassShot {
   /** Which player gets the ball (formation `skill` index). */
@@ -38,12 +36,14 @@ export interface PassOptions {
   pressured?: boolean;
   /** Our skill players in formation order (wide top, slot, wide bottom, RB, TE). Leave out = no receiver ratings. */
   offense?: (Player | null)[];
-  /** Their coverage: cover[i] covers skill spot i (three corners, LB1, LB2), plus the safety and the four rushers. Leave out = no defender ratings. */
-  defense?: { cover: (Player | null)[]; safety: Player | null; rush?: (Player | null)[] };
+  /** Their coverage: cover[i] covers skill spot i (three corners, LB1, LB2), plus the two safeties (S1 top half, S2 bottom) and the four rushers. Leave out = no defender ratings. */
+  defense?: { cover: (Player | null)[]; safety: Player | null; safety2?: Player | null; rush?: (Player | null)[] };
   /** Our five blockers (3h-a), formation order: `BLOCKER_OF[i]` blocks their rusher i. Leave out = average blocking. */
   line?: (Player | null)[];
   /** Their defensive call (3d2). Default: normal man. */
   call?: DefCallId;
+  /** Their safety look (3h-c). Default: two deep. */
+  shell?: ShellId;
   /** Our TE stays in to block (his route is Block): what LB2 does. Default: drops into the short middle. */
   lb2?: 'drop' | 'blitz';
   /**
@@ -96,22 +96,21 @@ export function simulatePass(
   );
   /** Who defender i is following before the throw: his man, or LB2's zone spot. */
   const coverTarget = (i: number) => (i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
-  let safety: Vec = { x: losX + d.safetyDepthYards, y: mid };
+  // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber.
+  const shell = opts.shell ?? 'twoDeep';
+  const KS = [0, 1] as const;
+  let safeties: Vec[] = KS.map((k) => safetyStart(feel, losX, shell, k));
+  const safetyPlayers = [def?.safety ?? null, def?.safety2 ?? null];
   const qbStart = f.qb;
   const qbAt = (t: number) => {
     const u = Math.min(1, t / Math.max(0.01, feel.pocket.dropbackTime));
     return { x: qbStart.x - feel.pocket.dropbackYards * (1 - (1 - u) * (1 - u)), y: qbStart.y };
   };
   const tk = feel.tackling;
-  const safetyParams = {
-    baseX: Math.min(losX + d.safetyDepthYards, TOTAL_LENGTH - 1),
-    maxX: TOTAL_LENGTH - 1,
-    cushionYards: d.safetyCushionYards,
-    driftSpeed: tk.dbPursuitSpeed * d.safetyDriftRatio,
-    bailSpeed: tk.dbPursuitSpeed * d.safetyBailRatio,
-    ballReactionTime: def ? safetyReadTime(def.safety, d.safetyBallReactionTime, R) : d.safetyBallReactionTime,
-    ballSpeed: tk.dbPursuitSpeed * d.safetyBallSpeedRatio,
-  };
+  const safetyParams = KS.map((k) => {
+    const base = safetyBaseReaction(feel, shell, k);
+    return safetyParamsFor(feel, losX, shell, k, def ? safetyReadTime(safetyPlayers[k], base, R) : base);
+  });
 
 
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
@@ -138,7 +137,7 @@ export function simulatePass(
   for (; t < shot.throwAt - 1e-9; t += dt) {
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
     cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : i === TE && lb2Rush ? c : stepCoverage(c, coverTarget(i), dt, coverP[i])));
-    safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
+    safeties = safeties.map((s, k) => stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k]));
     const q = qbAt(t + dt);
     rushers = rushers.map((r) => stepRusher(r, q, t + dt, dt, rushP));
     if (lb2Rush) {
@@ -174,7 +173,7 @@ export function simulatePass(
     cover = cover.map((c, i) =>
       i === TE && lb2Rush ? c : stepCoverage(c, coverTarget(i), dt, coverP[i], { landing, sinceThrow: e + dt, help: i !== shot.to }),
     );
-    safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams, { landing, sinceThrow: e + dt });
+    safeties = safeties.map((s, k) => stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], { landing, sinceThrow: e + dt }));
     rushers = rushers.map((r) => stepRusher(r, qb, t + e + dt, dt, rushP));
   }
   const ca = feel.catching;
@@ -182,7 +181,7 @@ export function simulatePass(
   const wrSpots = runners.map((r, i) =>
     i === TE && teBlocks ? OFF_FIELD : i === shot.to ? receiverInFlight(r.pos, atLanding[i], landing, duration, ca.receiverAdjustYards, ca.receiverAdjustSpeed) : r.pos,
   );
-  const cbSpots = [...cover.map((c) => c.pos), safety];
+  const cbSpots = [...cover.map((c) => c.pos), ...safeties];
   const pass = resolveTargetedPass(wrSpots, cbSpots, landing, rng.next(), {
     catchRadiusYards: ca.catchRadiusYards,
     contestRadiusYards: d.contestRadiusYards,
@@ -199,7 +198,7 @@ export function simulatePass(
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),
     }),
     ...(def && (() => {
-      const all = [...def.cover, def.safety].map((p) => contestMods(p, R));
+      const all = [...def.cover, ...safetyPlayers].map((p) => contestMods(p, R));
       return { breakup: all.map((m) => m.breakup), intercept: all.map((m) => m.intercept), hold: all.map((m) => m.hold) };
     })()),
   });
@@ -217,7 +216,7 @@ export function simulatePass(
     ...cover.map((c, i) =>
       pursuerFor(def?.cover[i] ?? undefined, coveredByLinebacker(i) ? 'LB' : 'CB', { pos: { ...c.pos }, speed: coveredByLinebacker(i) ? d.lbPursuitSpeed : tk.dbPursuitSpeed, stunned: 0 }, R),
     ),
-    pursuerFor(def?.safety ?? undefined, 'S', { pos: { ...safety }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
+    ...safeties.map((s, k) => pursuerFor(safetyPlayers[k] ?? undefined, 'S', { pos: { ...s }, speed: tk.dbPursuitSpeed, stunned: 0 }, R)),
     ...rushers.map((r, i) => pursuerFor(def?.rush?.[i] ?? undefined, 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0 }, R)),
   ];
   const carry = carryFor(catcher, role, { ...feel.running, runSpeed: isRb ? feel.runGame.rbRunSpeed : isTe ? feel.running.teRunSpeed : feel.running.runSpeed }, R);

@@ -52,7 +52,7 @@ const TOSS: RouteDef = { name: 'Toss', points: [{ x: 0, y: 0 }, { x: 2, y: -4 },
 // Tight end routes (3h-b). He lines up just outside the bottom tackle; positive y = up, toward the
 // middle. Seam: straight up the field. Drag: short, across the middle. Flat: out to the bottom
 // sideline. Block: he stays in (more time to throw, one fewer receiver).
-const SEAM: RouteDef = { name: 'Seam', points: [{ x: 0, y: 0 }, { x: 24, y: 0 }] };
+const SEAM: RouteDef = { name: 'Seam', points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 24, y: 3.5 }] };
 const TE_DRAG: RouteDef = { name: 'Drag', points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 5, y: 15 }] };
 const TE_FLAT: RouteDef = { name: 'Flat', points: [{ x: 0, y: 0 }, { x: 2, y: -1.5 }, { x: 6, y: -6 }] };
 const BLOCK: RouteDef = { name: 'Block', points: [{ x: 0, y: 0 }, { x: -0.8, y: 0 }], stop: true, block: true };

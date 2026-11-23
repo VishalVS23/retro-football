@@ -5,8 +5,8 @@
  * Pure (no Phaser). Feel values come from `feel.defCalls`.
  */
 import type { Feel } from '../config/feel';
-import type { CoverParams } from './defense';
-import { FIELD_WIDTH } from './field';
+import type { CoverParams, SafetyParams } from './defense';
+import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
 
@@ -71,13 +71,86 @@ export function coverParams(call: DefCallId, feel: Feel, losX: number, run: bool
     minXUntil: run ? undefined : d.lbPassDropTime,
   };
   // LB2 (3h-b) on the tight end: same, but a shallower first drop (he has the flat, not the checkdown).
-  const lb2: CoverParams = { ...lb, minX: losX + (run ? d.lbFloorYards : d.lb2PassDropYards) };
+  const lb2: CoverParams = { ...lb, minX: losX + (run ? d.lbFloorYards : d.lb2PassDropYards), cushionYards: d.lb2CushionYards, cushionFloorYards: d.lb2CushionYards };
   return { cb, lb, lb2 };
 }
 
 /** Where the linebacker lines up: a few yards deep, or creeping up to the line on a blitz. */
 export function linebackerStart(call: DefCallId, feel: Feel, losX: number): Vec {
   return { x: losX + (call === 'blitz' ? feel.defCalls.blitzStartYards : feel.defense.lbDepthYards), y: FIELD_WIDTH / 2 };
+}
+
+// ---------- Safety looks (3h-c) ----------
+
+/**
+ * How their two safeties play this snap. Both are readable before the snap from where the
+ * safeties stand. TWO DEEP: each over his half of the field (deep outside covered, the middle
+ * open). ROBBER: S1 alone deep in the middle, S2 sits ~10 yards deep in the middle and jumps
+ * slants and digs (the middle jammed, deep outside open).
+ */
+export type ShellId = 'twoDeep' | 'robber';
+export const SHELL_IDS: readonly ShellId[] = ['twoDeep', 'robber'];
+export const SHELL_NAMES: Record<ShellId, string> = { twoDeep: 'TWO DEEP', robber: 'ONE DEEP + ROBBER' };
+export const SHELL_TIPS: Record<ShellId, string> = {
+  twoDeep: 'Middle open',
+  robber: 'Go deep outside',
+};
+
+/** Where S1 (k 0) and S2 (k 1) line up for this look. */
+export function safetyStart(feel: Feel, losX: number, shell: ShellId, k: 0 | 1): Vec {
+  const d = feel.defense;
+  const mid = FIELD_WIDTH / 2;
+  const deep = (yards: number) => Math.min(losX + yards, TOTAL_LENGTH - 1);
+  if (shell === 'twoDeep') return { x: deep(d.twoDeepDepthYards), y: mid + (k ? 1 : -1) * d.twoDeepHalfYards };
+  return k ? { x: deep(d.robberDepthYards), y: mid } : { x: deep(d.safetyDepthYards), y: mid };
+}
+
+/**
+ * How safety k plays this look, before his ratings (`readTime` = his rated read of the throw,
+ * from the look's base reaction time: see `safetyBaseReaction`). Speeds from the DB chase speed.
+ */
+export function safetyParamsFor(feel: Feel, losX: number, shell: ShellId, k: 0 | 1, readTime: number): SafetyParams {
+  const d = feel.defense;
+  const db = feel.tackling.dbPursuitSpeed;
+  const common = { maxX: TOTAL_LENGTH - 1, cushionYards: d.safetyCushionYards, driftSpeed: db * d.safetyDriftRatio, bailSpeed: db * d.safetyBailRatio, ballReactionTime: readTime };
+  if (shell === 'twoDeep') {
+    return { ...common, baseX: Math.min(losX + d.twoDeepDepthYards, TOTAL_LENGTH - 1), ballSpeed: db * d.twoDeepBallSpeedRatio, half: k ? 1 : -1, halfYards: d.twoDeepHalfYards };
+  }
+  if (k) {
+    // The robber holds his depth (no bailing): he's there for what's thrown in front of the deep man.
+    const x = Math.min(losX + d.robberDepthYards, TOTAL_LENGTH - 1);
+    return { ...common, baseX: x, maxX: x, cushionYards: 0, ballSpeed: db * d.robberBallSpeedRatio };
+  }
+  return { ...common, baseX: Math.min(losX + d.safetyDepthYards, TOTAL_LENGTH - 1), ballSpeed: db * d.safetyBallSpeedRatio };
+}
+
+/** How long safety k waits after a handoff before chasing the run (two-deep safeties read pass first). */
+export function safetyRunRead(feel: Feel, shell: ShellId): number {
+  return shell === 'twoDeep' ? feel.runGame.twoDeepRunReadTime : 0;
+}
+
+/** The base time safety k takes to read the throw in this look (his ratings then scale it). */
+export function safetyBaseReaction(feel: Feel, shell: ShellId, k: 0 | 1): number {
+  const d = feel.defense;
+  if (shell === 'twoDeep') return d.twoDeepBallReactionTime;
+  return k ? d.robberBallReactionTime : d.safetyBallReactionTime;
+}
+
+/** How likely each look is in this situation (not normalised). */
+export function shellWeights(s: DefSituation, feel: Feel): Record<ShellId, number> {
+  const c = feel.defCalls;
+  const w: Record<ShellId, number> = { twoDeep: c.weightTwoDeep, robber: c.weightRobber };
+  if (s.down >= 3 && s.toGo >= c.longYards) w.twoDeep += c.longTwoDeepBonus;
+  else if (s.toGo <= c.shortYards) w.robber += c.shortRobberBonus;
+  if (OPP_GOAL_X - s.ballX <= 20) w.robber += c.redZoneRobberBonus;
+  if (s.lead > 0 && s.quarter >= 4 && s.timeLeft <= 120) w.twoDeep += c.preventTwoDeepBonus;
+  return w;
+}
+
+/** Picks the safety look with one dice roll (0..1). */
+export function pickShell(s: DefSituation, feel: Feel, roll: number): ShellId {
+  const w = shellWeights(s, feel);
+  return roll * (w.twoDeep + w.robber) < w.twoDeep ? 'twoDeep' : 'robber';
 }
 
 /** Where the second linebacker lines up (3h-b): a few yards deep, shading the tight end's side. */

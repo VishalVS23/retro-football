@@ -80,7 +80,8 @@ function catches(name: string, shot: PassShot, wr: number, cb: number) {
   const offense = [pl('WR', v(wr)), pl('WR', v(wr)), pl('WR', v(wr)), pl('RB')];
   const defense = { cover: [pl('CB', v(cb)), pl('CB', v(cb)), pl('CB', v(cb)), pl('LB')], safety: pl('S') };
   let n = 0;
-  for (let s = 1; s <= 250; s++) if (simulatePass(play(name), shot, s * 7919, feel, 35, { qb: pl('QB'), offense, defense }).result === 'catch') n++;
+  // One deep safety (the robber look, 3h-c): what these corner-vs-receiver numbers were tuned against.
+  for (let s = 1; s <= 250; s++) if (simulatePass(play(name), shot, s * 7919, feel, 35, { qb: pl('QB'), offense, defense, shell: 'robber' }).result === 'catch') n++;
   return (n / 250) * 100;
 }
 const SLOW = 60000;

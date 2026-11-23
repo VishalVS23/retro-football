@@ -10,7 +10,7 @@ import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, TE, routePath, type PlayDef } from '../sim/routes';
 import type { Vec } from '../sim/throw';
-import { cornerStart, linebacker2Start, linebackerStart, type DefCallId } from '../sim/defCalls';
+import { cornerStart, linebacker2Start, linebackerStart, safetyStart, type DefCallId, type ShellId } from '../sim/defCalls';
 
 export interface DiagramView {
   x0: number;
@@ -33,6 +33,8 @@ export interface DiagramView {
   defense?: DiagramDefense;
   /** Big diagram: line the defense up for this call (3d2; shown once you're at the line). Default: normal man. */
   call?: DefCallId;
+  /** Their safety look (3h-c), shown at the line like the call. */
+  shell?: ShellId;
 }
 
 /**
@@ -42,6 +44,8 @@ export interface DiagramView {
 export interface DiagramDefense {
   cover: string[];
   safety: string;
+  /** S2 (3h-c). */
+  safety2?: string;
   edge: number[];
   line?: { pass: number[]; run: number[] };
   /** false = no matchup markers (the ⚙ Display switch). Default true. */
@@ -221,7 +225,11 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
     s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
     s += player(linebacker2Start(feel, losX), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
-    s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.safety, 'S'));
+    // Safeties (3h-c) where this snap's look puts them (two deep in the huddle: the look shows at the line).
+    const shell = v.shell ?? 'twoDeep';
+    s += player(safetyStart(feel, losX, shell, 0), C.defense, dl(dn?.safety, 'S'));
+    // The robber sits right behind the linebackers: his name goes above him so the names don't run together.
+    s += player(safetyStart(feel, losX, shell, 1), C.defense, dl(dn?.safety2, 'S'), shell === 'robber' ? 'above' : 'below');
     f.rush.forEach((r) => (s += player(r, C.defense, null, 'below', LINEMAN_R))); // linemen unlabelled: too tightly packed
   }
   f.block.forEach((b) => (s += player(b, C.offense, null, 'below', LINEMAN_R)));

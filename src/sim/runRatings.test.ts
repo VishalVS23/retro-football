@@ -120,6 +120,7 @@ const team = (rbD: number, defD: number): RunPlayers => ({
   rb: mk('RB', 'RB', rbD),
   cover: [mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('LB', 'LB', defD), mk('LB', 'LB', defD)],
   safety: mk('S', 'S', defD),
+  safety2: mk('S', 'S', defD),
   rush: Array.from({ length: 4 }, () => mk('DL', 'DL', defD)),
 });
 function runs(name: string, players: RunPlayers | undefined) {
@@ -142,11 +143,23 @@ describe('balance: ball carriers vs tacklers', () => {
   it('a star RB gains clearly more, and against a weak defense breaks some long ones (but not every run)', () => {
     for (const name of ['Dive', 'Toss']) {
       const avg = runs(name, team(0, 0)).avg;
-      // +0.7 before 3h-b; LB2 now lines up on the Toss side, so a star gains ~+0.6 there.
-      expect(runs(name, team(5, 0)).avg).toBeGreaterThan(avg + 0.55);
+      // +0.7 before 3h-b; LB2 on the Toss side (3h-b) and a second safety (3h-c) leave a star ~+0.5 there (two deep).
+      expect(runs(name, team(5, 0)).avg).toBeGreaterThan(avg + 0.45);
       const vsWeak = runs(name, team(5, -4));
       expect(vsWeak.avg).toBeGreaterThan(avg + 2);
       expect(vsWeak.big).toBeLessThan(0.15);
+    }
+  }, 60000);
+
+  it('safety looks (3h-c): one deep + robber is tougher against the run than two deep (read it: run against two deep)', () => {
+    for (const name of ['Dive', 'Toss']) {
+      const play = PLAYS.find((p) => p.name === name)!;
+      const avg = (shell: 'twoDeep' | 'robber') => {
+        let y = 0;
+        for (let s = 1; s <= 300; s++) y += simulateRun(play, s * 7919, feel, 2.5, 45, undefined, 'man', team(5, -4), shell).yards;
+        return y / 300;
+      };
+      expect(avg('robber')).toBeLessThan(avg('twoDeep'));
     }
   }, 60000);
 

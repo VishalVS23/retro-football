@@ -86,6 +86,19 @@ export const feel = {
     defenderCatchChance: 0.75,
     /** How deep the safety lines up behind the line of scrimmage. */
     safetyDepthYards: 15,
+    /**
+     * Safety looks (3h-c), picked by their coach each snap. ONE DEEP + ROBBER: S1 plays the deep
+     * middle with the safety* values above; S2 (the robber) sits this deep in the middle and jumps
+     * throws there. TWO DEEP: each safety over his half, `twoDeepHalfYards` off the middle, this deep,
+     * reading / breaking on the ball with these.
+     */
+    robberDepthYards: 10,
+    robberBallReactionTime: 0.25,
+    robberBallSpeedRatio: 0.75,
+    twoDeepDepthYards: 18,
+    twoDeepHalfYards: 8,
+    twoDeepBallReactionTime: 0.7,
+    twoDeepBallSpeedRatio: 0.5,
     /** How fast the safety drifts while reading the play (fraction of his speed). */
     safetyDriftRatio: 0.5,
     /** The safety stays at least this far deeper than the deepest receiver... */
@@ -115,6 +128,8 @@ export const feel = {
     lb2OffsetYards: 4.5,
     /** ...and on a pass drops only this deep at first (LB1's deeper drop leaves the RB room; LB2 has the flat). */
     lb2PassDropYards: 5,
+    /** ...then covers the TE from only this far over the top (LB1's 3-yd cushion left every drag and seam free). */
+    lb2CushionYards: 1,
   },
   /** Defensive calls (3d2): the CPU defense picks press man / off man / LB blitz / normal man each snap. */
   defCalls: {
@@ -144,6 +159,16 @@ export const feel = {
     lb2BlitzMax: 0.65,
     lb2ZoneDepthYards: 6,
     lb2ZoneTopYards: 1,
+    /**
+     * Safety look weights (3h-c): two deep vs one deep + robber. 3rd / 4th and long and protecting a
+     * late lead = more two deep; short yardage and the red zone = more robber.
+     */
+    weightTwoDeep: 1,
+    weightRobber: 1,
+    longTwoDeepBonus: 1,
+    shortRobberBonus: 1,
+    redZoneRobberBonus: 1,
+    preventTwoDeepBonus: 2,
     /** Base weight of each call (how often it's picked in an ordinary situation). */
     weightMan: 4,
     weightPress: 2,
@@ -179,6 +204,8 @@ export const feel = {
     lbReadTime: 0.4,
     /** Cornerbacks stay with their receiver this long after the handoff before reading the run (pass first). */
     cbReadTime: 0.3,
+    /** Two-deep safeties (3h-c) are pass-first too: they wait this long after the handoff (the robber doesn't). */
+    twoDeepRunReadTime: 0.4,
     /** Until you steer, the RB follows his lane: aims this far ahead on it... */
     laneLookAheadYards: 2,
     /** ...and steers fully once he's this far off it. */

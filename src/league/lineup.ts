@@ -6,7 +6,7 @@
  * (the nickel) on the slot, CB2 on WR2; LB1 covers the RB; S1 is the deep safety.
  * The lines (3h-a): our five blockers top to bottom = LT (OL1), LG (OL4), C (OL3), RG (OL5),
  * RT (OL2); their four rushers top to bottom = edge (DL1), inside (DL3), inside (DL4), edge (DL2).
- * The tight end (TE1, 3h-b) is skill spot 4, covered by LB2. Until 3h-c the second safety isn't on the field.
+ * The tight end (TE1, 3h-b) is skill spot 4, covered by LB2. Two-deep shell (3h-c): S1 has the top half, S2 the bottom half.
  */
 import { depthChart, type League } from './league';
 import type { Player } from '../players/player';
@@ -22,7 +22,10 @@ export interface OffenseLineup {
 export interface DefenseLineup {
   /** Covering skill spots 0-4: the three corners, LB1 (on the RB) and LB2 (on the TE). */
   cover: [Player, Player, Player, Player, Player];
+  /** S1: the deep safety over the top half (two-deep shell, 3h-c)... */
   safety: Player;
+  /** ...and S2 over the bottom half. */
+  safety2: Player;
   /** The four rushers in formation order (top to bottom): they chase the ball carrier once free of their blocks. */
   rush: [Player, Player, Player, Player];
 }
@@ -34,7 +37,7 @@ export function offenseLineup(league: League, teamId: number): OffenseLineup {
 
 export function defenseLineup(league: League, teamId: number): DefenseLineup {
   const c = depthChart(league, teamId);
-  return { cover: [c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player, c.LB[1].player], safety: c.S[0].player, rush: [c.DL[0].player, c.DL[2].player, c.DL[3].player, c.DL[1].player] };
+  return { cover: [c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player, c.LB[1].player], safety: c.S[0].player, safety2: c.S[1].player, rush: [c.DL[0].player, c.DL[2].player, c.DL[3].player, c.DL[1].player] };
 }
 
 /** The team's starting kicker and punter (K1, P1). */

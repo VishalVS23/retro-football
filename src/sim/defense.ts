@@ -197,12 +197,22 @@ export interface SafetyParams {
   /** Once the ball is thrown: how long before he breaks on it, and how fast he goes. */
   ballReactionTime: number;
   ballSpeed: number;
+  /**
+   * Two-deep shell (3h-c): which half of the field is his (-1 = top, +1 = bottom). He sits
+   * `halfYards` off the middle on his side and stays deeper than the deepest receiver on his half.
+   * Leave out = the old single deep safety in the middle.
+   */
+  half?: -1 | 1;
+  halfYards?: number;
 }
 
+/** A receiver this far over the middle still counts as on a safety's half (seams and posts). */
+const HALF_OVERLAP_YARDS = 2;
+
 /**
- * One step of the deep safety: sits deep, shading toward the side with more receivers, and backs
- * up to stay deeper than the deepest receiver. After the throw (and a moment to read it) he
- * breaks on the landing spot.
+ * One step of a deep safety: sits deep (in the middle, shading toward the side with more
+ * receivers; or over his half in a two-deep shell) and backs up to stay deeper than the deepest
+ * receiver. After the throw (and a moment to read it) he breaks on the landing spot.
  */
 export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
   let target: Vec;
@@ -210,6 +220,12 @@ export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyPara
   if (ball && ball.sinceThrow >= p.ballReactionTime) {
     target = ball.landing;
     speed = p.ballSpeed;
+  } else if (p.half) {
+    const half = p.half;
+    const mine = receivers.filter((r) => (r.y - FIELD_MID) * half > -HALF_OVERLAP_YARDS);
+    const deepest = mine.length ? Math.max(...mine.map((r) => r.x)) : -Infinity;
+    target = { x: Math.min(p.maxX, Math.max(p.baseX, deepest + p.cushionYards)), y: FIELD_MID + half * (p.halfYards ?? 0) };
+    speed = target.x > pos.x + 0.25 ? p.bailSpeed : p.driftSpeed;
   } else {
     const avgY = receivers.reduce((s, r) => s + r.y, 0) / receivers.length;
     const deepest = Math.max(...receivers.map((r) => r.x));
