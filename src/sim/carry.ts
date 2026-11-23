@@ -182,7 +182,13 @@ export function stepPursuers(pursuers: Pursuer[], seen: Sightings, t: number, dt
   const late = Math.max(0, t - s.t);
   const guess = { x: s.pos.x + vx * late, y: s.pos.y + vy * late };
   const targetFor = (d: Pursuer) => {
-    const lead = Math.min(p.leadTime, dist(d.pos, guess) / Math.max(1, d.speed));
+    // Lead him by about the time it takes to meet. A defender in FRONT of the runner counts the
+    // runner coming at him too (closing speed), so he steps up to meet him: leading by gap / his own
+    // speed alone put the aim point behind him whenever the runner was faster, and he backpedaled
+    // in front of the runner all the way to the end zone.
+    const gap = dist(d.pos, guess);
+    const closing = gap > 1e-6 ? Math.max(0, (vx * (d.pos.x - guess.x) + vy * (d.pos.y - guess.y)) / gap) : 0;
+    const lead = Math.min(p.leadTime, gap / Math.max(1, d.speed + closing));
     return { x: guess.x + vx * lead, y: guess.y + vy * lead };
   };
   return pursuers.map((d) => {

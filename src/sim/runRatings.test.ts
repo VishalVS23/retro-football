@@ -138,7 +138,8 @@ describe('balance: ball carriers vs tacklers', () => {
     for (const name of ['Dive', 'Toss']) {
       const r = runs(name, team(-4, 4)).avg;
       expect(r).toBeLessThan(runs(name, team(0, 0)).avg - 0.4);
-      expect(r).toBeGreaterThan(0.8);
+      // 0.8 before the backpedal fix (2026-11-22): defenders in front no longer give ground, ~0.75-0.8 now.
+      expect(r).toBeGreaterThan(0.6);
     }
   }, 60000);
 });

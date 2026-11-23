@@ -113,6 +113,22 @@ describe('pursuit', () => {
     expect(Math.hypot(d[0].pos.x - c.pos.x, d[0].pos.y - c.pos.y)).toBeLessThan(gap0 / 3);
   });
 
+  it('a defender in front steps up to meet a faster runner instead of backpedaling (user bug 2026-11-22)', () => {
+    // QB scramble: runner 7.5 straight at a 6.8 defender 4 yd ahead. Before the fix the defender's
+    // aim point was behind him, so he backed off for ~17 yd.
+    let s = startChase({ x: 50, y: 26 }, [{ pos: { x: 54, y: 26 }, speed: 6.8, stunned: 0 }]);
+    const p = { carry, pursuit, tackle: { ...tackle, brokenTackleChance: 0 }, graceTime: 0.2, dirX: 1 as const };
+    let end: string | null = null;
+    for (let i = 0; i < 300 && !end; i++) {
+      const st = stepChase(s, 0, dt, p, () => 0.5);
+      s = st.state;
+      end = st.end;
+    }
+    expect(end).toBe('tackled');
+    expect(s.t).toBeLessThan(0.8);
+    expect(s.carrier.pos.x - 50).toBeLessThan(5);
+  });
+
   it('a stunned defender stays down for a moment', () => {
     const c = startCarrier({ x: 40, y: 20 });
     const d = stepPursuers([{ pos: { x: 45, y: 20 }, speed: 7, stunned: 0.5 }], remember([], 0, c, 1), 0, 0.1, pursuit);
