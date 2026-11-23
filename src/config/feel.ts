@@ -37,7 +37,7 @@ export const feel = {
     /** A rusher this close shows the red pressure warning. */
     pressureYards: 3.5,
     /** How far the QB drops back after the snap, and how long it takes. */
-    dropbackYards: 3,
+    dropbackYards: 2.2,
     dropbackTime: 0.6,
   },
   defense: {

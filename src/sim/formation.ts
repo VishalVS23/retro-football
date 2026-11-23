@@ -24,6 +24,8 @@ export const SLOT = 1;
  */
 export const RETURN_LINE = [1, 3] as const;
 export const RETURN_RUSH = [1, 2] as const;
+/** QB's spot behind the line (was 2; the centre is at 1 now that there is one). */
+export const QB_DEPTH = 2.8;
 const BLOCK_Y = [-4, -2, 0, 2, 4];
 const RUSH_Y = [-5.5, -2, 2, 5.5];
 
@@ -44,7 +46,9 @@ export function formation(losX: number) {
   // The RB counts as "below the middle", so negative route y (toward his sideline) = the bottom side.
   const rb: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX + RB_OFFSET.x, y: mid + RB_OFFSET.y }, towardMiddle: -1 };
   return {
-    qb: { x: losX - 2, y: mid },
+    // A step behind the centre so the two don't overlap (3h-a); his dropback is shorter to match,
+    // so he still sets up 5 yards behind the line.
+    qb: { x: losX - QB_DEPTH, y: mid },
     wrs,
     rb,
     skill: [...wrs, rb],
