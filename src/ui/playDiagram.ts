@@ -44,6 +44,8 @@ export interface DiagramDefense {
   safety: string;
   edge: number[];
   line?: { pass: number[]; run: number[] };
+  /** false = no matchup markers (the ⚙ Display switch). Default true. */
+  arrows?: boolean;
 }
 
 /** Text from outside goes through this before landing in the SVG. */
@@ -206,9 +208,10 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null)));
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null); // the backfield is too crowded for his name
-  if (v.detailed && v.defense) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
+  const arrows = v.detailed && v.defense && v.defense.arrows !== false;
+  if (arrows) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
   const lineEdges = v.defense?.line?.[play.run ? 'run' : 'pass'];
-  if (v.detailed && lineEdges) f.block.forEach((b, i) => (s += edgeArrow(b, lineEdges[i] ?? 0)));
+  if (arrows && lineEdges) f.block.forEach((b, i) => (s += edgeArrow(b, lineEdges[i] ?? 0)));
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

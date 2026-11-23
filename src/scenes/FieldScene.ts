@@ -82,6 +82,7 @@ import { coachTip } from '../sim/fourthDown';
 import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStart, pickDefCall, stepBlitzer, teamAggression, type DefCallId } from '../sim/defCalls';
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
+import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
 import { carryFor, edgeSign, lineEdge, pursuerFor, securityRatio, shedTimeFor, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
@@ -332,6 +333,14 @@ export class FieldScene extends Phaser.Scene {
       window.removeEventListener(NEW_GAME_EVENT, onNewGame);
       window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
     });
+
+    // ⚙ Display switches (matchup arrows, names): redraw the names and an open play-call screen.
+    const onDisplay = () => {
+      this.placeNameLabels();
+      if (this.state === 'calling') this.openCall();
+    };
+    window.addEventListener(DISPLAY_CHANGE_EVENT, onDisplay);
+    this.events.once('shutdown', () => window.removeEventListener(DISPLAY_CHANGE_EVENT, onDisplay));
 
     // SKIP button (a DOM button, so taps on it never reach the field). Taps elsewhere don't skip.
     const skip = document.createElement('button');
@@ -1980,8 +1989,19 @@ export class FieldScene extends Phaser.Scene {
       t.setText(players[i].lastName.toUpperCase())
         .setScale(feel.ratings.nameSize / 48)
         .setPosition(dots[i].x, dots[i].y + PLAYER_RADIUS + 0.2)
-        .setVisible(show && feel.ratings.nameSize > 0);
+        .setVisible(show && feel.ratings.nameSize > 0 && displayPrefs().names);
     });
+  }
+
+  /** Names and matchup markers for the play-call diagram, as the ⚙ Display switches say. */
+  private diagramPeople() {
+    const prefs = displayPrefs();
+    const m = this.diagramMatchups();
+    return {
+      names: prefs.names ? this.diagramNames() : null,
+      // Without names their defenders show as CB / LB / S (the diagram's fallback labels).
+      matchups: m ? { ...m, ...(prefs.names ? {} : { cover: [], safety: '' }), arrows: prefs.arrows } : null,
+    };
   }
 
   /**
@@ -2253,8 +2273,7 @@ export class FieldScene extends Phaser.Scene {
       onPunt: () => this.startKick(true),
       tip: coachTip({ match: this.match, quarter: this.clock.quarter, timeLeft: this.clock.timeLeft, fgRange, overtime: !!this.clock.ot }),
       onTeam: this.league && this.league.userTeamId !== null ? () => this.openTeam() : null,
-      names: this.diagramNames(),
-      matchups: this.diagramMatchups(),
+      ...this.diagramPeople(),
       defenseRead: this.callAtLine ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall] } : null,
     });
   }
