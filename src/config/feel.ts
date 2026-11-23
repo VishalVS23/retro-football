@@ -84,6 +84,8 @@ export const feel = {
     safetyBailRatio: 0.85,
     /** How long after the throw before the safety breaks on the ball. */
     safetyBallReactionTime: 0.25,
+    /** Breaking on the ball he runs at this fraction of his speed (corners turning around get cbBallSpeedRatio; he's facing the play, so faster: no sure late dig). */
+    safetyBallSpeedRatio: 0.75,
     /** Linebacker: lines up this deep, in the middle, and covers the running back. */
     lbDepthYards: 5,
     /** On a run play he never comes closer to the line than this before the handoff (he waits for the play). */
@@ -95,6 +97,10 @@ export const feel = {
     lbReactionTime: 0.35,
     /** His chasing speed once someone has the ball. */
     lbPursuitSpeed: 6.8,
+    /** On a pass he holds that drop only this long after the snap, then reads the RB and covers him tight (no free checkdown). */
+    lbPassDropTime: 0.75,
+    /** ...and then sits this far over the RB (settled, so he can tackle the catch instead of overrunning it). */
+    lbCushionYards: 3,
   },
   /** Defensive calls (3d2): the CPU defense picks press man / off man / LB blitz / normal man each snap. */
   defCalls: {
@@ -571,6 +577,11 @@ export const feel = {
     /** Screen shake multipliers for touchdowns and big hits (after long gains). */
     touchdownShakeScale: 2,
     bigHitShakeScale: 1.5,
+    /** Juke: puffs of turf (radius in yards) that grow by this much and fade over this long, and how much he leans into the cut. */
+    jukePuffSize: 0.55,
+    jukePuffGrow: 2.2,
+    jukePuffTime: 0.35,
+    jukeLean: 0.25,
   },
 };
 

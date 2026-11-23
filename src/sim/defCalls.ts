@@ -62,11 +62,13 @@ export function coverParams(call: DefCallId, feel: Feel, losX: number, run: bool
   const lb: CoverParams = {
     ...cb,
     reactionTime: d.lbReactionTime,
-    cushionYards: 1,
+    cushionYards: d.lbCushionYards,
+    cushionFloorYards: d.lbCushionYards,
     cushionCloseTime: d.cbCushionCloseTime,
     topSpeed: feel.routes.topSpeed * d.lbSpeedRatio,
     // He reads the play: holds near the line against a run, drops into coverage against a pass.
     minX: losX + (run ? d.lbFloorYards : d.lbPassDropYards),
+    minXUntil: run ? undefined : d.lbPassDropTime,
   };
   return { cb, lb };
 }

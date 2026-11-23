@@ -39,6 +39,8 @@ export interface CoverParams {
    * his ground past the line instead of running into our backfield after the running back).
    */
   minX?: number;
+  /** He only keeps to `minX` for this many seconds after the snap, then covers his man tight (a linebacker who reads the checkdown). Default: the whole play. */
+  minXUntil?: number;
   /** After the throw, how long before he breaks on the ball. */
   ballReactionTime: number;
   /** Fraction of his top speed when breaking on the ball (he has to read it in the air). */
@@ -131,7 +133,8 @@ export function stepCoverage(
     const before = delayedPos(history, t - p.reactionTime - 0.1);
     const seenVel = { x: (seen.x - before.x) / 0.1, y: (seen.y - before.y) / 0.1 };
     const ahead = (p.anticipation ?? 0) * p.reactionTime;
-    target = { x: Math.max(seen.x + seenVel.x * ahead + cushion, p.minX ?? -Infinity), y: seen.y + seenVel.y * ahead };
+    const floorX = p.minX !== undefined && (p.minXUntil === undefined || t < p.minXUntil) ? p.minX : -Infinity;
+    target = { x: Math.max(seen.x + seenVel.x * ahead + cushion, floorX), y: seen.y + seenVel.y * ahead };
     const closing = t < p.cushionCloseTime ? (p.cushionYards - floor) / Math.max(0.01, p.cushionCloseTime) : 0;
     targetVel = { x: seenVel.x - closing, y: seenVel.y };
   }

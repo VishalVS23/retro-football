@@ -7,7 +7,9 @@ import type { Feel } from '../config/feel';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { formation } from './formation';
 import { RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
-import { resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepSafety, type PassResult } from './defense';
+import { resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
+import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
+import { carryFor, pursuerFor, tackleFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
@@ -38,6 +40,12 @@ export interface PassOptions {
   defense?: { cover: (Player | null)[]; safety: Player | null };
   /** Their defensive call (3d2). Default: normal man. */
   call?: DefCallId;
+  /**
+   * Play out the run after a catch: the catcher runs away from the nearest chaser and jukes a
+   * tackler who gets this close (yards; 0 = never jukes). Result `gain` = yards from the line to where he's
+   * stopped. Uses its own dice, so the pass itself rolls exactly as without it.
+   */
+  afterCatch?: { jukeYards: number };
 }
 
 /** Headless pass play. Corner speeds are rolled from `seed`, like the game does each snap. */
@@ -48,7 +56,7 @@ export function simulatePass(
   feel: Feel,
   losX = 35,
   opts: PassOptions = {},
-): { result: PassResult; separation: number; defender: number; miss: number; sacked: boolean } {
+): { result: PassResult; separation: number; defender: number; miss: number; sacked: boolean; gain?: number; afterCatch?: number } {
   const withQb = 'qb' in opts;
   const armFx = withQb ? arm(opts.qb, feel.ratings) : { speed: 1, range: 1 };
   const rng = createRng(seed);
@@ -89,13 +97,18 @@ export function simulatePass(
     driftSpeed: tk.dbPursuitSpeed * d.safetyDriftRatio,
     bailSpeed: tk.dbPursuitSpeed * d.safetyBailRatio,
     ballReactionTime: def ? safetyReadTime(def.safety, d.safetyBallReactionTime, R) : d.safetyBallReactionTime,
-    ballSpeed: tk.dbPursuitSpeed * d.cbBallSpeedRatio,
+    ballSpeed: tk.dbPursuitSpeed * d.safetyBallSpeedRatio,
   };
 
 
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
   type Cov = (typeof cover)[number];
   const stepLb = (c: Cov, tt: number): Cov => ({ ...c, pos: stepBlitzer(c.pos, qbAt(tt), tt, dt, feel) });
+  // The two pass rushers (only needed to chase after a catch; their own dice keep the pass rolls unchanged).
+  const rng2 = createRng((seed ^ 0x5bd1e995) >>> 0);
+  const pk = feel.pocket;
+  let rushers: Rusher[] = f.rush.map((pos) => ({ pos: { ...pos }, shedAt: pk.shedTime + (rng2.next() * 2 - 1) * pk.shedTimeVariance }));
+  const rushP = { blockedSpeed: pk.rushBlockedSpeed, freeSpeed: pk.rushFreeSpeed, sackReachYards: pk.sackReachYards };
   let sacked = false;
   let t = 0;
   for (; t < shot.throwAt - 1e-9; t += dt) {
@@ -103,6 +116,7 @@ export function simulatePass(
     cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : stepCoverage(c, runners[i].pos, dt, coverP[i])));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
     const q = qbAt(t + dt);
+    rushers = rushers.map((r) => stepRusher(r, q, t + dt, dt, rushP));
     if (blitz && Math.hypot(cover[RB].pos.x - q.x, cover[RB].pos.y - q.y) <= feel.pocket.sackReachYards) sacked = true;
   }
 
@@ -130,6 +144,7 @@ export function simulatePass(
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
     cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, coverP[i], { landing, sinceThrow: e + dt, help: i !== shot.to }));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams, { landing, sinceThrow: e + dt });
+    rushers = rushers.map((r) => stepRusher(r, qb, t + e + dt, dt, rushP));
   }
   const ca = feel.catching;
   const wrSpots = runners.map((r, i) =>
@@ -156,5 +171,40 @@ export function simulatePass(
     })()),
   });
   const nearestDefender = Math.min(...cbSpots.map((c) => Math.hypot(c.x - landing.x, c.y - landing.y)));
-  return { result: pass.result, separation: nearestDefender, defender: pass.defender, miss, sacked };
+  const out = { result: pass.result, separation: nearestDefender, defender: pass.defender, miss, sacked };
+  if (!opts.afterCatch || sacked || pass.result !== 'catch') return out;
+
+  // Run after the catch, like the game: every defender chases (the rushers too: on a pass nobody blocks them any more).
+  const at = wrSpots[shot.to];
+  const isRb = shot.to === RB;
+  const catcher = opts.offense?.[shot.to] ?? undefined;
+  const role = isRb ? 'RB' : 'WR';
+  const pursuers: Pursuer[] = [
+    ...cover.map((c, i) =>
+      pursuerFor(def?.cover[i] ?? undefined, i === RB ? 'LB' : 'CB', { pos: { ...c.pos }, speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed, stunned: 0 }, R),
+    ),
+    pursuerFor(def?.safety ?? undefined, 'S', { pos: { ...safety }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
+    ...rushers.map((r) => pursuerFor(undefined, 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0 }, R)),
+  ];
+  const carry = carryFor(catcher, role, { ...feel.running, runSpeed: isRb ? feel.runGame.rbRunSpeed : feel.running.runSpeed }, R);
+  const params = {
+    carry,
+    pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed: 0 },
+    tackle: tackleFor(catcher, role, tk, R),
+    graceTime: tk.catchGraceTime,
+    dirX: 1 as const,
+  };
+  let chase = startChase(at, pursuers);
+  const juke = opts.afterCatch.jukeYards;
+  for (let i = 0; i < 60 * 15; i++) {
+    const c = chase.carrier.pos;
+    if (juke > 0) {
+      const threat = chase.pursuers.find((q) => canTackle(q) && q.pos.x > c.x - 0.5 && Math.hypot(q.pos.x - c.x, q.pos.y - c.y) < juke);
+      if (threat) chase = { ...chase, carrier: tryJuke(chase.carrier, Math.sign(c.y - threat.pos.y) || 1, carry) };
+    }
+    const step = stepChase(chase, evadeSteer(c, chase.pursuers, 1, feel.interception.evadeLookYards), dt, params, () => rng2.next());
+    chase = step.state;
+    if (step.end) break;
+  }
+  return { ...out, gain: chase.carrier.pos.x - losX, afterCatch: chase.carrier.pos.x - at.x };
 }

@@ -538,7 +538,7 @@ export class FieldScene extends Phaser.Scene {
       const quick = (this.time.now - t.time) / 1000 <= feel.running.jukeFlickTime;
       const dx = p.x - t.x;
       if (this.state === 'run' && quick && Math.abs(dy) >= JUKE_MIN_PX && Math.abs(dy) > Math.abs(dx)) {
-        this.chase = { ...this.chase, carrier: tryJuke(this.chase.carrier, Math.sign(dy), this.carryParams()) };
+        this.juke(Math.sign(dy));
         this.steered = true;
       } else if (this.state === 'run' && quick && dx >= JUKE_MIN_PX && dx > Math.abs(dy)) {
         this.goDown(); // quick flick FORWARD (toward their end zone) = dive / slide
@@ -602,7 +602,7 @@ export class FieldScene extends Phaser.Scene {
     this.arrowDown[key] = null;
     if (pressed === null || this.state !== 'run') return;
     if ((this.time.now - pressed) / 1000 <= feel.running.jukeFlickTime) {
-      this.chase = { ...this.chase, carrier: tryJuke(this.chase.carrier, key === 'up' ? -1 : 1, this.carryParams()) };
+      this.juke(key === 'up' ? -1 : 1);
     }
   }
 
@@ -1258,6 +1258,44 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** Catch / pick / swat "pop" on a player. */
+  /** Our ball carrier jukes up (-1) or down (+1), if he's ready; shows it so you know it went off. */
+  private juke(dir: number) {
+    const before = this.chase.carrier;
+    const after = tryJuke(before, dir, this.carryParams());
+    this.chase = { ...this.chase, carrier: after };
+    if (after !== before) this.jukeFx(dir);
+  }
+
+  /** A juke: a puff of turf kicked up on the side he pushed off from, and a quick lean the way he cut. */
+  private jukeFx(dir: number) {
+    const dot = this.carrierDot;
+    if (!dot) return;
+    const j = feel.juice;
+    for (let i = 0; i < 3; i++) {
+      const puff = this.add
+        .circle(dot.x - 0.4 - i * 0.5, dot.y - dir * (0.5 + i * 0.25), j.jukePuffSize * (1 - i * 0.2), 0xf4efd8, 0.95)
+        .setDepth(dot.depth - 1);
+      this.tweens.add({
+        targets: puff,
+        scale: j.jukePuffGrow,
+        alpha: 0,
+        x: puff.x - 0.6,
+        duration: j.jukePuffTime * 1000 * (1 + i * 0.25),
+        ease: 'Quad.easeOut',
+        onComplete: () => puff.destroy(),
+      });
+    }
+    this.tweens.add({
+      targets: dot,
+      scaleX: 1 - j.jukeLean,
+      scaleY: 1 + j.jukeLean,
+      duration: feel.running.jukeTime * 1000,
+      ease: 'Quad.easeOut',
+      yoyo: true,
+      onComplete: () => dot.setScale(1),
+    });
+  }
+
   private popPlayer(p: Phaser.GameObjects.Arc) {
     this.tweens.add({
       targets: p,
@@ -1330,7 +1368,7 @@ export class FieldScene extends Phaser.Scene {
         driftSpeed: db * d.safetyDriftRatio,
         bailSpeed: db * d.safetyBailRatio,
         ballReactionTime: safetyReadTime(this.theirLineup?.safety, d.safetyBallReactionTime, feel.ratings),
-        ballSpeed: db * d.cbBallSpeedRatio,
+        ballSpeed: db * d.safetyBallSpeedRatio,
       },
       ball,
     );
@@ -2322,7 +2360,7 @@ export class FieldScene extends Phaser.Scene {
     }
     if (this.state === 'run') {
       if (this.chase.dive) this.label.setText(this.qbRun ? 'Sliding…' : 'Diving…');
-      else this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag/↑↓ = steer · flick/tap ↑↓ = juke · flick →/→ key = ${this.qbRun ? 'slide' : 'dive'}`);
+      else this.label.setText(`${this.qbRun ? 'QB RUN' : 'RUN'}! Drag/↑↓/WS = steer · flick/tap = juke · flick →/D = ${this.qbRun ? 'slide' : 'dive'}`);
       return;
     }
     if (this.state === 'live' && this.calledPlay.run) {
