@@ -9,6 +9,9 @@ import {
   callWeights,
   cornerStart,
   coverParams,
+  lb2BlitzChance,
+  lb2Job,
+  linebacker2Start,
   linebackerStart,
   pickDefCall,
   stepBlitzer,
@@ -67,6 +70,29 @@ describe('choosing the call', () => {
     }
     expect(Math.max(...all) - Math.min(...all)).toBeGreaterThan(0.6);
     expect(teamAggression(null)).toBe(0.5);
+  });
+});
+
+describe('LB2 when our tight end stays in to block (3h-b)', () => {
+  it('covers the TE when he runs a route; else drops or blitzes on one roll', () => {
+    expect(lb2Job(false, 0, 1)).toBe('cover');
+    expect(lb2Job(true, 0.2, 0.3)).toBe('blitz');
+    expect(lb2Job(true, 0.4, 0.3)).toBe('drop');
+  });
+
+  it('their coach decides: aggressive coaches and short yardage blitz more, a late lead less; never always', () => {
+    const c = (s: DefSituation) => lb2BlitzChance(s, feel);
+    expect(c(base)).toBeGreaterThan(0.1);
+    expect(c({ ...base, aggression: 1 })).toBeGreaterThan(c({ ...base, aggression: 0 }) + 0.1);
+    expect(c({ ...base, down: 3, toGo: 1 })).toBeGreaterThan(c(base));
+    expect(c({ ...base, quarter: 4, timeLeft: 60, lead: 7 })).toBeLessThan(c(base));
+    for (const a of [0, 0.5, 1]) for (const toGo of [1, 5, 15]) expect(c({ ...base, aggression: a, down: 3, toGo })).toBeLessThanOrEqual(feel.defCalls.lb2BlitzMax);
+  });
+
+  it('LB2 lines up over the tight end, a few yards deep', () => {
+    const p = linebacker2Start(feel, 40);
+    expect(p.x).toBeGreaterThan(41);
+    expect(p.y).toBeGreaterThan(linebackerStart('man', feel, 40).y + 2);
   });
 });
 

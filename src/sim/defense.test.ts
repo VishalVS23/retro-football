@@ -278,6 +278,31 @@ describe('corner momentum, anticipation and help defense', () => {
     expect(safety).toBe(own);
   });
 
+  it('his own man right on him makes the play, not a help defender a step closer (3h-b)', () => {
+    const wrs = [{ x: 40, y: 20 }, { x: 40, y: 40 }];
+    const landing = { x: 40, y: 20 };
+    const k = { ...contest, helpContestRatio: 0.5 };
+    const own = { x: 40.9, y: 20 }; // 0.9 yd: strength 0.64
+    const help = { x: 40.5, y: 20.3 }; // ~0.58 yd, but at half strength: ~0.38
+    expect(resolveTargetedPass(wrs, [own, help], landing, 0.5, k).defender).toBe(0);
+    // His own man far off: the help defender is the one in the way.
+    expect(resolveTargetedPass(wrs, [{ x: 45, y: 20 }, help], landing, 0.5, k).defender).toBe(1);
+  });
+
+  it('a linebacker in a zone (covering no one) contests fully, like the safety', () => {
+    const wrs = [{ x: 40, y: 20 }, { x: 40, y: 40 }];
+    const landing = { x: 40, y: 20 };
+    const k = { ...contest, helpContestRatio: 0.5 };
+    const near = { x: 40.5, y: 20.5 };
+    const far = { x: 70, y: 0 };
+    const count = (zone?: boolean[]) => {
+      let n = 0;
+      for (let r = 0; r < 100; r++) if (resolveTargetedPass(wrs, [far, near], landing, (r + 0.5) / 100, k, undefined, { zone }).result === 'catch') n++;
+      return n;
+    };
+    expect(count([false, true])).toBeLessThan(count());
+  });
+
   it('the safety stays deeper than the deepest receiver, then breaks on the ball after reading it', () => {
     const p = { baseX: 50, maxX: 119, cushionYards: 3, driftSpeed: 4, bailSpeed: 7, ballReactionTime: 0.25, ballSpeed: 5 };
     let s = { x: 50, y: 26.65 };
@@ -410,7 +435,7 @@ describe('passing with three receivers', () => {
     expect(r.result).toBe('interception');
   });
 
-  it('every play has one route per receiver plus the running back', () => {
-    for (const play of PLAYS) expect(play.routes).toHaveLength(4);
+  it('every play has one route per receiver, the running back and the tight end', () => {
+    for (const play of PLAYS) expect(play.routes).toHaveLength(5);
   });
 });

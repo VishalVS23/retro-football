@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYS, RB, RB_ROUTES, ROUTES, ROUTE_MAX_X, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
+import { PLAYS, RB, RB_ROUTES, ROUTES, TE, TE_ROUTES, ROUTE_MAX_X, nextRoute, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, withHotRoute, type Runner } from './routes';
 import type { Vec } from './throw';
 import { TOTAL_LENGTH } from './field';
 
@@ -142,7 +142,7 @@ describe('hot routes', () => {
     const seen = new Set<string>();
     for (let i = 0; i < ROUTES.length; i++) {
       seen.add(r.name);
-      r = nextRoute(r);
+      r = nextRoute(r, 0);
     }
     expect(seen.size).toBe(ROUTES.length);
     expect(r.name).toBe(ROUTES[0].name); // back to the start
@@ -152,25 +152,39 @@ describe('hot routes', () => {
     const play = PLAYS[0];
     const before = play.routes.map((r) => r.name);
     const hot = withHotRoute(play, 1, route('Go'));
-    expect(hot.routes.map((r) => r.name)).toEqual([before[0], 'Go', before[2], before[3]]);
+    expect(hot.routes.map((r) => r.name)).toEqual([before[0], 'Go', ...before.slice(2)]);
     expect(play.routes.map((r) => r.name)).toEqual(before);
   });
 
-  it('every play has four routes (3 receivers + RB) and the new plays exist', () => {
-    for (const p of PLAYS) expect(p.routes).toHaveLength(4);
-    expect(PLAYS.map((p) => p.name)).toEqual(expect.arrayContaining(['Hitch Slant', 'Curls', 'Dive', 'Toss']));
-    expect(PLAYS).toHaveLength(8);
+  it('every play has five routes (3 receivers + RB + TE) and the new plays exist', () => {
+    for (const p of PLAYS) expect(p.routes).toHaveLength(5);
+    expect(PLAYS.map((p) => p.name)).toEqual(expect.arrayContaining(['Hitch Slant', 'Curls', 'TE Seam', 'TE Drag', 'Dive', 'Toss']));
+    expect(PLAYS).toHaveLength(10);
     expect(PLAYS.filter((p) => p.run).map((p) => p.name)).toEqual(['Dive', 'Toss']);
+    // The TE always blocks on runs; every TE route is one of his own.
+    for (const p of PLAYS) expect(TE_ROUTES).toContain(p.routes[TE]);
+    for (const p of PLAYS.filter((q) => q.run)) expect(p.routes[TE].block).toBe(true);
+  });
+
+  it('TE hot routes cycle Seam > Drag > Flat > Block > Seam, even though WR / RB routes share some names', () => {
+    let r = TE_ROUTES[0];
+    const names: string[] = [];
+    for (let i = 0; i <= TE_ROUTES.length; i++) {
+      names.push(r.name);
+      r = nextRoute(r, TE);
+    }
+    expect(names).toEqual(['Seam', 'Drag', 'Flat', 'Block', 'Seam']);
+    expect(TE_ROUTES).toContain(nextRoute(TE_ROUTES[1], TE)); // his Drag isn't the WR Drag
   });
 
   it('RB hot routes cycle through the RB routes only; run paths never change', () => {
     let r = RB_ROUTES[0];
     for (let i = 0; i < RB_ROUTES.length; i++) {
       expect(RB_ROUTES).toContain(r);
-      r = nextRoute(r);
+      r = nextRoute(r, RB);
     }
     expect(r).toBe(RB_ROUTES[0]);
     const dive = PLAYS.find((p) => p.name === 'Dive')!.routes[RB];
-    expect(nextRoute(dive)).toBe(dive);
+    expect(nextRoute(dive, RB)).toBe(dive);
   });
 });

@@ -113,7 +113,7 @@ export function openPlayCall(o: PlayCallOptions) {
           </div></div>`
         : ''
     }
-    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER OR THE RB TO CHANGE HIS ROUTE</div></div>
+    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER, THE RB OR THE TE TO CHANGE HIS ROUTE</div></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
       <div class="pc-cards">
@@ -199,7 +199,7 @@ export function openPlayCall(o: PlayCallOptions) {
     const wr = (e.target as Element).closest('[data-wr]')?.getAttribute('data-wr');
     if (wr == null) return;
     const k = Number(wr);
-    routes[k] = nextRoute(routes[k]);
+    routes[k] = nextRoute(routes[k], k);
     drawBig();
   });
   root.querySelector('.pc-btns')!.addEventListener('click', (e) => {

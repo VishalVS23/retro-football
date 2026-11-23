@@ -87,3 +87,31 @@ describe('after the catch', () => {
     expect(dig.gain).toBeGreaterThan(10);
   }, 60000);
 });
+
+// ---------- The tight end (3h-b) ----------
+
+describe('balance: the tight end', () => {
+  const sackTime = (name: string, extra = {}) => {
+    let sum = 0;
+    for (let s = 1; s <= 40; s++) {
+      let t = 0.8;
+      for (; t < 4.5; t += 0.1) if (simulatePass(play(name), { to: 0, throwAt: t, lead: 1 }, s * 7919, feel, 35, extra).sacked) break;
+      sum += t;
+    }
+    return sum / 40;
+  };
+
+  it('a TE in to block buys time (when LB2 drops); when LB2 blitzes he picks him up (about the normal pocket)', () => {
+    const route = sackTime('Verticals');
+    expect(sackTime('Crossers')).toBeGreaterThan(route + 0.15);
+    expect(Math.abs(sackTime('Crossers', { lb2: 'blitz' }) - route)).toBeLessThan(0.2);
+  }, 60000);
+
+  it('his short routes work; a ball near a blocking TE never counts as his', () => {
+    expect(catches('TE Drag', { to: 4, throwAt: 1.0, lead: 1 })).toBeGreaterThan(75);
+    expect(catches('Curls', { to: 4, throwAt: 0.9, lead: 1 })).toBeGreaterThan(30); // his flat
+    // The deep seam into the single safety is a gamble until the second safety (3h-c); thrown late, a real shot.
+    expect(catches('TE Seam', { to: 4, throwAt: 1.8, lead: 1 })).toBeGreaterThan(25);
+    for (let s = 1; s <= 30; s++) expect(simulatePass(play('Crossers'), { to: 4, throwAt: 1.0, lead: 1 }, s, feel).result).not.toBe('catch');
+  }, 60000);
+});

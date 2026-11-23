@@ -24,7 +24,7 @@ import type { TraitId } from '../players/traits';
 import { AVERAGE_RATING, halving, oddsShift, scale, type RatingSwitch } from './ratings';
 import type { CarryParams, Pursuer, TackleParams } from './carry';
 
-export type CarrierRole = 'QB' | 'RB' | 'WR';
+export type CarrierRole = 'QB' | 'RB' | 'WR' | 'TE';
 export type TacklerRole = 'CB' | 'LB' | 'S' | 'DL';
 export type Role = CarrierRole | TacklerRole | 'OL';
 
@@ -36,6 +36,9 @@ export const ROLE_NORMS: Record<Role, Partial<Record<AttributeKey, number>>> = {
   QB: { speed: 11.8, acceleration: 9.2, agility: 11.9, strength: 9.2, ballSecurity: 12.1 },
   RB: { speed: 12.6, acceleration: 12.6, agility: 12.6, strength: 12.2, ballSecurity: 12.7 },
   WR: { speed: 12.5, acceleration: 12.1, agility: 11.7, strength: 9.6, ballSecurity: 11.6 },
+  // Tight ends (3h-b). Ball security is low across the board (not a TE skill in the generator), so it's
+  // counted against other TEs: an average TE fumbles like anyone.
+  TE: { speed: 12.0, acceleration: 9.9, agility: 9.0, strength: 12.6, ballSecurity: 4.1 },
   CB: { speed: 12.6, agility: 11.7, tackling: 11.6, anticipation: 10.8 },
   LB: { speed: 12.7, agility: 9.4, tackling: 13.8, anticipation: 11.9 },
   S: { speed: 13.0, agility: 9.5, tackling: 13.2, anticipation: 11.5 },
@@ -175,7 +178,8 @@ export interface LineSheds {
  * The whole line for one snap: each rusher i vs his blocker `BLOCKER_OF[i]` (shedTimeFor, dice
  * rolled in that order), then the centre helps: on a pass whoever is about to get free first, on a
  * run the man at the point of attack (`helpOn`, the rusher nearest the hole). That block holds
- * `helpTime` longer (more if the centre wins that matchup, less if he loses it).
+ * `helpTime` longer (more if the centre wins that matchup, less if he loses it). `before` = extra
+ * help already on a rusher (the tight end's, 3h-b), added first so the centre helps someone else.
  */
 export function lineShedTimes(
   line: readonly (Player | null | undefined)[] | undefined,
@@ -185,8 +189,10 @@ export function lineShedTimes(
   rng: () => number,
   r: LineRatingParams,
   helpOn?: number,
+  before?: { rusher: number; time: number },
 ): LineSheds {
   const shedAt = BLOCKER_OF.map((b, i) => shedTimeFor(line?.[b], rush?.[i], run, base, rng() * 2 - 1, rng, r));
+  if (before) shedAt[before.rusher] += before.time;
   let helped = 0;
   shedAt.forEach((t, i) => {
     if (t < shedAt[helped]) helped = i;
@@ -203,6 +209,19 @@ export function pointOfAttack(rushY: readonly number[], holeY: number): number {
     if (Math.abs(y - holeY) < Math.abs(rushY[best] - holeY)) best = i;
   });
   return best;
+}
+
+/** The rusher on the tight end's side (3h-b): the bottom edge. */
+export const TE_SIDE_RUSHER = 3;
+
+/**
+ * How much longer blocks hold when the tight end stays in (3h-b): `time` x his blocking matchup
+ * with the edge rusher on his side (counted against an average lineman, so most TEs help a bit
+ * less). Runs: that edge block holds longer (`runGame.teHelpTime`). Passes: the whole line does
+ * (`pocket.teProtectTime`: with an extra man they slide).
+ */
+export function teHelpFor(te: Player | null | undefined, dl: Player | null | undefined, run: boolean, time: number, r: LineRatingParams): number {
+  return time * Math.max(0.25, 1 + lineEdge(te, dl, run, r) * (run ? r.runLinePerPoint : r.passLinePerPoint));
 }
 
 /** Each rusher's matchup with his own blocker, in rating points (rusher order). */

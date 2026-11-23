@@ -31,8 +31,9 @@ const baseCover = {
 
 describe('receiver and defender ratings', () => {
   it('a 10 changes nothing; switched off, nothing changes either', () => {
-    expect(receiverRunParams(pl('WR'), feel.routes, R)).toEqual(feel.routes);
-    expect(receiverRunParams(pl('WR', { speed: 18 }), feel.routes, off)).toEqual(feel.routes);
+    const plain = { topSpeed: feel.routes.topSpeed, acceleration: feel.routes.acceleration, cutSpeedRatio: feel.routes.cutSpeedRatio };
+    expect(receiverRunParams(pl('WR'), plain, R)).toEqual(plain);
+    expect(receiverRunParams(pl('WR', { speed: 18 }), plain, off)).toEqual(plain);
     expect(receiverCatchChance(pl('WR'), 0.95, R)).toBeCloseTo(0.95);
     expect(coverFor(pl('CB'), baseCover, R)).toEqual(baseCover);
     expect(contestMods(pl('CB'), R)).toEqual({ breakup: 1, intercept: 1, hold: 1 });

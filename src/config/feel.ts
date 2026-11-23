@@ -27,6 +27,12 @@ export const feel = {
     shedTimeVariance: 0.3,
     /** The centre's help (3h-a): the rusher about to get free first is held this much longer. */
     helpTime: 0.6,
+    /**
+     * Tight end in to block (3h-b): with an extra man the whole line holds this much longer (scaled by
+     * his matchup with the edge on his side)... unless LB2 blitzes, then he picks LB2 up, holding him about this long.
+     */
+    teProtectTime: 0.3,
+    tePickupTime: 1.6,
     /** How fast the centre slides over to help, yards per second (looks only). */
     helpSlideSpeed: 4,
     /** Rusher speed while blocked / once free, yards per second. */
@@ -105,6 +111,10 @@ export const feel = {
     lbPassDropTime: 0.75,
     /** ...and then sits this far over the RB (settled, so he can tackle the catch instead of overrunning it). */
     lbCushionYards: 3,
+    /** Second linebacker (3h-b): lines up this far below the middle, over our tight end... */
+    lb2OffsetYards: 4.5,
+    /** ...and on a pass drops only this deep at first (LB1's deeper drop leaves the RB room; LB2 has the flat). */
+    lb2PassDropYards: 5,
   },
   /** Defensive calls (3d2): the CPU defense picks press man / off man / LB blitz / normal man each snap. */
   defCalls: {
@@ -126,6 +136,14 @@ export const feel = {
     blitzStartYards: 2,
     blitzDelay: 0.45,
     blitzSpeed: 5.5,
+    /**
+     * Our tight end stays in to block (3h-b): LB2 blitzes with his usual blitz share x this (capped),
+     * else he drops to a hook zone this deep and this far toward the top from the middle (the two-receiver side).
+     */
+    lb2BlitzScale: 1.8,
+    lb2BlitzMax: 0.65,
+    lb2ZoneDepthYards: 6,
+    lb2ZoneTopYards: 1,
     /** Base weight of each call (how often it's picked in an ordinary situation). */
     weightMan: 4,
     weightPress: 2,
@@ -153,6 +171,8 @@ export const feel = {
     shedTimeVariance: 0.7,
     /** The centre's help on a run (3h-a): the defender about to get free first is held this much longer. */
     helpTime: 0.4,
+    /** On a run the tight end helps on the edge rusher on his side: that block holds this much longer. */
+    teHelpTime: 0.05,
     /** How fast our blockers push held defenders back, yards per second. */
     driveSpeed: 1.2,
     /** Linebacker pauses this long after the handoff to read the run. */
@@ -169,6 +189,8 @@ export const feel = {
   running: {
     /** Ball carrier's forward speed after the catch (later: his speed rating). */
     runSpeed: 7.5,
+    /** Tight end with the ball (3h-b): a little quicker than a linebacker (6.8), slower than a receiver. */
+    teRunSpeed: 7.0,
     /**
      * Sideways speed while you hold up or down. Moving is normalized: sideways speed comes out of
      * forward speed, so a diagonal is never faster than running straight.
@@ -276,6 +298,8 @@ export const feel = {
     acceleration: 16,
     /** Speed kept through a cut (1 = razor-sharp, lower = slower, rounder cuts). */
     cutSpeedRatio: 0.55,
+    /** Tight end's route speed, as a share of a receiver's (3h-b: bigger, a step slower). */
+    teSpeedRatio: 0.94,
   },
   throw: {
     /** Earliest the QB can release after the snap. */

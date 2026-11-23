@@ -8,9 +8,9 @@ import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../si
 import { formation, SLOT } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
-import { RB, routePath, type PlayDef } from '../sim/routes';
+import { RB, TE, routePath, type PlayDef } from '../sim/routes';
 import type { Vec } from '../sim/throw';
-import { cornerStart, linebackerStart, type DefCallId } from '../sim/defCalls';
+import { cornerStart, linebacker2Start, linebackerStart, type DefCallId } from '../sim/defCalls';
 
 export interface DiagramView {
   x0: number;
@@ -220,6 +220,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     const call = v.call ?? 'man';
     f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
     s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
+    s += player(linebacker2Start(feel, losX), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
     s += player({ x: Math.min(losX + feel.defense.safetyDepthYards, TOTAL_LENGTH - 1), y: FIELD_WIDTH / 2 }, C.defense, dl(dn?.safety, 'S'));
     f.rush.forEach((r) => (s += player(r, C.defense, null, 'below', LINEMAN_R))); // linemen unlabelled: too tightly packed
   }
@@ -227,6 +228,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
   const nm = v.names;
   f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null, i === SLOT ? 'leftFar' : 'below')));
   s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
+  s += player(f.te.pos, C.offense, v.detailed ? (nm?.skill[TE] ? esc(nm.skill[TE].toUpperCase()) : 'TE') : null);
   s += player(f.qb, C.offense, v.detailed ? 'QB' : null, 'left'); // the backfield is too crowded for his name
   const arrows = v.detailed && v.defense && v.defense.arrows !== false;
   if (arrows) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));

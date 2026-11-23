@@ -12,7 +12,7 @@ import {
   type Throw,
   type Vec,
 } from '../sim/throw';
-import { PLAYS, RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
+import { PLAYS, RB, TE, coveredByLinebacker, receiverInFlight, routeBase, routePath, runnerAfter, startRunner, stepRunner, type PlayDef, type Runner } from '../sim/routes';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from '../sim/run';
 import {
   blockerSpot,
@@ -44,7 +44,7 @@ import {
   type Pursuer,
   type Trailer,
 } from '../sim/carry';
-import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, SLOT } from '../sim/formation';
+import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, RETURN_SKILL, SLOT } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
@@ -98,11 +98,42 @@ import {
 import { PUNTER_DEPTH, insideTwenty } from '../sim/punting';
 import { coverageAt, returnerStart, startPuntPlay, stepPuntPlay, type PuntEnd, type PuntPlay } from '../sim/puntReturn';
 import { coachTip } from '../sim/fourthDown';
-import { DEF_CALL_NAMES, DEF_CALL_TIPS, cornerStart, coverParams, linebackerStart, pickDefCall, stepBlitzer, teamAggression, type DefCallId } from '../sim/defCalls';
+import {
+  DEF_CALL_NAMES,
+  DEF_CALL_TIPS,
+  cornerStart,
+  coverParams,
+  lb2BlitzChance,
+  lb2Job,
+  lb2ZoneSpot,
+  linebacker2Start,
+  linebackerStart,
+  pickDefCall,
+  stepBlitzer,
+  teamAggression,
+  zoneParams,
+  type DefCallId,
+  type DefSituation,
+  type Lb2Job,
+} from '../sim/defCalls';
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
-import { blockerEdges, carryFor, edgeSign, lineShedTimes, pointOfAttack, pursuerFor, securityRatio, tackleFor, type CarrierRole, type TacklerRole } from '../sim/runRatings';
+import {
+  TE_SIDE_RUSHER,
+  blockerEdges,
+  carryFor,
+  edgeSign,
+  lineShedTimes,
+  pointOfAttack,
+  pursuerFor,
+  securityRatio,
+  shedTimeFor,
+  tackleFor,
+  teHelpFor,
+  type CarrierRole,
+  type TacklerRole,
+} from '../sim/runRatings';
 import { addPoints, newGameStats, recordEvent, recordOurPlay, recordOurSimDrive, recordTheirDrive, type OurPlay } from '../sim/gameStats';
 import { closeEndGame, openEndGame } from '../ui/endGame';
 import { afterBothPossessions, overtimeBanner, overtimeStart, possessionOver, SHOOTOUT_PERIOD } from '../sim/overtime';
@@ -165,7 +196,9 @@ const PLAYER_RADIUS = 0.9; // placeholder art size, yards
 const MIN_DRAG_PX = 10; // smaller drags count as a tap, not a throw
 const PRESSURE_COLOR = 0xff3b3b;
 const LINEMAN_RADIUS = 0.8; // linemen drawn a little smaller: nine of them across ~10 yards
-const SKILL_COUNT = 4; // three receivers + the running back (index RB), each with his own man defender
+const SKILL_COUNT = 5; // three receivers, the running back (index RB) and the tight end (TE), each with his own man defender
+/** Where a player who can't catch the ball (the TE in to block) is put for the catch checks. */
+const OFF_FIELD: Vec = { x: -1000, y: -1000 };
 // Camera height before the throw: a bit above the middle, toward the two-receiver side, which also
 // leaves room under the scoreboard. (Layout, not feel: it follows the formation.)
 const FORMATION_VIEW_Y = FIELD_WIDTH / 2 - 3;
@@ -273,6 +306,12 @@ export class FieldScene extends Phaser.Scene {
   private calledPlay: PlayDef = PLAYS[0]; // that play with any hot routes (this snap only)
   /** Their defensive call for this snap (3d2), rolled once per snap when the huddle opens. */
   private defCall: DefCallId = 'man';
+  /** LB2's job this snap (3h-b): cover the TE, or (TE in to block) drop into the short middle / blitz. */
+  private lb2Job: Lb2Job = 'cover';
+  /** This snap's dice for LB2's choice (rolled with the defensive call, so reopening PLAYS keeps it). */
+  private lb2Roll = 0.5;
+  /** LB2 blitzing: he rushes like a lineman until our TE (who picks him up) lets him go. */
+  private lb2Rush: Rusher | null = null;
   /** The play calling screen was opened at the line (PLAYS before the snap): it shows their defense. */
   private callAtLine = false;
   private qbPos: Vec = { ...this.form.qb };
@@ -777,7 +816,8 @@ export class FieldScene extends Phaser.Scene {
     this.currentThrow = this.buildThrow(this.qbPos, target, this.bulletThrow);
     this.flightElapsed = 0;
     const duration = this.currentThrow.duration;
-    this.receivers.forEach((r, i) => (r.atLanding = runnerAfter(r.runner, r.path, duration, this.runParams(i)).pos));
+    // A TE in to block isn't a receiver (kept far away, so the ball is never meant for him).
+    this.receivers.forEach((r, i) => (r.atLanding = i === TE && this.teBlocks() ? OFF_FIELD : runnerAfter(r.runner, r.path, duration, this.runParams(i)).pos));
     // The ball is meant for whoever's route takes him closest to the landing spot.
     this.targetIndex = closestIndex(this.receivers.map((r) => r.atLanding), target);
     this.state = 'flight';
@@ -817,10 +857,12 @@ export class FieldScene extends Phaser.Scene {
     const R = feel.ratings;
     const base = this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance;
     const radius = this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards;
-    const off = this.ourLineup?.skill ?? [null, null, null, null];
-    const def = this.theirLineup ? [...this.theirLineup.cover, this.theirLineup.safety] : [null, null, null, null, null];
+    const off = this.ourLineup?.skill ?? [null, null, null, null, null];
+    const def = this.theirLineup ? [...this.theirLineup.cover, this.theirLineup.safety] : [null, null, null, null, null, null];
     const m = def.map((p) => contestMods(p, R));
     return {
+      // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
+      zone: def.map((_, i) => i === TE && this.lb2Job === 'drop'),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
       contested: off.map((p) => contestedCatchRatio(p, R)),
       breakup: m.map((x) => x.breakup),
@@ -831,11 +873,12 @@ export class FieldScene extends Phaser.Scene {
 
   /** Receiver i's route running: his speed, acceleration and cuts (3d-c). */
   private runParams(i: number) {
-    return receiverRunParams(this.ourLineup?.skill[i], feel.routes, feel.ratings);
+    return receiverRunParams(this.ourLineup?.skill[i], routeBase(i, feel.routes), feel.ratings);
   }
 
   private drawReceivers() {
     this.receivers.forEach((_, i) => {
+      if (i === TE && this.teBlocks()) return; // he's blocking: stepTeBlock moves him
       const p = this.receiverPosition(i);
       this.wrDots[i].setPosition(p.x, p.y);
     });
@@ -843,7 +886,7 @@ export class FieldScene extends Phaser.Scene {
 
   private resolveThrow() {
     const th = this.currentThrow!;
-    const wrSpots = this.receivers.map((_, i) => this.receiverPosition(i));
+    const wrSpots = this.receivers.map((_, i) => (i === TE && this.teBlocks() ? OFF_FIELD : this.receiverPosition(i)));
     // Every defender in coverage can contest: the three cornerbacks and the deep safety.
     const cbSpots = [...this.receivers.map((r) => r.coverage.pos), { ...this.safetyPos }];
     this.aimG.clear();
@@ -922,9 +965,10 @@ export class FieldScene extends Phaser.Scene {
     const chase = (d: Phaser.GameObjects.Arc, speed: number): Pursuer => ({ pos: { x: d.x, y: d.y }, speed, stunned: 0 });
     // Only the two guards chase (returns were tuned with a two-man line); the rest stay put.
     const linemen = RETURN_LINE.map((i) => this.blockerDots[i]);
-    this.chaserDots = [...this.wrDots, this.qb, ...linemen];
+    const skill = this.wrDots.slice(0, RETURN_SKILL); // not the TE (returns were tuned without him)
+    this.chaserDots = [...skill, this.qb, ...linemen];
     this.ret = startChase(at, [
-      ...this.wrDots.map((d) => chase(d, ic.wrChaseSpeed)),
+      ...skill.map((d) => chase(d, ic.wrChaseSpeed)),
       chase(this.qb, ic.qbChaseSpeed),
       ...linemen.map((d) => chase(d, ic.olChaseSpeed)),
     ]);
@@ -1154,11 +1198,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private coverageDots() {
-    return [...this.wrDots, ...RETURN_LINE.map((i) => this.blockerDots[i]), this.qb];
+    return [...this.wrDots.slice(0, RETURN_SKILL), ...RETURN_LINE.map((i) => this.blockerDots[i]), this.qb];
   }
 
   private returnTeamDots() {
-    return [...this.cbDots, ...RETURN_RUSH.map((i) => this.rusherDots[i])];
+    return [...this.cbDots.slice(0, RETURN_SKILL), ...RETURN_RUSH.map((i) => this.rusherDots[i])];
   }
 
   /** The punt tap: the punt play starts (flight, returner, coverage; rules in sim/puntReturn.ts). */
@@ -1396,7 +1440,7 @@ export class FieldScene extends Phaser.Scene {
         ? { landing: this.currentThrow.to, sinceThrow: this.flightElapsed }
         : undefined;
     // Corners and linebacker play this snap's call (press / off / normal man); the LB holds near the line against a run.
-    const { cb: cover, lb: lbCover } = coverParams(this.defCall, feel, this.match.ballX, !!this.calledPlay.run);
+    const { cb: cover, lb: lbCover, lb2: lb2Cover } = coverParams(this.defCall, feel, this.match.ballX, !!this.calledPlay.run);
     // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
     // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
@@ -1406,8 +1450,15 @@ export class FieldScene extends Phaser.Scene {
         // Blitz: the linebacker shoots his gap at the QB (nobody blocks him; the RB is left uncovered).
         const goal = this.calledPlay.run ? this.form.qb : this.qbPos;
         r.coverage = { ...r.coverage, pos: stepBlitzer(r.coverage.pos, goal, this.playTime, dt, feel) };
+      } else if (i === TE && this.lb2Rush) {
+        // LB2 blitzing (our TE in to block): he rushes, and our TE picks him up until he gets free.
+        this.lb2Rush = stepRusher(this.lb2Rush, this.qbPos, this.playTime, dt, this.rushParams());
+        r.coverage = { ...r.coverage, pos: { ...this.lb2Rush.pos } };
       } else {
-        r.coverage = stepCoverage(r.coverage, r.runner.pos, dt, coverFor(this.theirLineup?.cover[i], i === RB ? lbCover : cover, feel.ratings), myBall);
+        const base = coverFor(this.theirLineup?.cover[i], i === TE ? lb2Cover : i === RB ? lbCover : cover, feel.ratings);
+        // LB2 dropping into his hook zone heads for the spot instead of a man.
+        const zone = i === TE && this.lb2Job === 'drop';
+        r.coverage = stepCoverage(r.coverage, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos, dt, zone ? zoneParams(base) : base, myBall);
       }
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
@@ -1451,6 +1502,37 @@ export class FieldScene extends Phaser.Scene {
       }
     });
     this.stepCentre(this.rushers[this.helped], run ? { x: this.rushers[this.helped].pos.x - 5, y: this.rushers[this.helped].pos.y } : this.qbPos, dt);
+    if (this.teBlocks()) this.stepTeBlock(dt);
+  }
+
+  /** Our TE stays in to block this snap (his route is Block; always on a run). */
+  private teBlocks() {
+    return !!this.calledPlay.routes[TE]?.block;
+  }
+
+  /**
+   * The blocking TE: on LB2's blitz he stands in front of LB2 until LB2 gets free; otherwise he
+   * helps on the edge rusher on his side (beside that block, on the outside).
+   */
+  private stepTeBlock(dt: number) {
+    const dot = this.wrDots[TE];
+    if (this.lb2Rush) {
+      if (!isFree(this.lb2Rush, this.playTime)) this.slideToward(dot, blockerSpot(this.lb2Rush, this.qbPos, PLAYER_RADIUS * 2), dt);
+      return;
+    }
+    const edge = this.rushers[TE_SIDE_RUSHER];
+    if (!edge || isFree(edge, this.playTime)) return;
+    const toward = this.calledPlay.run ? { x: edge.pos.x - 5, y: edge.pos.y } : this.qbPos;
+    const spot = blockerSpot(edge, toward, PLAYER_RADIUS * 2);
+    const side = Math.sign(edge.pos.y - FIELD_WIDTH / 2) || 1; // the outside
+    this.slideToward(dot, { x: spot.x - 0.3, y: spot.y + side * LINEMAN_RADIUS * 1.7 }, dt);
+  }
+
+  /** Moves a dot toward a spot at the helpers' slide speed (looks only). */
+  private slideToward(dot: Phaser.GameObjects.Arc, to: Vec, dt: number) {
+    const d = Math.hypot(to.x - dot.x, to.y - dot.y);
+    const step = Math.min(d, feel.pocket.helpSlideSpeed * dt);
+    if (d > 0) dot.setPosition(dot.x + ((to.x - dot.x) / d) * step, dot.y + ((to.y - dot.y) / d) * step);
   }
 
   /** The centre slides over to help on the block he's doubling (until that rusher gets free). */
@@ -1479,12 +1561,12 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private carrierRole(): CarrierRole {
-    return this.qbRun ? 'QB' : this.rbRun ? 'RB' : 'WR';
+    return this.qbRun ? 'QB' : this.rbRun ? 'RB' : this.targetIndex === TE ? 'TE' : 'WR';
   }
 
   private baseCarryParams(): CarryParams {
     return {
-      runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : this.rbRun ? feel.runGame.rbRunSpeed : feel.running.runSpeed,
+      runSpeed: this.qbRun ? feel.scramble.qbRunSpeed : this.rbRun ? feel.runGame.rbRunSpeed : this.targetIndex === TE ? feel.running.teRunSpeed : feel.running.runSpeed,
       steerSpeed: feel.running.steerSpeed,
       steerResponse: feel.running.steerResponse,
       jukeSpeed: feel.running.jukeSpeed,
@@ -1541,13 +1623,15 @@ export class FieldScene extends Phaser.Scene {
         rated(
           {
             pos: { ...r.coverage.pos },
-            speed: i === RB ? feel.defense.lbPursuitSpeed : db,
+            speed: coveredByLinebacker(i) ? feel.defense.lbPursuitSpeed : db,
             stunned: 0,
-            // On a run the linebacker reads it first, and the corners stay with their receivers a moment (pass first).
-            wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : feel.runGame.cbReadTime) : 0,
+            // On a run the linebackers read it first, and the corners stay with their receivers a moment (pass first).
+            wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : i === TE ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) : 0,
+            // LB2 blitzing on a scramble: still on our TE until he beats him.
+            held: i === TE && this.lb2Rush && blocking ? Math.max(0, this.lb2Rush.shedAt - this.playTime) : 0,
           },
           them?.cover[i],
-          i === RB ? 'LB' : 'CB',
+          coveredByLinebacker(i) ? 'LB' : 'CB',
         ),
       ),
       rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0 }, them?.safety, 'S'),
@@ -1557,7 +1641,7 @@ export class FieldScene extends Phaser.Scene {
     ]);
     this.pursuerDots = [...this.cbDots, this.safety, ...this.rusherDots];
     // Everyone else stops his route and follows the play (the carrier's own entry is ignored).
-    this.trailers = this.receivers.map((r) => ({ pos: { ...r.runner.pos }, speed: r.runner.speed, dir: { ...r.runner.dir } }));
+    this.trailers = this.receivers.map((r, i) => ({ pos: { x: this.wrDots[i].x, y: this.wrDots[i].y }, speed: r.runner.speed, dir: { ...r.runner.dir } }));
     this.updateLabel();
   }
 
@@ -2356,13 +2440,17 @@ export class FieldScene extends Phaser.Scene {
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
     const play = this.calledPlay;
     const rng = getRngOrFallback();
-    if (call) this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
+    if (call) {
+      this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
+      this.lb2Roll = rng.next();
+    }
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
-      const cbStart = i === RB ? linebackerStart(this.defCall, feel, this.match.ballX) : cornerStart(this.defCall, feel, wr.pos);
-      // Each corner's speed is rolled per snap (the linebacker's isn't).
-      const speed = i === RB ? 1 : rollCornerSpeed(1, feel.defense.cbSpeedVariance, rng.next());
+      const cbStart =
+        i === RB ? linebackerStart(this.defCall, feel, this.match.ballX) : i === TE ? linebacker2Start(feel, this.match.ballX) : cornerStart(this.defCall, feel, wr.pos);
+      // Each corner's speed is rolled per snap (the linebackers' aren't).
+      const speed = coveredByLinebacker(i) ? 1 : rollCornerSpeed(1, feel.defense.cbSpeedVariance, rng.next());
       return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos, speed) };
     });
     this.targetIndex = 0;
@@ -2402,9 +2490,27 @@ export class FieldScene extends Phaser.Scene {
     // The centre (3h-a) helps whoever is about to get free first.
     const shed = play.run ? feel.runGame : feel.pocket;
     const hole = play.run ? pointOfAttack(this.form.rush.map((r) => r.y), pathYAt(this.receivers[RB].path, this.match.ballX)) : undefined;
-    const sheds = lineShedTimes(this.ourLineup?.line, this.theirLineup?.rush, !!play.run, shed, () => rng.next(), feel.ratings, hole);
+    // The TE (3h-b): on a run he helps on the edge on his side; in to block on a pass, the whole line
+    // holds longer with him, unless LB2 blitzes (decided now, no tell before the snap), then he picks LB2 up.
+    const te = this.ourLineup?.skill[TE];
+    const edgeMan = this.theirLineup?.rush[TE_SIDE_RUSHER];
+    const teHelp = play.run ? { rusher: TE_SIDE_RUSHER, time: teHelpFor(te, edgeMan, true, feel.runGame.teHelpTime, feel.ratings) } : undefined;
+    const sheds = lineShedTimes(this.ourLineup?.line, this.theirLineup?.rush, !!play.run, shed, () => rng.next(), feel.ratings, hole, teHelp);
     this.helped = sheds.helped;
+    this.lb2Job = play.run ? 'cover' : lb2Job(!!play.routes[TE]?.block, this.lb2Roll, lb2BlitzChance(this.defSituation(), feel));
+    if (this.lb2Job === 'drop') {
+      const extra = teHelpFor(te, edgeMan, false, feel.pocket.teProtectTime, feel.ratings);
+      sheds.shedAt = sheds.shedAt.map((t) => t + extra);
+    }
     this.rushers = this.form.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
+    const pk = feel.pocket;
+    this.lb2Rush =
+      this.lb2Job === 'blitz'
+        ? {
+            pos: { ...this.receivers[TE].coverage.pos },
+            shedAt: shedTimeFor(te, this.theirLineup?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
+          }
+        : null;
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
     this.form.block.forEach((b, i) => this.blockerDots[i].setPosition(b.x, b.y));
     this.qbPos = { ...qbStart };
@@ -2428,26 +2534,28 @@ export class FieldScene extends Phaser.Scene {
   /** Their defensive call for the coming snap, weighted by the situation and their aggression. */
   private rollDefCall(roll: number): DefCallId {
     if (!feel.defCalls.enabled) return 'man';
+    return pickDefCall(this.defSituation(), feel, roll);
+  }
+
+  /** The situation their coach reads for his calls (down, distance, field, clock, score, aggression). */
+  private defSituation(): DefSituation {
     const g = this.match;
-    return pickDefCall(
-      {
-        down: g.down,
-        toGo: Math.max(1, Math.round((g.tryPending ? OPP_GOAL_X : g.firstDownX) - g.ballX)),
-        ballX: g.ballX,
-        quarter: this.clock.quarter,
-        timeLeft: this.clock.timeLeft,
-        lead: g.them - g.us,
-        aggression: teamAggression(this.opponentId),
-      },
-      feel,
-      roll,
-    );
+    return {
+      down: g.down,
+      toGo: Math.max(1, Math.round((g.tryPending ? OPP_GOAL_X : g.firstDownX) - g.ballX)),
+      ballX: g.ballX,
+      quarter: this.clock.quarter,
+      timeLeft: this.clock.timeLeft,
+      lead: g.them - g.us,
+      aggression: teamAggression(this.opponentId),
+    };
   }
 
   /** Everyone rushing the QB: the rushers, plus the linebacker on a blitz (never blocked). */
   private rushThreats() {
-    if (this.defCall !== 'blitz') return this.rushers;
-    return [...this.rushers, { pos: this.receivers[RB].coverage.pos, shedAt: 0 }];
+    const all: Rusher[] = this.lb2Rush ? [...this.rushers, this.lb2Rush] : [...this.rushers];
+    if (this.defCall === 'blitz') all.push({ pos: this.receivers[RB].coverage.pos, shedAt: 0 });
+    return all;
   }
 
   /**

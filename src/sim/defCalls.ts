@@ -42,7 +42,7 @@ export function cornerCushion(call: DefCallId, feel: Feel): { yards: number; clo
  * Coverage params for this call: corners (`cb`) and the linebacker (`lb`), before ratings
  * (`coverFor` scales them per player). `run` = our called play is a run (the LB holds near the line).
  */
-export function coverParams(call: DefCallId, feel: Feel, losX: number, run: boolean): { cb: CoverParams; lb: CoverParams } {
+export function coverParams(call: DefCallId, feel: Feel, losX: number, run: boolean): { cb: CoverParams; lb: CoverParams; lb2: CoverParams } {
   const d = feel.defense;
   const cush = cornerCushion(call, feel);
   const cb: CoverParams = {
@@ -70,12 +70,51 @@ export function coverParams(call: DefCallId, feel: Feel, losX: number, run: bool
     minX: losX + (run ? d.lbFloorYards : d.lbPassDropYards),
     minXUntil: run ? undefined : d.lbPassDropTime,
   };
-  return { cb, lb };
+  // LB2 (3h-b) on the tight end: same, but a shallower first drop (he has the flat, not the checkdown).
+  const lb2: CoverParams = { ...lb, minX: losX + (run ? d.lbFloorYards : d.lb2PassDropYards) };
+  return { cb, lb, lb2 };
 }
 
 /** Where the linebacker lines up: a few yards deep, or creeping up to the line on a blitz. */
 export function linebackerStart(call: DefCallId, feel: Feel, losX: number): Vec {
   return { x: losX + (call === 'blitz' ? feel.defCalls.blitzStartYards : feel.defense.lbDepthYards), y: FIELD_WIDTH / 2 };
+}
+
+/** Where the second linebacker lines up (3h-b): a few yards deep, shading the tight end's side. */
+export function linebacker2Start(feel: Feel, losX: number): Vec {
+  return { x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 + feel.defense.lb2OffsetYards };
+}
+
+/** With our tight end in to block, LB2 drops here (the short middle, a hook zone) and breaks on throws nearby. */
+export function lb2ZoneSpot(feel: Feel, losX: number): Vec {
+  return { x: losX + feel.defCalls.lb2ZoneDepthYards, y: FIELD_WIDTH / 2 - feel.defCalls.lb2ZoneTopYards };
+}
+
+/** LB2 in his hook zone: he heads straight for the spot (no cushion, no man) and breaks on throws like anyone. */
+export function zoneParams(lb: CoverParams): CoverParams {
+  return { ...lb, cushionYards: 0, cushionFloorYards: 0, minX: undefined, minXUntil: undefined, bodyGapYards: 0, anticipation: 0 };
+}
+
+/** What LB2 does this snap: covers the tight end, or (TE in to block) drops into the short middle or blitzes. */
+export type Lb2Job = 'cover' | 'drop' | 'blitz';
+
+/** LB2's job from the play and one dice roll (0..1) against `lb2BlitzChance`. */
+export function lb2Job(teBlocks: boolean, roll: number, chance: number): Lb2Job {
+  if (!teBlocks) return 'cover';
+  return roll < chance ? 'blitz' : 'drop';
+}
+
+/**
+ * Our tight end stays in to block: does their coach send LB2 after the QB (else he drops into the
+ * short middle)? His usual blitz share for the situation (`callWeights`, so aggression, down and
+ * distance, score and clock all count) x `lb2BlitzScale`, at most `lb2BlitzMax`. Decided by one
+ * dice roll at the snap, with no tell before it.
+ */
+export function lb2BlitzChance(s: DefSituation, feel: Feel): number {
+  const w = callWeights(s, feel);
+  const total = DEF_CALL_IDS.reduce((sum, id) => sum + w[id], 0);
+  if (total <= 0) return 0;
+  return Math.min(feel.defCalls.lb2BlitzMax, (w.blitz / total) * feel.defCalls.lb2BlitzScale);
 }
 
 /** Where a corner lines up against a receiver at `wr`. */

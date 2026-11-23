@@ -40,7 +40,7 @@ const off = { ...feel.ratings, enabled: 0 };
 describe('role averages', () => {
   it('ROLE_NORMS matches the average starters the generator makes (within a point)', () => {
     const leagues = [11, 22, 33].map((s) => generateLeague(s * 1009));
-    const take: Record<Role, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 4, OL: 5 };
+    const take: Record<Role, number> = { QB: 1, RB: 1, WR: 3, CB: 3, LB: 1, S: 1, DL: 4, OL: 5, TE: 1 };
     for (const [role, norms] of Object.entries(ROLE_NORMS) as [Role, Record<string, number>][]) {
       for (const [key, norm] of Object.entries(norms)) {
         const vals: number[] = [];
@@ -118,7 +118,7 @@ describe('the numbers', () => {
 
 const team = (rbD: number, defD: number): RunPlayers => ({
   rb: mk('RB', 'RB', rbD),
-  cover: [mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('LB', 'LB', defD)],
+  cover: [mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('CB', 'CB', defD), mk('LB', 'LB', defD), mk('LB', 'LB', defD)],
   safety: mk('S', 'S', defD),
   rush: Array.from({ length: 4 }, () => mk('DL', 'DL', defD)),
 });
@@ -142,7 +142,8 @@ describe('balance: ball carriers vs tacklers', () => {
   it('a star RB gains clearly more, and against a weak defense breaks some long ones (but not every run)', () => {
     for (const name of ['Dive', 'Toss']) {
       const avg = runs(name, team(0, 0)).avg;
-      expect(runs(name, team(5, 0)).avg).toBeGreaterThan(avg + 0.7);
+      // +0.7 before 3h-b; LB2 now lines up on the Toss side, so a star gains ~+0.6 there.
+      expect(runs(name, team(5, 0)).avg).toBeGreaterThan(avg + 0.55);
       const vsWeak = runs(name, team(5, -4));
       expect(vsWeak.avg).toBeGreaterThan(avg + 2);
       expect(vsWeak.big).toBeLessThan(0.15);
@@ -285,6 +286,6 @@ describe('balance: the line', () => {
     const plain = avg('Dive', 0, 0);
     expect(avg('Dive', 4, -4)).toBeGreaterThan(plain + 0.6);
     expect(avg('Dive', -4, 4)).toBeLessThan(plain - 1);
-    expect(avg('Toss', -4, 4)).toBeGreaterThan(1);
+    expect(avg('Toss', -4, 4)).toBeGreaterThan(0.8); // ~1.0 with LB2 on the Toss side (3h-b); 1.04 before
   }, 60000);
 });

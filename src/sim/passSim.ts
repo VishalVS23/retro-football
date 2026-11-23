@@ -6,18 +6,20 @@
 import type { Feel } from '../config/feel';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { formation } from './formation';
-import { RB, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
+import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, type PassResult, type Rusher } from './defense';
 import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
-import { carryFor, lineShedTimes, pursuerFor, tackleFor } from './runRatings';
+import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pursuerFor, shedTimeFor, tackleFor, teHelpFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
-import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { cornerStart, coverParams, lb2ZoneSpot, linebacker2Start, linebackerStart, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
 
 const dt = 1 / 60;
+/** Where a player who can't catch the ball (the TE in to block) is put for the catch check. */
+const OFF_FIELD: Vec = { x: -1000, y: -1000 };
 const mid = FIELD_WIDTH / 2;
 
 export interface PassShot {
@@ -34,14 +36,16 @@ export interface PassOptions {
   qb?: Player | null;
   /** He's under pressure when he throws (the miss circle grows). */
   pressured?: boolean;
-  /** Our skill players in formation order (wide top, slot, wide bottom, RB). Leave out = no receiver ratings. */
+  /** Our skill players in formation order (wide top, slot, wide bottom, RB, TE). Leave out = no receiver ratings. */
   offense?: (Player | null)[];
-  /** Their coverage: cover[i] covers skill spot i (three corners + the linebacker), plus the safety and the four rushers. Leave out = no defender ratings. */
+  /** Their coverage: cover[i] covers skill spot i (three corners, LB1, LB2), plus the safety and the four rushers. Leave out = no defender ratings. */
   defense?: { cover: (Player | null)[]; safety: Player | null; rush?: (Player | null)[] };
   /** Our five blockers (3h-a), formation order: `BLOCKER_OF[i]` blocks their rusher i. Leave out = average blocking. */
   line?: (Player | null)[];
   /** Their defensive call (3d2). Default: normal man. */
   call?: DefCallId;
+  /** Our TE stays in to block (his route is Block): what LB2 does. Default: drops into the short middle. */
+  lb2?: 'drop' | 'blitz';
   /**
    * Play out the run after a catch: the catcher runs away from the nearest chaser and jukes a
    * tackler who gets this close (yards; 0 = never jukes). Result `gain` = yards from the line to where he's
@@ -68,23 +72,30 @@ export function simulatePass(
   let runners = paths.map((path, i) => startRunner(path, play.routes[i].stop));
   const R = feel.ratings;
   // Each receiver runs his route at his own speed (3d-c); without `offense`, everyone at the plain values.
-  const run = f.skill.map((_, i) => (opts.offense ? receiverRunParams(opts.offense[i], feel.routes, R) : feel.routes));
+  const run = f.skill.map((_, i) => (opts.offense ? receiverRunParams(opts.offense[i], routeBase(i, feel.routes), R) : routeBase(i, feel.routes)));
   const call = opts.call ?? 'man';
   const blitz = call === 'blitz';
-  const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, false);
+  const { cb: cbCover, lb: lbCover, lb2: lb2Cover } = coverParams(call, feel, losX, false);
   // Each defender covers with his own ratings (3d-c).
   const def = opts.defense;
+  // LB2 (3h-b) covers the TE, or with the TE in to block drops into the short middle / blitzes.
+  const teBlocks = !!play.routes[TE]?.block;
+  const job: Lb2Job = teBlocks ? (opts.lb2 ?? 'drop') : 'cover';
   const coverP = f.skill.map((_, i) => {
-    const base = i === RB ? lbCover : cbCover;
-    return def ? coverFor(def.cover[i], base, R) : base;
+    const base = i === TE ? lb2Cover : i === RB ? lbCover : cbCover;
+    const rated = def ? coverFor(def.cover[i], base, R) : base;
+    return i === TE && job === 'drop' ? zoneParams(rated) : rated;
   });
+  const zoneSpot = lb2ZoneSpot(feel, losX);
   let cover = f.skill.map((s, i) =>
     startCoverage(
-      i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos),
+      i === RB ? linebackerStart(call, feel, losX) : i === TE ? linebacker2Start(feel, losX) : cornerStart(call, feel, s.pos),
       s.pos,
-      i === RB ? 1 : rollCornerSpeed(1, d.cbSpeedVariance, rng.next()),
+      coveredByLinebacker(i) ? 1 : rollCornerSpeed(1, d.cbSpeedVariance, rng.next()),
     ),
   );
+  /** Who defender i is following before the throw: his man, or LB2's zone spot. */
+  const coverTarget = (i: number) => (i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
   let safety: Vec = { x: losX + d.safetyDepthYards, y: mid };
   const qbStart = f.qb;
   const qbAt = (t: number) => {
@@ -109,18 +120,32 @@ export function simulatePass(
   // The pass rush (own dice, so the pass rolls the same whatever the line does).
   const rng2 = createRng((seed ^ 0x5bd1e995) >>> 0);
   const pk = feel.pocket;
+  // TE in to block: he helps on the edge on his side (first, so the centre helps someone else), or picks up LB2 if he blitzes.
+  const te = opts.offense?.[TE];
   const sheds = lineShedTimes(opts.line, def?.rush, false, pk, () => rng2.next(), R);
+  if (job === 'drop') {
+    const extra = teHelpFor(te, def?.rush?.[TE_SIDE_RUSHER], false, pk.teProtectTime, R);
+    sheds.shedAt = sheds.shedAt.map((t) => t + extra);
+  }
   let rushers: Rusher[] = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
+  let lb2Rush: Rusher | null =
+    job === 'blitz'
+      ? { pos: { ...cover[TE].pos }, shedAt: shedTimeFor(te, def?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng2.next() * 2 - 1, () => rng2.next(), R) }
+      : null;
   const rushP = { blockedSpeed: pk.rushBlockedSpeed, freeSpeed: pk.rushFreeSpeed, sackReachYards: pk.sackReachYards };
   let sacked = false;
   let t = 0;
   for (; t < shot.throwAt - 1e-9; t += dt) {
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
-    cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : stepCoverage(c, runners[i].pos, dt, coverP[i])));
+    cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : i === TE && lb2Rush ? c : stepCoverage(c, coverTarget(i), dt, coverP[i])));
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams);
     const q = qbAt(t + dt);
     rushers = rushers.map((r) => stepRusher(r, q, t + dt, dt, rushP));
-    if (reachedQb(rushers, q, rushP)) sacked = true;
+    if (lb2Rush) {
+      lb2Rush = stepRusher(lb2Rush, q, t + dt, dt, rushP);
+      cover[TE] = { ...cover[TE], pos: lb2Rush.pos };
+    }
+    if (reachedQb(lb2Rush ? [...rushers, lb2Rush] : rushers, q, rushP)) sacked = true;
     if (blitz && Math.hypot(cover[RB].pos.x - q.x, cover[RB].pos.y - q.y) <= feel.pocket.sackReachYards) sacked = true;
   }
 
@@ -146,13 +171,16 @@ export function simulatePass(
   const atLanding = runners.map((r, i) => runnerAfter(r, paths[i], duration, run[i]).pos);
   for (let e = 0; e < duration - 1e-9; e += dt) {
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
-    cover = cover.map((c, i) => stepCoverage(c, runners[i].pos, dt, coverP[i], { landing, sinceThrow: e + dt, help: i !== shot.to }));
+    cover = cover.map((c, i) =>
+      i === TE && lb2Rush ? c : stepCoverage(c, coverTarget(i), dt, coverP[i], { landing, sinceThrow: e + dt, help: i !== shot.to }),
+    );
     safety = stepSafety(safety, runners.map((r) => r.pos), dt, safetyParams, { landing, sinceThrow: e + dt });
     rushers = rushers.map((r) => stepRusher(r, qb, t + e + dt, dt, rushP));
   }
   const ca = feel.catching;
+  // A blocking TE isn't a receiver: he can't catch it (kept far away).
   const wrSpots = runners.map((r, i) =>
-    i === shot.to ? receiverInFlight(r.pos, atLanding[i], landing, duration, ca.receiverAdjustYards, ca.receiverAdjustSpeed) : r.pos,
+    i === TE && teBlocks ? OFF_FIELD : i === shot.to ? receiverInFlight(r.pos, atLanding[i], landing, duration, ca.receiverAdjustYards, ca.receiverAdjustSpeed) : r.pos,
   );
   const cbSpots = [...cover.map((c) => c.pos), safety];
   const pass = resolveTargetedPass(wrSpots, cbSpots, landing, rng.next(), {
@@ -165,6 +193,7 @@ export function simulatePass(
     shieldedContestRatio: d.shieldedContestRatio,
     helpContestRatio: d.helpContestRatio,
   }, qb, {
+    zone: cover.map((_, i) => i === TE && job === 'drop'),
     ...(opts.offense && {
       receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),
@@ -181,16 +210,17 @@ export function simulatePass(
   // Run after the catch, like the game: every defender chases (the rushers too: on a pass nobody blocks them any more).
   const at = wrSpots[shot.to];
   const isRb = shot.to === RB;
+  const isTe = shot.to === TE;
   const catcher = opts.offense?.[shot.to] ?? undefined;
-  const role = isRb ? 'RB' : 'WR';
+  const role = isRb ? 'RB' : isTe ? 'TE' : 'WR';
   const pursuers: Pursuer[] = [
     ...cover.map((c, i) =>
-      pursuerFor(def?.cover[i] ?? undefined, i === RB ? 'LB' : 'CB', { pos: { ...c.pos }, speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed, stunned: 0 }, R),
+      pursuerFor(def?.cover[i] ?? undefined, coveredByLinebacker(i) ? 'LB' : 'CB', { pos: { ...c.pos }, speed: coveredByLinebacker(i) ? d.lbPursuitSpeed : tk.dbPursuitSpeed, stunned: 0 }, R),
     ),
     pursuerFor(def?.safety ?? undefined, 'S', { pos: { ...safety }, speed: tk.dbPursuitSpeed, stunned: 0 }, R),
     ...rushers.map((r, i) => pursuerFor(def?.rush?.[i] ?? undefined, 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0 }, R)),
   ];
-  const carry = carryFor(catcher, role, { ...feel.running, runSpeed: isRb ? feel.runGame.rbRunSpeed : feel.running.runSpeed }, R);
+  const carry = carryFor(catcher, role, { ...feel.running, runSpeed: isRb ? feel.runGame.rbRunSpeed : isTe ? feel.running.teRunSpeed : feel.running.runSpeed }, R);
   const params = {
     carry,
     pursuit: { reactionTime: tk.pursuitReactionTime, leadTime: tk.pursuitLeadTime, readWindow: tk.pursuitReadWindow, driveSpeed: 0 },

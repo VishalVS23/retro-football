@@ -37,13 +37,13 @@ describe('ratings -> on-field numbers', () => {
 
 describe('lineups', () => {
   const league = generateLeague(31);
-  it('our skill spots are WR1 wide top, WR3 slot, WR2 wide bottom, RB1; their corners mirror them', () => {
+  it('our skill spots are WR1 wide top, WR3 slot, WR2 wide bottom, RB1, TE1; their corners mirror them, LB1 / LB2 on the RB / TE', () => {
     const c = depthChart(league, 2);
     const o = offenseLineup(league, 2);
     expect(o.qb).toBe(c.QB[0].player);
-    expect(o.skill).toEqual([c.WR[0].player, c.WR[2].player, c.WR[1].player, c.RB[0].player]);
+    expect(o.skill).toEqual([c.WR[0].player, c.WR[2].player, c.WR[1].player, c.RB[0].player, c.TE[0].player]);
     const d = defenseLineup(league, 2);
-    expect(d.cover).toEqual([c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player]);
+    expect(d.cover).toEqual([c.CB[0].player, c.CB[2].player, c.CB[1].player, c.LB[0].player, c.LB[1].player]);
     expect(d.safety).toBe(c.S[0].player);
   });
 

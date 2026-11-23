@@ -15,6 +15,8 @@ export interface RouteDef {
   points: Vec[];
   /** Stop route (Hitch, Curl): he plants on the last point and waits for the ball instead of running on. */
   stop?: boolean;
+  /** The tight end stays in to block (3h-b): he isn't a receiver on this play. */
+  block?: boolean;
 }
 
 // Sideways routes end a few yards short of the sideline so the pre-snap route art stays on screen at
@@ -47,11 +49,34 @@ export const RB_ROUTES: RouteDef[] = [FLAT, CHECK, WHEEL];
 const DIVE: RouteDef = { name: 'Dive', points: [{ x: 0, y: 0 }, { x: 2.7, y: 1 }, { x: 6, y: 1.5 }, { x: 14, y: 1.5 }] };
 const TOSS: RouteDef = { name: 'Toss', points: [{ x: 0, y: 0 }, { x: 2, y: -4 }, { x: 6, y: -6.5 }, { x: 13.5, y: -7.5 }] };
 
+// Tight end routes (3h-b). He lines up just outside the bottom tackle; positive y = up, toward the
+// middle. Seam: straight up the field. Drag: short, across the middle. Flat: out to the bottom
+// sideline. Block: he stays in (more time to throw, one fewer receiver).
+const SEAM: RouteDef = { name: 'Seam', points: [{ x: 0, y: 0 }, { x: 24, y: 0 }] };
+const TE_DRAG: RouteDef = { name: 'Drag', points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 5, y: 15 }] };
+const TE_FLAT: RouteDef = { name: 'Flat', points: [{ x: 0, y: 0 }, { x: 2, y: -1.5 }, { x: 6, y: -6 }] };
+const BLOCK: RouteDef = { name: 'Block', points: [{ x: 0, y: 0 }, { x: -0.8, y: 0 }], stop: true, block: true };
+/** Tight end routes, in the order a hot route cycles through them. */
+export const TE_ROUTES: RouteDef[] = [SEAM, TE_DRAG, TE_FLAT, BLOCK];
+
 /** Index of the running back in a play's routes (and in formation `skill`). */
 export const RB = 3;
+/** Index of the tight end (3h-b). */
+export const TE = 4;
+
+/** Route running for skill spot i before his ratings: the tight end runs a step slower (3h-b). */
+export function routeBase(i: number, routes: RunParams & { teSpeedRatio: number }): RunParams {
+  const plain = { topSpeed: routes.topSpeed, acceleration: routes.acceleration, cutSpeedRatio: routes.cutSpeedRatio };
+  return i === TE ? { ...plain, topSpeed: plain.topSpeed * routes.teSpeedRatio } : plain;
+}
+
+/** The defender on skill spot i is a linebacker (LB1 on the RB, LB2 on the TE), else a corner. */
+export function coveredByLinebacker(i: number): boolean {
+  return i === RB || i === TE;
+}
 
 /**
- * A play: one route per player in formation `skill` order: [wide top, slot top, wide bottom, RB].
+ * A play: one route per player in formation `skill` order: [wide top, slot top, wide bottom, RB, TE].
  * Run play (`run`): the RB's "route" is his run path and he gets the ball; the receivers run their
  * routes to pull the cornerbacks away (on the Toss the bottom receiver runs a Hitch, staying near the edge).
  */
@@ -63,26 +88,27 @@ export interface PlayDef {
 
 /** Starter playbook. Play calling picks from these. */
 export const PLAYS: PlayDef[] = [
-  { name: 'Slants', routes: [SLANT, OUT, SLANT, CHECK] },
-  { name: 'Verticals', routes: [GO, GO, GO, CHECK] },
-  { name: 'Post Corner', routes: [POST, CORNER, DIG, FLAT] },
-  { name: 'Crossers', routes: [DIG, DRAG, POST, WHEEL] },
-  { name: 'Hitch Slant', routes: [HITCH, SLANT, HITCH, FLAT] },
-  { name: 'Curls', routes: [CURL, DIG, CURL, CHECK] },
-  { name: 'Dive', routes: [GO, GO, GO, DIVE], run: true },
-  { name: 'Toss', routes: [GO, GO, HITCH, TOSS], run: true },
+  { name: 'Slants', routes: [SLANT, OUT, SLANT, CHECK, SEAM] },
+  { name: 'Verticals', routes: [GO, GO, GO, CHECK, SEAM] },
+  { name: 'Post Corner', routes: [POST, CORNER, DIG, FLAT, TE_DRAG] },
+  { name: 'Crossers', routes: [DIG, DRAG, POST, WHEEL, BLOCK] },
+  { name: 'Hitch Slant', routes: [HITCH, SLANT, HITCH, FLAT, SEAM] },
+  { name: 'Curls', routes: [CURL, DIG, CURL, CHECK, TE_FLAT] },
+  // Tight end plays (3h-b): the slot's post pulls the safety away from his seam; his drag under a curl.
+  { name: 'TE Seam', routes: [GO, POST, GO, CHECK, SEAM] },
+  { name: 'TE Drag', routes: [GO, CURL, CURL, FLAT, TE_DRAG] },
+  { name: 'Dive', routes: [GO, GO, GO, DIVE, BLOCK], run: true },
+  { name: 'Toss', routes: [GO, GO, HITCH, TOSS, BLOCK], run: true },
 ];
 
 /**
- * Hot route: the next route in the same list (receiver routes or RB routes), wrapping round.
- * A run path has no list, so it stays as it is.
+ * Hot route: the next route in that player's list (receiver, RB or TE routes; `index` = his
+ * formation spot), wrapping round. A run path isn't in a list, so it stays as it is.
  */
-export function nextRoute(current: RouteDef): RouteDef {
-  for (const list of [ROUTES, RB_ROUTES]) {
-    const i = list.findIndex((r) => r.name === current.name);
-    if (i >= 0) return list[(i + 1) % list.length];
-  }
-  return current;
+export function nextRoute(current: RouteDef, index: number): RouteDef {
+  const list = index === TE ? TE_ROUTES : index === RB ? RB_ROUTES : ROUTES;
+  const i = list.findIndex((r) => r.name === current.name);
+  return i >= 0 ? list[(i + 1) % list.length] : current;
 }
 
 /** A copy of `play` with receiver `wr` running `route` instead. The playbook itself never changes. */

@@ -5,25 +5,27 @@
 import type { Feel } from '../config/feel';
 import { FIELD_WIDTH } from './field';
 import { formation } from './formation';
-import { RB, routePath, startRunner, stepRunner, type PlayDef } from './routes';
+import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage } from './defense';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { cornerStart, coverParams, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
-import { carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor } from './runRatings';
+import { cornerStart, coverParams, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
 /** Who's on the field (ratings, 3e-a). Anyone missing plays as an average starter. */
 export interface RunPlayers {
   rb?: Player;
-  /** Their corners and linebacker, in formation order (CB1, CB3, CB2, LB1). */
+  /** Their corners and linebackers, in formation order (CB1, CB3, CB2, LB1, LB2). */
   cover?: (Player | undefined)[];
   safety?: Player;
   /** Their four rushers, formation order. */
   rush?: (Player | undefined)[];
   /** Our five blockers, formation order (`BLOCKER_OF[i]` blocks rusher i). */
   line?: (Player | undefined)[];
+  /** Our tight end (3h-b): he blocks on runs, helping on the edge on his side. */
+  te?: Player;
 }
 
 const dt = 1 / 60;
@@ -58,10 +60,13 @@ export function simulateRun(
   const d = feel.defense;
   const blitz = call === 'blitz';
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
-  let cover = f.skill.map((s, i) => startCoverage(i === RB ? linebackerStart(call, feel, losX) : cornerStart(call, feel, s.pos), s.pos));
+  let cover = f.skill.map((s, i) =>
+    startCoverage(i === RB ? linebackerStart(call, feel, losX) : i === TE ? linebacker2Start(feel, losX) : cornerStart(call, feel, s.pos), s.pos),
+  );
   const rg = feel.runGame;
   const holeY = pathYAt(paths[RB], losX);
-  const sheds = lineShedTimes(players.line, players.rush, true, rg, () => rng.next(), feel.ratings, pointOfAttack(f.rush.map((r) => r.y), holeY));
+  const teHelp = { rusher: TE_SIDE_RUSHER, time: teHelpFor(players.te, players.rush?.[TE_SIDE_RUSHER], true, rg.teHelpTime, feel.ratings) };
+  const sheds = lineShedTimes(players.line, players.rush, true, rg, () => rng.next(), feel.ratings, pointOfAttack(f.rush.map((r) => r.y), holeY), teHelp);
   let rushers = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
   let t = 0;
   while (!reachedHandoff(runners[RB]) && t < 3) {
@@ -69,7 +74,7 @@ export function simulateRun(
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, feel.routes));
     // A blitzing linebacker shoots his gap, straight at the QB (a run away from him gets outside him).
     cover = cover.map((c, i) =>
-      blitz && i === RB ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) } : stepCoverage(c, runners[i].pos, dt, i === RB ? lbCover : cbCover),
+      blitz && i === RB ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) } : stepCoverage(c, runners[i].pos, dt, coveredByLinebacker(i) ? lbCover : cbCover),
     );
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
   }
@@ -79,13 +84,13 @@ export function simulateRun(
     ...cover.map((c, i) =>
       pursuerFor(
         players.cover?.[i],
-        i === RB ? 'LB' : 'CB',
+        coveredByLinebacker(i) ? 'LB' : 'CB',
         {
           pos: { ...c.pos },
-          speed: i === RB ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
+          speed: coveredByLinebacker(i) ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
           stunned: 0,
           // A blitzer is already coming: no read.
-          wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : rg.cbReadTime,
+          wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : i === TE ? rg.lbReadTime : rg.cbReadTime,
         },
         R,
       ),

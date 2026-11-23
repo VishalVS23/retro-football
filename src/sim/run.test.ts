@@ -10,10 +10,11 @@ const dt = 1 / 60;
 const play = (name: string) => PLAYS.find((p) => p.name === name)!;
 
 describe('running back', () => {
-  it('lines up behind the QB and is the 4th skill player', () => {
+  it('lines up behind the QB and is the 4th skill player (the TE is the 5th)', () => {
     const f = formation(45);
-    expect(f.skill).toHaveLength(4);
+    expect(f.skill).toHaveLength(5);
     expect(f.skill[RB]).toBe(f.rb);
+    expect(f.skill[4]).toBe(f.te);
     expect(f.rb.pos.x).toBeLessThan(f.qb.x - 2);
   });
 

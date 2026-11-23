@@ -321,6 +321,8 @@ export function closestIndex(points: Vec[], to: Vec): number {
  * breakup / intercept / hold: each defender's multipliers on breakup, interception and holding on.
  */
 export interface PlayerContestMods {
+  /** Defender i plays a zone this snap (covers no one): he contests at full strength, like the safety. */
+  zone?: boolean[];
   receiverCatch?: number[];
   contested?: number[];
   breakup?: number[];
@@ -338,9 +340,20 @@ export function resolveTargetedPass(
   mods: PlayerContestMods = {},
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
-  const defender = closestIndex(defenders, landing);
   // Defender i < receivers.length covers receiver i man-to-man; anyone beyond that is the deep safety.
-  const help = defender < receivers.length && defender !== receiver;
+  const isHelp = (d: number) => d < receivers.length && d !== receiver && !mods.zone?.[d];
+  let defender = closestIndex(defenders, landing);
+  // When the receiver can get to it, the defender who contests HARDEST makes the play: his own man
+  // right on him beats a help defender (half strength) who happens to stand a step closer (3h-b).
+  if (isHelp(defender) && receiver < defenders.length && dist(receivers[receiver], landing) <= p.catchRadiusYards) {
+    const strength = (d: number) => {
+      const k = Math.max(0, 1 - dist(defenders[d], landing) / p.contestRadiusYards);
+      const shield = thrower && isShielded(receivers[receiver], defenders[d], thrower) ? (p.shieldedContestRatio ?? 1) : 1;
+      return k * shield * (isHelp(d) ? (p.helpContestRatio ?? 1) : 1);
+    };
+    if (strength(receiver) > strength(defender)) defender = receiver;
+  }
+  const help = isHelp(defender);
   const params: ContestParams = {
     ...p,
     receiverCatchChance: mods.receiverCatch?.[receiver] ?? p.receiverCatchChance,
