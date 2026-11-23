@@ -161,8 +161,8 @@ describe('whole simulated games', () => {
     expect(g.close).toBeGreaterThan(0.5);
     expect(g.blowouts).toBeGreaterThan(0.005);
     expect(g.ot).toBeGreaterThan(0.03);
-    expect(g.pts).toBeGreaterThan(14);
-    expect(g.pts).toBeLessThan(28);
+    expect(g.pts).toBeGreaterThan(22); // 3-minute quarters (2026-11-23): ~30 a game, like football
+    expect(g.pts).toBeLessThan(38);
   }, 60000);
 
   it('the best team beats the worst most of the time but not always; a good team beats a middling one more often than not', () => {

@@ -550,8 +550,8 @@ export const feel = {
     riskPickSteps: 0.6,
   },
   clock: {
-    /** Game seconds per quarter (user's choice: 2 minutes). */
-    quarterLength: 120,
+    /** Game seconds per quarter (user's choice: 2 minutes; 3 since 2026-11-23 so scores look like football: ~17 drives a game instead of ~12). */
+    quarterLength: 180,
     /** Game seconds the huddle takes when the clock keeps running (tackle in bounds). */
     huddleRunoff: 5,
     /** Late-quarter warning in Q2 and Q4 (clock stops once at this time). */
@@ -650,7 +650,7 @@ export const feel = {
      * Simulated drives (3g-A): unit matchups nudge the CPU drive dice, against the average starters.
      * Every unit edge is scaled by simEdgeScale (the units add up over a whole game), then capped at simEdgeCap points (so upsets stay possible).
      */
-    simEdgeScale: 0.4,
+    simEdgeScale: 0.33, // 0.4 with 2-minute quarters; more drives = the better team wins more often
     simEdgeCap: 2.5,
     /** Completions: doublings of the catch odds per point of passing edge (QB accuracy + receivers vs coverage). */
     simCompletionOddsPerPoint: 0.16,
