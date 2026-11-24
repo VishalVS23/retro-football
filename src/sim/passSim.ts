@@ -12,6 +12,7 @@ import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } f
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pursuerFor, shedTimeFor, tackleFor, teHelpFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
+import { jumpTarget } from './scouting';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
@@ -47,6 +48,8 @@ export interface PassOptions {
   shell?: ShellId;
   /** Disguise (D-a): they line up in this look and play `call` / `shell` from there. Leave out = they line up in what they play. */
   shown?: Look;
+  /** A-b: defender `cover` (0-4) sits on `spot` (he expects a throw there), reads the throw quicker and contests at full strength. */
+  jump?: { cover: number; spot: Vec };
   /** Our TE stays in to block (his route is Block): what LB2 does. Default: drops into the short middle. */
   lb2?: 'drop' | 'blitz';
   /**
@@ -65,7 +68,7 @@ export function simulatePass(
   feel: Feel,
   losX = 35,
   opts: PassOptions = {},
-): { result: PassResult; separation: number; defender: number; miss: number; sacked: boolean; gain?: number; afterCatch?: number } {
+): { result: PassResult; separation: number; defender: number; miss: number; sacked: boolean; landing?: Vec; gain?: number; afterCatch?: number } {
   const withQb = 'qb' in opts;
   const armFx = withQb ? arm(opts.qb, feel.ratings) : { speed: 1, range: 1 };
   const rng = createRng(seed);
@@ -96,6 +99,12 @@ export function simulatePass(
     }
     return i === TE && job === 'drop' ? zoneParams(rated) : rated;
   });
+  // A-b: the jumper sits on his spot (no cushion) and reads the throw quicker.
+  const jumper = opts.jump && !(blitz && opts.jump.cover === RB) && !(opts.jump.cover === TE && job === 'blitz') ? opts.jump : null;
+  if (jumper) {
+    const p = zoneParams(coverP[jumper.cover]);
+    coverP[jumper.cover] = { ...p, ballReactionTime: p.ballReactionTime * feel.adjust.jumpReactionRatio };
+  }
   const zoneSpot = lb2ZoneSpot(feel, losX);
   // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber. Cover 3: one deep (S1 in the middle third), S2 rotates down.
   const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
@@ -116,7 +125,8 @@ export function simulatePass(
   /** Who defender i is following before the throw: his man, or LB2's zone spot. */
   /** Receivers out on a route (a blocking TE is nobody's in a zone). */
   const live = () => runners.filter((_, i) => !(i === TE && teBlocks)).map((r) => r.pos);
-  const coverTarget = (i: number) => (jobs ? zoneTarget(jobs[i], live(), feel) : i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
+  const jobTarget = (i: number) => (jobs ? zoneTarget(jobs[i], live(), feel) : i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
+  const coverTarget = (i: number) => (jumper && i === jumper.cover ? jumpTarget(jobTarget(i), jumper.spot, feel) : jobTarget(i));
   const KS = [0, 1] as const;
   let safeties: Vec[] = [...align.safeties];
   const safetyPlayers = [def?.safety ?? null, def?.safety2 ?? null];
@@ -198,7 +208,7 @@ export function simulatePass(
     cover = cover.map((c, i) =>
       i === TE && lb2Rush
         ? c
-        : stepCoverage(c, rot(i, t + e, coverTarget(i)), dt, coverP[i], jobs && !breaksOn(jobs[i], landing, feel) ? undefined : { landing, sinceThrow: e + dt, help: !zone && i !== shot.to }),
+        : stepCoverage(c, rot(i, t + e, coverTarget(i)), dt, coverP[i], jobs && i !== jumper?.cover && !breaksOn(jobs[i], landing, feel) ? undefined : { landing, sinceThrow: e + dt, help: !zone && i !== shot.to }),
     );
     safeties = safeties.map((s, k) => {
       const ball = !jobs || breaksOn(jobs[5 + k], landing, feel) ? { landing, sinceThrow: e + dt } : undefined;
@@ -224,8 +234,8 @@ export function simulatePass(
     shieldedContestRatio: d.shieldedContestRatio,
     helpContestRatio: d.helpContestRatio,
   }, qb, {
-    zone: cover.map((_, i) => zone || (i === TE && job === 'drop')),
-    under: jobs?.map((j) => contestsAsHelp(j, landing, feel)),
+    zone: cover.map((_, i) => zone || (i === TE && job === 'drop') || i === jumper?.cover),
+    under: jobs?.map((j, i) => contestsAsHelp(j, landing, feel) && i !== jumper?.cover),
     ...(opts.offense && {
       receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),
@@ -236,7 +246,7 @@ export function simulatePass(
     })()),
   });
   const nearestDefender = Math.min(...cbSpots.map((c) => Math.hypot(c.x - landing.x, c.y - landing.y)));
-  const out = { result: pass.result, separation: nearestDefender, defender: pass.defender, miss, sacked };
+  const out = { result: pass.result, separation: nearestDefender, defender: pass.defender, miss, sacked, landing };
   if (!opts.afterCatch || sacked || pass.result !== 'catch') return out;
 
   // Run after the catch, like the game: every defender chases (the rushers too: on a pass nobody blocks them any more).

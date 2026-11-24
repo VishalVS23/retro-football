@@ -180,7 +180,7 @@ import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor, qbReadChance } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
-import { LEAN_HINTS, leans, mainLean, newScouting, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
+import { LEAN_HINTS, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT } from '../debug/gameControls';
@@ -253,6 +253,8 @@ export class FieldScene extends Phaser.Scene {
   private rotation: Rotation | null = null;
   /** Our QB saw through this snap's disguise before the snap (D-b). */
   private qbRead = false;
+  /** A-b: the defender sitting on a play we keep calling (where those throws land), or null. */
+  private jump: { cover: number; spot: Vec; play: string } | null = null;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -945,9 +947,9 @@ export class FieldScene extends Phaser.Scene {
     const m = def.map((p) => contestMods(p, R));
     return {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
-      zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop')),
+      zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop') || this.jump?.cover === i),
       // Underneath zone defenders (Z-a) come from their spots to rally: help strength.
-      under: this.zoneJobs()?.map((j) => contestsAsHelp(j, landing, feel)),
+      under: this.zoneJobs()?.map((j, i) => contestsAsHelp(j, landing, feel) && this.jump?.cover !== i),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
       contested: off.map((p) => contestedCatchRatio(p, R)),
       breakup: m.map((x) => x.breakup),
@@ -1547,16 +1549,21 @@ export class FieldScene extends Phaser.Scene {
         r.coverage = { ...r.coverage, pos: { ...this.lb2Rush.pos } };
       } else {
         const base = coverFor(this.theirLineup?.cover[i], i === TE ? lb2Cover : i === RB ? lbCover : cover, feel.ratings, !!jobs);
+        // A-b: the jumper leans toward where our throws on that play land and reads the throw quicker.
+        const jumping = this.jump?.cover === i;
+        const sit = (t: Vec) => (jumping ? jumpTarget(t, this.jump!.spot, feel) : t);
+        const quick = jumping ? feel.adjust.jumpReactionRatio : 1;
         if (jobs) {
           const zs = zoneCoverScale(jobs[i], feel);
-          const zp = { ...zoneParams(base), ballReactionTime: zs.ballReactionTime + late(i), topSpeed: base.topSpeed * zs.speedRatio };
-          const zb = ball && breaksOn(jobs[i], ball.landing, feel) ? { ...ball, help: false } : undefined;
-          r.coverage = stepCoverage(r.coverage, rot(i, zoneTarget(jobs[i], live, feel)), dt, zp, zb);
+          const zp = { ...zoneParams(base), ballReactionTime: (zs.ballReactionTime + late(i)) * quick, topSpeed: base.topSpeed * zs.speedRatio };
+          const zb = ball && (jumping || breaksOn(jobs[i], ball.landing, feel)) ? { ...ball, help: false } : undefined;
+          r.coverage = stepCoverage(r.coverage, rot(i, sit(zoneTarget(jobs[i], live, feel))), dt, zp, zb);
         } else {
           // LB2 dropping into his hook zone heads for the spot instead of a man.
-          const zone = i === TE && this.lb2Job === 'drop';
+          const zone = (i === TE && this.lb2Job === 'drop') || jumping;
           const params = zone ? zoneParams(base) : base;
-          r.coverage = stepCoverage(r.coverage, rot(i, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos), dt, { ...params, ballReactionTime: params.ballReactionTime + late(i) }, myBall);
+          const target = i === TE && this.lb2Job === 'drop' ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos;
+          r.coverage = stepCoverage(r.coverage, rot(i, sit(target)), dt, { ...params, ballReactionTime: (params.ballReactionTime + late(i)) * quick }, myBall);
         }
       }
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
@@ -1868,7 +1875,7 @@ export class FieldScene extends Phaser.Scene {
       {
         play: this.calledPlay.name,
         run: !!this.calledPlay.run,
-        ...(thrown && { air: this.currentThrow!.to.x - this.match.ballX, to: this.targetIndex, caught, yards: caught ? p.yards : 0 }),
+        ...(thrown && { air: this.currentThrow!.to.x - this.match.ballX, y: this.currentThrow!.to.y, to: this.targetIndex, caught, yards: caught ? p.yards : 0 }),
       },
       feel,
     );
@@ -2571,6 +2578,9 @@ export class FieldScene extends Phaser.Scene {
       this.shown = null;
       this.readOk = readRoll < qbReadChance(this.ourLineup?.qb, feel.ratings);
       this.qbRead = !!dz && this.readOk;
+      // A-b: sitting on a play we keep calling (no dice: it's in his scouting memory).
+      const key = feel.defCalls.enabled && !forcedDefCall() && !forcedDz ? playKey(this.scouting, teamAdjustSpeed(this.opponentId), feel) : null;
+      this.jump = key && !(this.defCall === 'blitz' && key.to === RB) ? { cover: key.to, spot: { x: this.match.ballX + key.dx, y: key.y }, play: key.play } : null;
       if (dz) {
         const looks = disguiseLooks(dz, this.shell);
         this.defCall = looks.real.call;
@@ -2788,12 +2798,15 @@ export class FieldScene extends Phaser.Scene {
     const read = !!this.shown && this.qbRead;
     // A-a: what he's adjusting to, if our QB spots it.
     const lean = feel.defCalls.enabled && this.readOk && !forcedDefCall() ? mainLean(leans(this.scouting, feel), feel) : null;
+    // A-b: sitting on a play (named, with the receiver) beats a general lean for the hint.
+    const who = this.jump ? this.ourLineup?.skill[this.jump.cover]?.lastName : undefined;
+    const keyHint = this.jump && this.readOk ? `They're sitting on ${this.jump.play}${who ? ` to ${who}` : ''}` : null;
     const { call, shell } = read ? { call: this.defCall, shell: this.shell } : stand;
     return {
       call: stand.call,
       shell: stand.shell,
       read,
-      ...(lean && { hint: LEAN_HINTS[lean] }),
+      ...((keyHint || lean) && { hint: keyHint ?? LEAN_HINTS[lean!] }),
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.

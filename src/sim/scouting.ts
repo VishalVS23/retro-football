@@ -24,17 +24,23 @@ export interface Scouting {
   /** Game totals per skill spot: catches and yards after the catch included. */
   catches: number[];
   yards: number[];
+  /**
+   * A-b: per play and target ("Slants#0"), faded throw count and the average landing spot (yards past
+   * the line, and across). Missing in memories saved before A-b.
+   */
+  landings?: Record<string, { n: number; dx: number; y: number }>;
 }
 
 export function newScouting(): Scouting {
-  return { plays: {}, run: 0, pass: 0, short: 0, deep: 0, targets: [0, 0, 0, 0, 0], catches: [0, 0, 0, 0, 0], yards: [0, 0, 0, 0, 0] };
+  return { plays: {}, run: 0, pass: 0, short: 0, deep: 0, targets: [0, 0, 0, 0, 0], catches: [0, 0, 0, 0, 0], yards: [0, 0, 0, 0, 0], landings: {} };
 }
 
-/** One snap of ours, as he saw it. `air` = how far past the line the ball was thrown (passes only). */
+/** One snap of ours, as he saw it. `air` = how far past the line the ball was thrown, `y` = where across (passes only). */
 export interface ScoutedSnap {
   play: string;
   run: boolean;
   air?: number;
+  y?: number;
   to?: number;
   caught?: boolean;
   yards?: number;
@@ -55,7 +61,15 @@ export function recordSnap(s: Scouting, snap: ScoutedSnap, feel: Feel): Scouting
     targets: s.targets.map((t, i) => t * k + (!snap.run && snap.to === i ? 1 : 0)),
     catches: [...s.catches],
     yards: [...s.yards],
+    landings: {},
   };
+  for (const [key, l] of Object.entries(s.landings ?? {})) if (l.n * k >= 0.05) out.landings![key] = { ...l, n: l.n * k };
+  if (!snap.run && snap.to !== undefined && snap.air !== undefined && snap.y !== undefined) {
+    const key = `${snap.play}#${snap.to}`;
+    const old = out.landings![key];
+    const n = (old?.n ?? 0) + 1;
+    out.landings![key] = old ? { n, dx: (old.dx * old.n + snap.air) / n, y: (old.y * old.n + snap.y) / n } : { n, dx: snap.air, y: snap.y };
+  }
   if (snap.to !== undefined && snap.to >= 0 && snap.to < out.catches.length && snap.caught) {
     out.catches[snap.to] += 1;
     out.yards[snap.to] += snap.yards ?? 0;
@@ -101,6 +115,37 @@ export const LEAN_HINTS: Record<keyof Leans, string> = {
   deep: "They're protecting deep",
 };
 
+/** Skill spot of the RB: never keyed (an LB sitting on the flat measured no better than covering him). */
+const KEY_SKIP_RB = 3;
+
+/** A-b: the play he's sitting on, its favourite target and where those throws land (yards past the line, across). */
+export interface PlayKey {
+  play: string;
+  to: number;
+  dx: number;
+  y: number;
+}
+
+/**
+ * A-b: is he sitting on one of our plays? The most-called play once its faded count reaches `keyFrom`
+ * (a fast coach sooner), and its most-thrown-to target once that has `keyTargetFrom` faded throws.
+ */
+export function playKey(s: Scouting, speed: number, feel: Feel): PlayKey | null {
+  const a = feel.adjust;
+  const from = a.keyFrom - a.keyFastSpeedUp * Math.max(0, Math.min(1, speed));
+  const top = Object.entries(s.plays).reduce<[string, number] | null>((best, e) => (!best || e[1] > best[1] ? e : best), null);
+  if (!top || top[1] < from) return null;
+  let best: PlayKey | null = null;
+  let bestN = 0;
+  for (const [key, l] of Object.entries(s.landings ?? {})) {
+    const [play, to] = key.split('#');
+    if (play !== top[0] || Number(to) === KEY_SKIP_RB || l.n < a.keyTargetFrom || l.n <= bestN) continue;
+    best = { play, to: Number(to), dx: l.dx, y: l.y };
+    bestN = l.n;
+  }
+  return best;
+}
+
 /** How quickly a coach adjusts, 0 (slow) .. 1 (fast): fixed per team until coordinators (Stage 8). */
 export function teamAdjustSpeed(teamId: number | null | undefined): number {
   if (teamId === null || teamId === undefined) return 0.5;
@@ -126,5 +171,17 @@ export function sanitizeScouting(v: unknown): Scouting {
     !list(s.yards)
   )
     return newScouting();
-  return JSON.parse(JSON.stringify(s)) as Scouting;
+  const out = JSON.parse(JSON.stringify(s)) as Scouting;
+  const okLanding = (l: unknown) => {
+    const x = l as { n?: unknown; dx?: unknown; y?: unknown };
+    return !!x && num(x.n) && typeof x.dx === 'number' && Number.isFinite(x.dx) && num(x.y);
+  };
+  if (!out.landings || typeof out.landings !== 'object' || !Object.values(out.landings).every(okLanding)) out.landings = {};
+  return out;
+}
+
+/** A-b: where a jumper aims: `jumpBlend` of the way from where his job puts him toward the spot he's sitting on. */
+export function jumpTarget(job: { x: number; y: number }, spot: { x: number; y: number }, feel: Feel): { x: number; y: number } {
+  const k = Math.max(0, Math.min(1, feel.adjust.jumpBlend));
+  return { x: job.x + (spot.x - job.x) * k, y: job.y + (spot.y - job.y) * k };
 }

@@ -313,6 +313,20 @@ export const feel = {
     deepOffBonus: 3,
     deepCover2Bonus: 3,
     deepTwoDeepBonus: 2,
+    /**
+     * A-b, sitting on a play: once a play's faded count reaches `keyFrom` (less `keyFastSpeedUp` for the
+     * fastest-adjusting coach) and one target on it (not the RB: an LB sitting on the flat measured no
+     * better) has `keyTargetFrom` faded throws, the defender on that target leans toward where those throws
+     * land (relative to the line), reads the throw x `jumpReactionRatio` and contests at full strength.
+     * Measured (avg QB, man / robber / Cover 3): that throw -24 to -32 points (TE drag -43, go -12); other
+     * targets on the same play unchanged.
+     */
+    keyFrom: 2.4,
+    keyFastSpeedUp: 0.8,
+    keyTargetFrom: 1.5,
+    jumpReactionRatio: 1,
+    /** ...but he only goes this share of the way from where his job puts him toward that spot (1 = right on it). */
+    jumpBlend: 0.5,
   },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
