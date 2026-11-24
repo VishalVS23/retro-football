@@ -5,6 +5,7 @@
 import { addDrive, newSideStats, type SideStats } from '../sim/gameStats';
 import type { SimGameResult } from '../sim/simGame';
 import type { Rng } from '../sim/rng';
+import { rateGame } from './gameRatings';
 import { addLine, creditSnaps, regroupLines, sanitizeLines, type Lines, type StatUnit } from './playerStats';
 
 export interface TeamBox {
@@ -13,6 +14,8 @@ export interface TeamBox {
   /** Points per period: 0-3 = Q1-Q4, 4+ = overtime periods. */
   byPeriod: number[];
   lines: Lines;
+  /** 4d: each starter's rating for this game, x10 (74 = 7.4). Missing in games played before 4d. */
+  ratings?: Record<number, number>;
 }
 
 export interface BoxScore {
@@ -45,7 +48,13 @@ export function boxFromSim(gameId: number, result: SimGameResult, teamIds: [numb
     if (e.drive) me.stats = addDrive(me.stats, e.drive);
   }
   creditLog([teams[0].lines, teams[1].lines], result.log, units, rng);
-  return { gameId, teams };
+  return withRatings({ gameId, teams }, units);
+}
+
+/** The box score with every starter's game rating added (4d; `units` in the box's team order). */
+export function withRatings(box: BoxScore, units: [StatUnit, StatUnit]): BoxScore {
+  const [a, b] = rateGame(box, units);
+  return { ...box, teams: [{ ...box.teams[0], ratings: a }, { ...box.teams[1], ratings: b }] };
 }
 
 /**
@@ -131,9 +140,23 @@ export function sanitizeBoxScores(raw: unknown): BoxScores | null {
       const s = t.stats as unknown as Record<string, unknown>;
       const keys: (keyof SideStats)[] = ['plays', 'passYards', 'rushYards', 'firstDowns', 'turnovers', 'sacked'];
       if (!keys.every((k) => typeof s[k] === 'number')) return null;
-      teams.push({ teamId: t.teamId, stats: { ...(t.stats as SideStats) }, byPeriod: [...t.byPeriod], lines });
+      const team: TeamBox = { teamId: t.teamId, stats: { ...(t.stats as SideStats) }, byPeriod: [...t.byPeriod], lines };
+      const ratings = sanitizeRatings((t as { ratings?: unknown }).ratings);
+      if (ratings) team.ratings = ratings;
+      teams.push(team);
     }
     out[box.gameId] = { gameId: box.gameId, teams: [teams[0], teams[1]] };
+  }
+  return out;
+}
+
+/** Ratings by player id (x10, whole numbers 30-100); anything else = none. */
+function sanitizeRatings(raw: unknown): Record<number, number> | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const out: Record<number, number> = {};
+  for (const [id, r] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d+$/.test(id) || typeof r !== 'number' || !Number.isInteger(r) || r < 0 || r > 100) return null;
+    out[Number(id)] = r;
   }
   return out;
 }

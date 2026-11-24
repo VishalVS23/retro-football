@@ -96,6 +96,8 @@ export interface GameLogRow {
   home: boolean;
   /** Null = no stats that game (didn't play, or nothing to count). */
   line: PlayerLine | null;
+  /** 4d: his game rating x10 (null = not rated: didn't start, or a game from before 4d). */
+  rating: number | null;
 }
 
 /** A player's line in each game his team has played this season (with a box score), by week. */
@@ -106,7 +108,7 @@ export function gameLog(season: Season, boxes: BoxScores, playerId: number, team
     const b = boxes[g.id];
     if (!b) continue;
     const mine = b.teams.find((t) => t.teamId === teamId);
-    rows.push({ week: g.week, opponent: g.home === teamId ? g.away : g.home, home: g.home === teamId, line: mine?.lines[playerId] ?? null });
+    rows.push({ week: g.week, opponent: g.home === teamId ? g.away : g.home, home: g.home === teamId, line: mine?.lines[playerId] ?? null, rating: mine?.ratings?.[playerId] ?? null });
   }
   return rows.sort((a, b) => a.week - b.week);
 }
@@ -155,3 +157,38 @@ export const PROFILE_COLUMNS: Record<Position, StatColumn[]> = {
   K: [{ label: 'FG', value: (l) => `${n(l, 'fgm')}/${n(l, 'fga')}` }, longest('LNG', 'fgl'), { label: 'XP', value: (l) => `${n(l, 'xpm')}/${n(l, 'xpa')}` }],
   P: [col('PUNTS', 'pu'), col('NET', 'puy'), { label: 'AVG', value: (l) => avg(n(l, 'puy'), n(l, 'pu')) }],
 };
+
+/**
+ * 4d: the best average game ratings (one decimal), among players rated in at least half of their
+ * team's games so far (so one big game can't top the list).
+ */
+export function ratingLeaders(boxes: BoxScores, teams: TeamTotals[], n = 10): { id: number; value: number }[] {
+  const sum = new Map<number, { total: number; games: number; teamId: number }>();
+  for (const b of Object.values(boxes))
+    for (const t of b.teams)
+      for (const [key, r] of Object.entries(t.ratings ?? {})) {
+        const id = Number(key);
+        const e = sum.get(id) ?? { total: 0, games: 0, teamId: t.teamId };
+        e.total += r;
+        e.games++;
+        sum.set(id, e);
+      }
+  return [...sum]
+    .filter(([, e]) => e.games * 2 >= (teams[e.teamId]?.games ?? 0) && e.games > 0)
+    .map(([id, e]) => ({ id, value: Math.round(e.total / e.games) / 10 }))
+    .sort((a, b) => b.value - a.value || a.id - b.id)
+    .slice(0, n);
+}
+
+/** A short stat summary for a player of the game: his best 2-3 stats in words (e.g. "21/28 · 290 YDS · 3 TD"). */
+export function statSummary(l: PlayerLine): string {
+  const parts: string[] = [];
+  const x = (k: StatKey) => l[k] ?? 0;
+  if (x('pa')) parts.push(`${x('pc')}/${x('pa')}`, `${x('py')} PASS YDS`, ...(x('ptd') ? [`${x('ptd')} TD`] : []), ...(x('pint') ? [`${x('pint')} INT`] : []));
+  if (x('ra') && x('ry') >= 20) parts.push(`${x('ra')} CAR ${x('ry')} YDS`, ...(x('rtd') ? [`${x('rtd')} RUSH TD`] : []));
+  if (x('rec')) parts.push(`${x('rec')} REC ${x('rcy')} YDS`, ...(x('rctd') ? [`${x('rctd')} TD`] : []));
+  if (x('tk') || x('sck') || x('dint')) parts.push(...(x('tk') ? [`${x('tk')} TK`] : []), ...(x('sck') ? [`${x('sck')} SACK${x('sck') > 1 ? 'S' : ''}`] : []), ...(x('dint') ? [`${x('dint')} INT`] : []), ...(x('ff') ? [`${x('ff')} FF`] : []));
+  if (x('fga')) parts.push(`${x('fgm')}/${x('fga')} FG`);
+  if (x('pu')) parts.push(`${x('pu')} PUNTS`);
+  return parts.slice(0, 4).join(' · ') || 'A STRONG GAME UP FRONT';
+}

@@ -176,7 +176,8 @@ import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame
 import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
 import { addLine, creditLive, creditSnaps, type LivePlay, type Lines, type PlayerLine, type StatUnit } from '../league/playerStats';
 import { createRng } from '../sim/rng';
-import { CREDIT_SALT, closeSeasonStats, creditLog, emptyStats, regroupBoxes, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
+import { CREDIT_SALT, closeSeasonStats, creditLog, emptyStats, regroupBoxes, withRatings, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
+import { playerOfTheGame, ratingText, unitAverages } from '../league/gameRatings';
 import { closeBoxScore, openBoxScore } from '../ui/boxScoreScreen';
 import { runWeekSims } from '../league/weekSim';
 import { closeSeasonScreen, openSeasonScreen } from '../ui/seasonScreen';
@@ -187,7 +188,7 @@ import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
-import { LEADER_CATS, gameLog, leaders, pastSeasons, playerTotals, teamTotals } from '../league/leaders';
+import { LEADER_CATS, gameLog, leaders, pastSeasons, playerTotals, ratingLeaders, statSummary, teamTotals } from '../league/leaders';
 import type { PlayerStatsInfo } from '../ui/teamScreen';
 import type { SeasonStatsData } from '../ui/seasonScreen';
 import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type KickingUnit, type OffenseLineup } from '../league/lineup';
@@ -2372,6 +2373,7 @@ export class FieldScene extends Phaser.Scene {
     const gameId = this.seasonGameId;
     const week = this.recordSeasonGame();
     openEndGame({
+      ...this.endScreenRatings(gameId),
       onBoxScore: this.league?.userTeamId !== null && this.league && this.opponentId !== null ? () => this.showFinalBox(gameId) : undefined,
       us: this.match.us,
       them: this.match.them,
@@ -2629,12 +2631,14 @@ export class FieldScene extends Phaser.Scene {
     const s = this.season;
     const boxes = this.leagueStats.boxes;
     const log = s ? gameLog(s, boxes, playerId, teamId) : [];
-    const played = log.filter((g) => g.line);
+    const played = log.filter((g) => g.line || g.rating !== null);
+    const rated = log.filter((g) => g.rating !== null);
     return {
       year: s?.year ?? 1,
-      season: played.length ? played.reduce<PlayerLine>((a, g) => addLine(a, g.line!), {}) : null,
+      season: played.length ? played.reduce<PlayerLine>((a, g) => addLine(a, g.line ?? {}), {}) : null,
       games: played.length,
-      log: log.map((g) => ({ week: g.week, opponent: l.teams[g.opponent].abbr, home: g.home, line: g.line })),
+      rating: rated.length ? ratingText(Math.round(rated.reduce((a, g) => a + g.rating!, 0) / rated.length)) : null,
+      log: log.map((g) => ({ week: g.week, opponent: l.teams[g.opponent].abbr, home: g.home, line: g.line, rating: g.rating === null ? null : ratingText(g.rating) })),
       past: pastSeasons(this.leagueStats, playerId),
     };
   }
@@ -2645,7 +2649,7 @@ export class FieldScene extends Phaser.Scene {
     const totals = playerTotals(this.leagueStats.boxes);
     const teamOf = new Map<number, number>();
     for (const t of l.teams) for (const id of [...t.roster, ...t.practice]) teamOf.set(id, t.id);
-    return {
+    const out: SeasonStatsData = {
       leaders: LEADER_CATS.map((c) => ({
         label: c.label,
         rows: leaders(totals, c.key)
@@ -2657,6 +2661,19 @@ export class FieldScene extends Phaser.Scene {
       })),
       teams: teamTotals(this.leagueStats.boxes, l.teams.length),
     };
+    // 4d: best average game rating, among players rated in at least half their team's games.
+    const rated = ratingLeaders(this.leagueStats.boxes, teamTotals(this.leagueStats.boxes, l.teams.length));
+    out.leaders.push({
+      label: 'AVG RATING',
+      decimals: true,
+      rows: rated
+        .filter((r) => l.players[r.id] && teamOf.has(r.id))
+        .map((r) => {
+          const p = l.players[r.id];
+          return { id: r.id, name: `${p.firstName[0]}. ${p.lastName}`.toUpperCase(), pos: p.position, teamId: teamOf.get(r.id)!, value: r.value };
+        }),
+    });
+    return out;
   }
 
   /** Both teams' main colours (for logos / colour dots on the HTML screens). */
@@ -2821,7 +2838,32 @@ export class FieldScene extends Phaser.Scene {
     const copy = (l: Lines): Lines => JSON.parse(JSON.stringify(l)) as Lines;
     const us: TeamBox = { teamId: me, stats: { ...this.stats.us }, byPeriod: [...this.stats.byQuarter.us], lines: copy(this.lines.us) };
     const them: TeamBox = { teamId: opp, stats: { ...this.stats.them }, byPeriod: [...this.stats.byQuarter.them], lines: copy(this.lines.them) };
-    return { gameId, teams: weAreHome ? [us, them] : [them, us] };
+    const box: BoxScore = { gameId, teams: weAreHome ? [us, them] : [them, us] };
+    // 4d: every starter's rating for the game.
+    const units = this.statUnits();
+    return units ? withRatings(box, weAreHome ? units : [units[1], units[0]]) : box;
+  }
+
+  /** 4d: the end screen's player of the game and both teams' average ratings. */
+  private endScreenRatings(gameId: number | null) {
+    const l = this.league;
+    const me = l?.userTeamId;
+    const units = this.statUnits();
+    if (!l || me === null || me === undefined || this.opponentId === null || !units) return {};
+    const box = gameId !== null && this.leagueStats.boxes[gameId] ? this.leagueStats.boxes[gameId] : this.gameBox(-1, me, this.opponentId, true);
+    const ours = box.teams.findIndex((t) => t.teamId === me);
+    const [u, t] = [box.teams[ours], box.teams[1 - ours]];
+    const avg = (x: { off: number | null; def: number | null }) => ({ off: x.off === null ? '-' : ratingText(x.off), def: x.def === null ? '-' : ratingText(x.def) });
+    const best = playerOfTheGame(box);
+    const p = best ? l.players[best.id] : undefined;
+    const team = best ? l.teams[box.teams[best.side].teamId] : undefined;
+    const line = best ? box.teams[best.side].lines[best.id] ?? {} : {};
+    return {
+      ratings: { us: avg(unitAverages(u, units[0])), them: avg(unitAverages(t, units[1])) },
+      ...(p && team && best && {
+        potg: { name: `${p.firstName[0]}. ${p.lastName}`.toUpperCase(), pos: p.position, abbr: team.abbr, rating: ratingText(best.rating), line: statSummary(line) },
+      }),
+    };
   }
 
   private openBox(box: BoxScore, week: number | null, ot: number) {

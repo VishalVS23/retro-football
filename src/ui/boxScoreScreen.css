@@ -166,3 +166,33 @@
   color: var(--bx-gold);
   margin-right: 4px;
 }
+
+/* 4d: STATS / RATINGS switch and the rating pills */
+.bx-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  margin: 6px 0 2px;
+}
+.bx-chip.small {
+  padding: 5px 8px;
+}
+.bx-gap {
+  width: 10px;
+}
+.bx-stat {
+  color: var(--bx-dim);
+}
+.bx-rtg {
+  display: inline-block;
+  min-width: 30px;
+  padding: 2px 4px;
+  text-align: center;
+  color: #0d1b2a;
+  border-radius: 2px;
+}
+.bx-rtg.r-great { background: #ffd166; }
+.bx-rtg.r-good { background: #9be38a; }
+.bx-rtg.r-ok { background: #f0a948; }
+.bx-rtg.r-poor { background: #ff6b6b; }

@@ -148,3 +148,13 @@
   color: #f4efe1;
   background: #7b5cd6;
 }
+
+/* 4d: player of the game */
+.eg-rtg {
+  display: inline-block;
+  padding: 1px 4px;
+  font-weight: normal;
+  color: #0d1b2a;
+  background: #ffd166;
+  border-radius: 2px;
+}

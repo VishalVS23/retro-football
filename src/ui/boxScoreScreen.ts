@@ -9,6 +9,8 @@ import type { BoxScore, TeamBox } from '../league/boxScore';
 import type { PlayerLine } from '../league/playerStats';
 import { totalYards } from '../sim/gameStats';
 import { teamLogoHtml } from './teamLogo';
+import { ratingBand, ratingText } from '../league/gameRatings';
+import { statSummary } from '../league/leaders';
 
 export interface BoxTeamInfo {
   abbr: string;
@@ -80,9 +82,29 @@ function playerTables(t: TeamBox, o: BoxScoreOptions): string {
   );
 }
 
+/** 4d: every rated player of one team, best first, with a colour pill and a few of his stats. */
+function ratingsTable(t: TeamBox, o: BoxScoreOptions, unit: 'all' | 'offense' | 'defense'): string {
+  const r = t.ratings;
+  if (!r || !Object.keys(r).length) return '<div class="bx-note">NO RATINGS FOR THIS GAME (PLAYED BEFORE RATINGS WERE KEPT).</div>';
+  const rows = Object.entries(r)
+    .map(([id, v]) => ({ id: Number(id), v, p: o.player(Number(id)) }))
+    .filter((x) => unit === 'all' || (POS_UNIT[x.p.pos] ?? 'special') === unit)
+    .sort((a, b) => b.v - a.v || a.id - b.id)
+    .map((x) => [
+      `<span class="bx-pos">${esc(x.p.pos)}</span>${esc(x.p.name)}`,
+      `<span class="bx-stat">${esc(statSummary(t.lines[x.id] ?? {}).replace('A STRONG GAME UP FRONT', ''))}</span>`,
+      `<span class="bx-rtg ${ratingBand(x.v / 10)}">${ratingText(x.v)}</span>`,
+    ]);
+  return table('GAME RATINGS', ['', '', 'RTG'], rows);
+}
+
+const POS_UNIT: Record<string, 'offense' | 'defense' | 'special'> = { QB: 'offense', RB: 'offense', WR: 'offense', TE: 'offense', OL: 'offense', DL: 'defense', LB: 'defense', CB: 'defense', S: 'defense', K: 'special', P: 'special' };
+
 export function openBoxScore(o: BoxScoreOptions) {
   closeBoxScore();
   let side: 0 | 1 = o.side ?? 1;
+  let mode: 'stats' | 'ratings' = 'stats';
+  let unit: 'all' | 'offense' | 'defense' = 'all';
   const [home, away] = o.box.teams;
   const [hi, ai] = o.teams;
   const hs = home.byPeriod.reduce((a, b) => a + b, 0);
@@ -123,13 +145,19 @@ export function openBoxScore(o: BoxScoreOptions) {
           <button type="button" class="bx-chip" data-side="1">${esc(ai.abbr)} PLAYERS</button>
           <button type="button" class="bx-chip" data-side="0">${esc(hi.abbr)} PLAYERS</button>
         </div>
+        <div class="bx-modes"></div>
         <div class="bx-players"></div>
       </div>
     </div>`;
   const players = el.querySelector<HTMLElement>('.bx-players')!;
   const render = () => {
     el.querySelectorAll<HTMLElement>('.bx-chip').forEach((c) => c.classList.toggle('on', Number(c.dataset.side) === side));
-    players.innerHTML = playerTables(o.box.teams[side], o);
+    const chip = (attr: string, v: string, label: string, on: boolean) => `<button type="button" class="bx-chip small${on ? ' on' : ''}" ${attr}="${v}">${label}</button>`;
+    el.querySelector<HTMLElement>('.bx-modes')!.innerHTML =
+      chip('data-mode', 'stats', 'STATS', mode === 'stats') +
+      chip('data-mode', 'ratings', 'RATINGS', mode === 'ratings') +
+      (mode === 'ratings' ? `<span class="bx-gap"></span>${chip('data-unit', 'all', 'ALL', unit === 'all')}${chip('data-unit', 'offense', 'OFF', unit === 'offense')}${chip('data-unit', 'defense', 'DEF', unit === 'defense')}` : '');
+    players.innerHTML = mode === 'ratings' ? ratingsTable(o.box.teams[side], o, unit) : playerTables(o.box.teams[side], o);
   };
   const done = () => {
     closeBoxScore();
@@ -137,6 +165,18 @@ export function openBoxScore(o: BoxScoreOptions) {
   };
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
+    const m = t.closest<HTMLElement>('[data-mode]');
+    if (m) {
+      mode = m.dataset.mode as 'stats' | 'ratings';
+      render();
+      return;
+    }
+    const u = t.closest<HTMLElement>('[data-unit]');
+    if (u) {
+      unit = u.dataset.unit as 'all' | 'offense' | 'defense';
+      render();
+      return;
+    }
     const chip = t.closest<HTMLElement>('[data-side]');
     if (chip) {
       side = Number(chip.dataset.side) as 0 | 1;

@@ -24,6 +24,10 @@ export interface EndGameOptions {
   header?: string;
   /** 4b-2: BOX SCORE button (every player's line); missing = no button. */
   onBoxScore?: () => void;
+  /** 4d: the game's best-rated player (both teams). */
+  potg?: { name: string; pos: string; abbr: string; rating: string; line: string };
+  /** 4d: each team's average rating on offense and defense ("6.8"). */
+  ratings?: { us: { off: string; def: string }; them: { off: string; def: string } };
 }
 
 let root: HTMLDivElement | null = null;
@@ -67,6 +71,7 @@ export function openEndGame(o: EndGameOptions) {
       ${row('TURNOVERS', (x) => x.turnovers)}
       ${row('SACKED', (x) => x.sacked)}
       ${row('PLAYS', (x) => x.plays)}
+      ${o.ratings ? `<tr><td>${o.ratings.us.off}</td><th>OFF RATING</th><td>${o.ratings.them.off}</td></tr><tr><td>${o.ratings.us.def}</td><th>DEF RATING</th><td>${o.ratings.them.def}</td></tr>` : ''}
     </table>`;
   const q = s.qb;
   const qbLine = `${q.completions}/${q.attempts} · ${q.yards} YDS · ${q.touchdowns} TD · ${q.interceptions} INT`;
@@ -81,7 +86,11 @@ export function openEndGame(o: EndGameOptions) {
         <div class="eg-score">${o.ourColor ? teamLogoHtml(us, o.ourColor, 26) : ''}<span>${us} ${o.us} - ${o.them} ${them}</span>${o.theirColor ? teamLogoHtml(them, o.theirColor, 26) : ''}</div>
         ${quarters}
         <div class="eg-qb"><span>YOUR QB</span>${qbLine}</div>
-        <div class="eg-qb"><span>LONGEST PLAY</span>${s.longest} YDS</div>
+        ${
+          o.potg
+            ? `<div class="eg-qb eg-potg"><span>PLAYER OF THE GAME</span><b class="eg-rtg">${o.potg.rating}</b> ${o.potg.abbr} ${o.potg.pos} ${o.potg.name}<br>${o.potg.line}</div>`
+            : `<div class="eg-qb"><span>LONGEST PLAY</span>${s.longest} YDS</div>`
+        }
       </div>
       <div class="eg-right">
         ${team}

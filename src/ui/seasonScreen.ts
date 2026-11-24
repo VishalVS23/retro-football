@@ -56,7 +56,7 @@ export interface SeasonScreenOptions {
 }
 
 export interface SeasonStatsData {
-  leaders: { label: string; rows: { id: number; name: string; pos: string; teamId: number; value: number }[] }[];
+  leaders: { label: string; decimals?: boolean; rows: { id: number; name: string; pos: string; teamId: number; value: number }[] }[];
   teams: TeamTotals[];
 }
 
@@ -257,13 +257,14 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
             .map(
               (r, i) => `<button type="button" class="ss-leader${r.teamId === me ? ' mine' : ''}" data-player="${r.id}">
                 <span class="ss-rank">${i + 1}</span>${logo(r.teamId, 16)}<span class="ss-labbr">${esc(t(r.teamId).abbr)}</span>
-                <span class="ss-lpos">${esc(r.pos)}</span><span class="ss-lname">${esc(r.name)}</span><b>${r.value}</b></button>`,
+                <span class="ss-lpos">${esc(r.pos)}</span><span class="ss-lname">${esc(r.name)}</span><b>${c.decimals ? r.value.toFixed(1) : r.value}</b></button>`,
             )
             .join('')
         : '<div class="ss-note">NO GAMES PLAYED YET.</div>';
+      const note = c?.decimals ? '<div class="ss-note">PLAYERS RATED IN AT LEAST HALF OF THEIR TEAM\'S GAMES.</div>' : '';
       return `${head}
         <div class="ss-cats">${d.leaders.map((x, i) => chip('data-cat', i, x.label, i === cat)).join('')}</div>
-        <div class="ss-leaders">${list}</div>`;
+        <div class="ss-leaders">${list}</div>${note}`;
     }
     const sortCol = TEAM_COLS.find((x) => x.key === teamSort)!;
     const dir = (sortCol.low ? 1 : -1) * (sortFlip ? -1 : 1);

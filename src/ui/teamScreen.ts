@@ -15,6 +15,7 @@ import { TRAITS } from '../players/traits';
 import type { RosterRow } from '../league/rosterView';
 import { teamLogoHtml } from './teamLogo';
 import { PROFILE_COLUMNS } from '../league/leaders';
+import { ratingBand } from '../league/gameRatings';
 import type { PlayerLine } from '../league/playerStats';
 
 export interface TeamScreenOptions {
@@ -35,7 +36,9 @@ export interface PlayerStatsInfo {
   /** This season's totals (null = no stats yet) and the games he has a line in. */
   season: PlayerLine | null;
   games: number;
-  log: { week: number; opponent: string; home: boolean; line: PlayerLine | null }[];
+  /** 4d: his average game rating ("7.1"), null = never rated. */
+  rating: string | null;
+  log: { week: number; opponent: string; home: boolean; line: PlayerLine | null; rating: string | null }[];
   past: { year: number; line: PlayerLine }[];
 }
 
@@ -92,24 +95,27 @@ function attrRow(p: Player, k: AttributeKey, big: boolean): string {
 /** The STATS tab (4c): this season, the game log and past seasons, in the columns that fit his position. */
 function statsHtml(p: Player, info: PlayerStatsInfo): string {
   const cols = PROFILE_COLUMNS[p.position];
-  if (!cols.length) return '<div class="ts-section"><div class="ts-text">NO STATS FOR LINEMEN YET: THEY GET GAME RATINGS LATER.</div></div>';
-  const head = (first: string) => `<tr><th class="l">${first}</th>${cols.map((c) => `<th>${c.label}</th>`).join('')}</tr>`;
+  const pill = (r: string | null) => (r === null ? '-' : `<span class="ts-rtg ${ratingBand(Number(r))}">${r}</span>`);
+  // Season / game rows lead with the rating (4d); linemen have only that.
+  const head = (first: string, rtg = true) => `<tr><th class="l">${first}</th>${rtg ? '<th>RTG</th>' : ''}${cols.map((c) => `<th>${c.label}</th>`).join('')}</tr>`;
   const cells = (l: PlayerLine | null) => cols.map((c) => `<td>${l ? c.value(l) : '-'}</td>`).join('');
-  const season = info.season
-    ? `<table class="ts-stable">${head('GP')}<tr><td class="l">${info.games}</td>${cells(info.season)}</tr></table>`
-    : '<div class="ts-text">NO STATS THIS SEASON YET.</div>';
+  const season =
+    info.season || info.rating
+      ? `<table class="ts-stable">${head('GP')}<tr><td class="l">${info.games}</td><td>${pill(info.rating)}</td>${cells(info.season)}</tr></table>`
+      : '<div class="ts-text">NO STATS THIS SEASON YET.</div>';
   const log = info.log.length
     ? `<table class="ts-stable">${head('WEEK')}${info.log
-        .map((g) => `<tr class="${g.line ? '' : 'dim'}"><td class="l">${g.week} ${g.home ? 'VS' : '@'} ${esc(g.opponent)}</td>${cells(g.line)}</tr>`)
+        .map((g) => `<tr class="${g.line || g.rating ? '' : 'dim'}"><td class="l">${g.week} ${g.home ? 'VS' : '@'} ${esc(g.opponent)}</td><td>${pill(g.rating)}</td>${cells(g.line)}</tr>`)
         .join('')}</table>`
     : '<div class="ts-text">NO GAMES PLAYED YET.</div>';
   const past = info.past.length
-    ? `<div class="ts-section"><div class="ts-h">PAST SEASONS</div><table class="ts-stable">${head('SEASON')}${info.past
+    ? `<div class="ts-section"><div class="ts-h">PAST SEASONS</div><table class="ts-stable">${head('SEASON', false)}${info.past
         .map((h) => `<tr><td class="l">${h.year}</td>${cells(h.line)}</tr>`)
         .join('')}</table></div>`
     : '';
+  const lineman = !cols.length ? '<div class="ts-text">LINEMEN HAVE NO COUNTING STATS: THEIR GAME RATING COMES FROM THE LINE\'S RESULTS.</div>' : '';
   return `
-    <div class="ts-section"><div class="ts-h">SEASON ${info.year}</div>${season}</div>
+    <div class="ts-section"><div class="ts-h">SEASON ${info.year}</div>${season}${lineman}</div>
     <div class="ts-section"><div class="ts-h">GAME LOG</div>${log}</div>
     ${past}`;
 }
