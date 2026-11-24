@@ -29,7 +29,7 @@ import type { PuntRules } from './punting';
 
 /** The average starter's ratings that the sim reads (measured over generated leagues; a test keeps it in step). */
 export const SIM_NORMS: Partial<Record<Position, Partial<Record<AttributeKey, number>>>> = {
-  QB: { shortAccuracy: 13.1, mediumAccuracy: 13.2, deepAccuracy: 12.6, decisions: 11.3 },
+  QB: { shortAccuracy: 13.1, mediumAccuracy: 13.2, deepAccuracy: 12.6, decisions: 11.3, vision: 11.3 },
   WR: { speed: 12.6, routeRunning: 12.9, hands: 12.9 },
   RB: { speed: 12.6, agility: 12.6, strength: 12.2, ballSecurity: 12.7 },
   TE: { speed: 12.0, routeRunning: 12.1, hands: 12.3, runBlocking: 12.5 },

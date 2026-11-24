@@ -112,6 +112,7 @@ import {
   safetyRunRead,
   lookAlignment,
   disguiseLooks,
+  pickDisguise,
   rotatedTarget,
   rotationReadDelay,
   type Look,
@@ -177,7 +178,7 @@ import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type Kic
 import { isPressureKick, kickerRules, pressureSweep, punterRules } from '../sim/kickRatings';
 import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
-import { arm, missLanding, missRadius, offTargetCatchFactor } from '../sim/qbRatings';
+import { arm, missLanding, missRadius, offTargetCatchFactor, qbReadChance } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
@@ -249,6 +250,8 @@ export class FieldScene extends Phaser.Scene {
   private shown: Look | null = null;
   /** Both alignments of a disguised snap (who rotates where), else null. */
   private rotation: Rotation | null = null;
+  /** Our QB saw through this snap's disguise before the snap (D-b). */
+  private qbRead = false;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -2533,9 +2536,14 @@ export class FieldScene extends Phaser.Scene {
       this.lb2Roll = rng.next();
       this.shell = feel.defCalls.enabled ? pickShell(this.defSituation(), feel, rng.next()) : 'twoDeep';
       if (isZoneCall(this.defCall)) this.shell = ZONE_SHELL[this.defCall]; // Cover 3: one deep (S2 rotates down); Cover 2: two deep halves
-      // Disguise (D-a: only from the gear panel's Force disguise for now): line up in one look, play another.
-      const dz = forcedDisguise();
+      // Disguise: line up in one look, play another (their coach's pick, or the gear panel's Force disguise).
+      // Then our QB's read of it (vision + decisions). Two dice rolls every snap, used or not.
+      const dzRoll = rng.next();
+      const readRoll = rng.next();
+      const forcedDz = forcedDisguise();
+      const dz = forcedDz ?? (feel.defCalls.enabled && !forcedDefCall() ? pickDisguise({ call: this.defCall, shell: this.shell }, this.defSituation(), feel, dzRoll) : null);
       this.shown = null;
+      this.qbRead = dz ? readRoll < qbReadChance(this.ourLineup?.qb, feel.ratings) : false;
       if (dz) {
         const looks = disguiseLooks(dz, this.shell);
         this.defCall = looks.real.call;
@@ -2742,16 +2750,20 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /**
-   * What the defense shows at the line this snap. D-a: on a disguised snap that's the SHOWN look
-   * (as if our QB were fooled); D-b adds his read.
+   * What the defense shows at the line this snap. Honest snap: what they play. Disguise: the SHOWN
+   * look, unless our QB read it (then what they really play, flagged `read`). `call` / `shell` stay
+   * where they stand, for the diagram.
    */
   private defenseRead() {
-    const { call, shell } = this.shownLook();
+    const stand = this.shownLook();
+    const read = !!this.shown && this.qbRead;
+    const { call, shell } = read ? { call: this.defCall, shell: this.shell } : stand;
     return {
-      call,
+      call: stand.call,
+      shell: stand.shell,
+      read,
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
-      shell,
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
       shellName: isZoneCall(call) ? (call === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[shell],
       shellTip: isZoneCall(call) ? (call === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[shell],
@@ -2764,8 +2776,9 @@ export class FieldScene extends Phaser.Scene {
     this.readText.setVisible(show);
     if (!show) return;
     const r = this.defenseRead();
-    this.readText.setText(`LOOKS LIKE: ${r.name} · ${r.shellName}
-${r.tip.toUpperCase()}`);
+    const head = r.read ? `QB READ: DISGUISED · REALLY ${r.name} · ${r.shellName}` : `LOOKS LIKE: ${r.name} · ${r.shellName}`;
+    this.readText.setText([head, r.tip.toUpperCase()]);
+    this.readText.setColor(r.read ? '#7fe7ff' : '#ffd166');
     const cam = this.cameras.main;
     this.readText.setScale(1 / cam.zoom).setOrigin(0.5, 0);
     this.placeOnScreen(this.readText, cam.width / 2, 8 + this.scoreboard.height + 4);

@@ -135,6 +135,36 @@ export const DISGUISES: Record<DisguiseId, { shown: { call: DefCallId; shell: Sh
   fakeBlitz: { shown: { call: 'blitz', shell: null }, real: { call: 'man', shell: null } },
 };
 
+/** Which disguises fit a real look (so a disguise never changes what their coach calls). */
+export function disguisesFor(real: Look): DisguiseId[] {
+  if (real.call === 'cover3') return ['rotateCover3'];
+  if (real.call === 'cover2') return ['robberToCover2'];
+  if (real.call === 'blitz') return ['hiddenBlitz'];
+  if (real.call === 'man') return real.shell === 'robber' ? ['cover2ToMan', 'fakeBlitz'] : ['fakeBlitz'];
+  return [];
+}
+
+/** How often their coach disguises in this situation (D-b). */
+export function disguiseChance(s: DefSituation, feel: Feel): number {
+  const c = feel.defCalls;
+  let p = c.disguiseChance * (0.6 + 0.8 * Math.max(0, Math.min(1, s.aggression)));
+  if (s.toGo <= c.shortYards) p *= c.disguiseShortRatio;
+  if (OPP_GOAL_X - s.ballX <= 20) p *= c.disguiseRedZoneRatio;
+  return Math.min(1, p);
+}
+
+/**
+ * Their coach's disguise for this snap, from one dice roll (0..1): none unless the roll is under the
+ * situation's chance AND a disguise fits what he really plays; the same roll picks which one.
+ * Fitting disguises are tried for every call, so a call with none (press, off) is just never disguised.
+ */
+export function pickDisguise(real: Look, s: DefSituation, feel: Feel, roll: number): DisguiseId | null {
+  const options = disguisesFor(real);
+  const chance = disguiseChance(s, feel);
+  if (!options.length || roll >= chance) return null;
+  return options[Math.min(options.length - 1, Math.floor((roll / chance) * options.length))];
+}
+
 /** The shown and real looks of disguise `id`, with `rolled` filling in "the snap's own safety look" (zones use their own shell). */
 export function disguiseLooks(id: DisguiseId, rolled: ShellId): { shown: Look; real: Look } {
   const d = DISGUISES[id];

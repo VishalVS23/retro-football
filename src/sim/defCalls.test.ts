@@ -9,6 +9,9 @@ import {
   DEF_CALL_IDS,
   DISGUISE_IDS,
   disguiseLooks,
+  disguiseChance,
+  disguisesFor,
+  pickDisguise,
   lookAlignment,
   rotatedTarget,
   rotationGap,
@@ -291,4 +294,26 @@ describe('disguises (D-a)', () => {
       expect(d).toBeLessThan(13);
     }
   }, 240000);
+});
+
+describe('their coach disguises (D-b)', () => {
+  it('only calls a disguise fits; about 1 in 5 snaps overall, more for aggressive coaches, fewer in short yardage and the red zone', () => {
+    expect(disguisesFor({ call: 'press', shell: 'twoDeep' })).toEqual([]);
+    expect(disguisesFor({ call: 'off', shell: 'robber' })).toEqual([]);
+    expect(disguisesFor({ call: 'man', shell: 'robber' })).toEqual(['cover2ToMan', 'fakeBlitz']);
+    expect(disguiseChance(base, feel)).toBeCloseTo(feel.defCalls.disguiseChance);
+    expect(disguiseChance({ ...base, aggression: 1 }, feel)).toBeGreaterThan(disguiseChance({ ...base, aggression: 0 }, feel));
+    expect(disguiseChance({ ...base, down: 3, toGo: 1 }, feel)).toBeLessThan(disguiseChance(base, feel));
+    expect(disguiseChance({ ...base, ballX: 95 }, feel)).toBeLessThan(disguiseChance(base, feel));
+  });
+
+  it('the roll picks: under the chance = a fitting disguise (each one comes up), over it = honest', () => {
+    const real: Look = { call: 'man', shell: 'robber' };
+    expect(pickDisguise(real, base, feel, 0.99)).toBeNull();
+    expect(pickDisguise({ call: 'press', shell: 'twoDeep' }, base, feel, 0)).toBeNull();
+    const seen = new Set<string | null>();
+    for (let i = 0; i < 100; i++) seen.add(pickDisguise(real, base, feel, (i + 0.5) / 100));
+    expect(seen).toEqual(new Set(['cover2ToMan', 'fakeBlitz', null]));
+    expect(pickDisguise({ call: 'cover3', shell: 'robber' }, base, feel, 0.01)).toBe('rotateCover3');
+  });
 });

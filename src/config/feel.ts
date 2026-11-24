@@ -209,6 +209,15 @@ export const feel = {
     /** ...and a defender who rotates more than `disguiseGapYards` reads the throw this much later all play (his eyes were on his rotation). */
     disguiseReadDelay: 0.2,
     disguiseGapYards: 3,
+    /**
+     * D-b: their coach disguises this share of the snaps a disguise fits (average aggression), x (0.6 +
+     * 0.8 x aggression); less in short yardage and the red zone (no time / room to rotate). Disguises
+     * fit Cover 3, Cover 2, man (fake blitz; with a robber also shown as Cover 2) and a blitz (hidden),
+     * not press / off, so 0.27 = about 1 snap in 5 overall.
+     */
+    disguiseChance: 0.27,
+    disguiseShortRatio: 0.4,
+    disguiseRedZoneRatio: 0.5,
     /** 0/1 switch: 0 = always normal man (as before 3d2). */
     enabled: 1,
   },
@@ -662,6 +671,12 @@ export const feel = {
     scatterPerYard: 0.035,
     /** Every this many accuracy points above 10 halves the circle (below doubles it). */
     accuracyHalvingPoints: 4,
+    /**
+     * D-b: an average starting QB reads a disguise before the snap this often; every this many points of
+     * 0.5 vision + 0.5 decisions above the average starter doubles the odds (below halves them).
+     */
+    qbReadChance: 0.5,
+    qbReadDoublingPoints: 2.2,
     /** Under pressure the circle grows by this share at composure 10... */
     pressureScatter: 0.8,
     /** ...and every this many composure points above 10 halves that (below doubles it). */

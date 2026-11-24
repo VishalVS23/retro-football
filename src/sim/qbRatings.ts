@@ -9,7 +9,8 @@
  * A 10 everywhere = today's arm, plus a small miss (the one exception to "10 = today").
  */
 import type { Player } from '../players/player';
-import { attr, halving, scale, type RatingSwitch } from './ratings';
+import { attr, halving, oddsShift, scale, type RatingSwitch } from './ratings';
+import { SIM_NORMS } from './driveRatings';
 import type { FlightParams, Vec } from './throw';
 
 export interface QbRatingParams extends RatingSwitch {
@@ -100,4 +101,16 @@ export function missLanding(from: Vec, aim: Vec, radius: number, depthRatio: num
   const ux = (aim.x - from.x) / len;
   const uy = (aim.y - from.y) / len;
   return { x: aim.x + ux * along - uy * across, y: aim.y + uy * along + ux * across };
+}
+
+/**
+ * D-b: does our QB see through a disguise before the snap? The chance for him: `qbReadChance` for an
+ * average starting QB, the odds doubled per `qbReadDoublingPoints` of 0.5 vision + 0.5 decisions over
+ * the average starter's. No QB / ratings off = the average chance.
+ */
+export function qbReadChance(qb: Player | null | undefined, p: RatingSwitch & { qbReadChance: number; qbReadDoublingPoints: number }): number {
+  if (!qb || !p.enabled) return p.qbReadChance;
+  const n = SIM_NORMS.QB!;
+  const edge = 0.5 * (qb.attributes.vision - (n.vision ?? 10)) + 0.5 * (qb.attributes.decisions - (n.decisions ?? 10));
+  return oddsShift(p.qbReadChance, edge / Math.max(0.1, p.qbReadDoublingPoints));
 }

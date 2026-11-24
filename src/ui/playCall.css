@@ -372,3 +372,9 @@
   font-size: 7px;
   color: #d9c8ff;
 }
+
+/* D-b: our QB saw through a disguise (the strip shows what they really play). */
+.pc-read,
+.pc-read b {
+  color: #7fe7ff;
+}

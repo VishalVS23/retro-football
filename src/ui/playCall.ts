@@ -49,7 +49,11 @@ export interface PlayCallOptions {
   /** Their defenders' names and the matchup edges for the big diagram (see DiagramView.defense); null = plain CB / LB / S. */
   matchups: DiagramDefense | null;
   /** At the line (PLAYS reopened before the snap): their defensive call, drawn in the diagram, with a read and a tip. null = in the huddle. */
-  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string } | null;
+  /**
+   * What the defense shows at the line. `call` / `shell` = where they stand (the diagram); name / tip
+   * = what the strip says (on a disguise: the shown look, or the real one when our QB `read` it).
+   */
+  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string; read?: boolean } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
   /** SIM (3g): its menu's choices; picking one closes the screen and calls `onSim`. null = no SIM button. */
@@ -89,7 +93,13 @@ export function openPlayCall(o: PlayCallOptions) {
 
   const tipLines = [
     ...(o.tip ? [`COACH: <b>${o.tip.text.toUpperCase()}</b>`] : []),
-    ...(o.defenseRead ? [`LOOKS LIKE: <b>${o.defenseRead.name}</b> - ${o.defenseRead.tip.toUpperCase()}`] : []),
+    ...(o.defenseRead
+      ? [
+          o.defenseRead.read
+            ? `<span class="pc-read">QB READ: DISGUISED - REALLY <b>${o.defenseRead.name}</b></span> - ${o.defenseRead.tip.toUpperCase()}`
+            : `LOOKS LIKE: <b>${o.defenseRead.name}</b> - ${o.defenseRead.tip.toUpperCase()}`,
+        ]
+      : []),
     ...(o.defenseRead ? [`SAFETIES: <b>${o.defenseRead.shellName}</b> - ${o.defenseRead.shellTip.toUpperCase()}`] : []),
   ];
   const rec = (c: FourthChoice) => (o.tip?.choice === c ? ' pc-rec' : '');

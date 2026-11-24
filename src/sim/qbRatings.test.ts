@@ -4,7 +4,7 @@ import { makeFiller } from '../league/league';
 import type { Player } from '../players/player';
 import { PLAYS } from './routes';
 import { simulatePass, type PassShot } from './passSim';
-import { accuracyFor, arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
+import { accuracyFor, arm, missLanding, missRadius, offTargetCatchFactor, qbReadChance } from './qbRatings';
 
 /** A QB with every attribute 10, then the given overrides. */
 function qb(over: Partial<Player['attributes']> = {}): Player {
@@ -117,4 +117,23 @@ describe('balance: QB ratings in whole pass plays', () => {
     const weak = catches('Slants', routes[0][1], { qb: qb({ throwPower: 5 }) });
     expect(big - weak).toBeGreaterThan(10);
   }, SLOW);
+});
+
+describe('reading a disguise (D-b)', () => {
+  const qbWith = (vision: number, decisions: number) => {
+    const q = makeFiller('QB');
+    q.attributes.vision = vision;
+    q.attributes.decisions = decisions;
+    return q;
+  };
+  it('an average starter ~50%, a star ~85%, a weak one ~25%; ratings off or no QB = the average', () => {
+    const R = feel.ratings;
+    expect(qbReadChance(qbWith(11.3, 11.3), R)).toBeCloseTo(0.5, 1);
+    expect(qbReadChance(qbWith(16.3, 16.3), R)).toBeGreaterThan(0.78);
+    expect(qbReadChance(qbWith(16.3, 16.3), R)).toBeLessThan(0.9);
+    expect(qbReadChance(qbWith(7.3, 7.3), R)).toBeGreaterThan(0.15);
+    expect(qbReadChance(qbWith(7.3, 7.3), R)).toBeLessThan(0.3);
+    expect(qbReadChance(qbWith(20, 20), { ...R, enabled: 0 })).toBe(R.qbReadChance);
+    expect(qbReadChance(null, R)).toBe(R.qbReadChance);
+  });
 });
