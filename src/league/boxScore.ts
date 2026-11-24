@@ -6,6 +6,7 @@ import { addDrive, newSideStats, type SideStats } from '../sim/gameStats';
 import type { SimGameResult } from '../sim/simGame';
 import type { Rng } from '../sim/rng';
 import { rateGame } from './gameRatings';
+import type { SeasonSummary } from './playoffs';
 import { addLine, creditSnaps, regroupLines, sanitizeLines, type Lines, type StatUnit } from './playerStats';
 
 export interface TeamBox {
@@ -96,6 +97,8 @@ export interface StatsStore {
   history: { year: number; lines: Lines }[];
   /** 4b-2: the box scores have every player in his own team's lines (missing = a 4b-1 save: regroup once). */
   grouped?: true;
+  /** 4e: a short record of each finished season (champion, runner-up, the user's season). */
+  seasons?: SeasonSummary[];
 }
 
 export const emptyStats = (): StatsStore => ({ boxes: {}, history: [], grouped: true });
@@ -109,7 +112,7 @@ export function seasonTotals(boxes: BoxScores): Lines {
 
 /** A finished season: its totals go into the history, its box scores are dropped (keeps the save small). */
 export function closeSeasonStats(s: StatsStore, year: number): StatsStore {
-  return { boxes: {}, history: [...s.history.filter((h) => h.year !== year), { year, lines: seasonTotals(s.boxes) }], grouped: true };
+  return { ...s, boxes: {}, history: [...s.history.filter((h) => h.year !== year), { year, lines: seasonTotals(s.boxes) }], grouped: true };
 }
 
 export function sanitizeStats(raw: unknown): StatsStore {
@@ -123,7 +126,10 @@ export function sanitizeStats(raw: unknown): StatsStore {
       const year = h && (h as { year: unknown }).year;
       if (lines && typeof year === 'number' && Number.isInteger(year) && year >= 1) history.push({ year, lines });
     }
-  return r.grouped === true ? { boxes, history, grouped: true } : { boxes, history };
+  const out: StatsStore = r.grouped === true ? { boxes, history, grouped: true } : { boxes, history };
+  const seasons = sanitizeSummaries(r.seasons);
+  if (seasons.length) out.seasons = seasons;
+  return out;
 }
 
 export function sanitizeBoxScores(raw: unknown): BoxScores | null {
@@ -159,4 +165,26 @@ function sanitizeRatings(raw: unknown): Record<number, number> | null {
     out[Number(id)] = r;
   }
   return out;
+}
+
+/** Season records from storage (4e): any damaged entry is dropped. */
+function sanitizeSummaries(raw: unknown): SeasonSummary[] {
+  if (!Array.isArray(raw)) return [];
+  const int = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+  const results = ['champion', 'runnerUp', 1, 2, 3, 'missed', 'alive'];
+  return raw.filter(
+    (x): x is SeasonSummary =>
+      typeof x === 'object' &&
+      x !== null &&
+      int(x.year) &&
+      int(x.champion) &&
+      int(x.runnerUp) &&
+      Array.isArray(x.score) &&
+      x.score.length === 2 &&
+      x.score.every(int) &&
+      int(x.ot) &&
+      int(x.userTeam) &&
+      typeof x.userRecord === 'string' &&
+      results.includes(x.userResult),
+  ).map((x) => ({ ...x, score: [x.score[0], x.score[1]] }));
 }

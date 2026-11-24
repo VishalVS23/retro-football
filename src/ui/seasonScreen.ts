@@ -11,7 +11,6 @@ import {
   SEASON_WEEKS,
   divisionStandings,
   gamesInWeek,
-  isOver,
   recordText,
   standingRows,
   teamGame,
@@ -21,6 +20,7 @@ import {
 } from '../league/season';
 import { teamLogoHtml } from './teamLogo';
 import type { TeamTotals } from '../league/leaders';
+import { ROUND_NAMES, championOf, inPlayoffs, playoffResult, playoffSeeds, resultWords, roundOfWeek, seasonDone, type SeasonSummary } from '../league/playoffs';
 
 export interface SeasonTeamInfo {
   abbr: string;
@@ -53,6 +53,8 @@ export interface SeasonScreenOptions {
   /** 4c: the STATS view's numbers (worked out when it opens), and tapping a leader opens his profile. */
   stats?: () => SeasonStatsData;
   onPlayer?: (playerId: number) => void;
+  /** 4e: past seasons (champion, runner-up, the user's season), oldest first. */
+  pastSeasons?: SeasonSummary[];
 }
 
 export interface SeasonStatsData {
@@ -60,7 +62,7 @@ export interface SeasonStatsData {
   teams: TeamTotals[];
 }
 
-type View = 'season' | 'standings' | 'schedule' | 'stats';
+type View = 'season' | 'standings' | 'schedule' | 'stats' | 'playoffs';
 type TeamSort = 'pf' | 'pa' | 'yds' | 'alw' | 'to' | 'sck';
 function per(total: number, games: number) {
   return games ? total / games : 0;
@@ -89,6 +91,8 @@ export function seasonScreenBusy(busy: boolean) {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const starText = (n: number) => '*'.repeat(n) + '-'.repeat(5 - n);
+/** "WEEK 7" in the regular season, the round's name in the playoffs (4e). */
+export const weekName = (week: number) => (roundOfWeek(week) ? ROUND_NAMES[roundOfWeek(week) - 1] : `WEEK ${week}`);
 const pctText = (p: number) => (p >= 1 ? '1.000' : p.toFixed(3).replace(/^0/, ''));
 
 export function openSeasonScreen(o: SeasonScreenOptions) {
@@ -114,9 +118,13 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   const scoreLine = (g: SeasonGame) => {
     const mine = g.home === me || g.away === me;
     const [hs, as] = g.score ?? [0, 0];
+    const seed = (id: number) => {
+      const i = g.round ? (s.seeds ?? []).findIndex((c) => c.includes(id)) : -1;
+      return i >= 0 ? `<span class="ss-seed">${s.seeds![i].indexOf(id) + 1}</span>` : '';
+    };
     const side = (id: number, pts: number, won: boolean) =>
-      `<span class="ss-side${won ? ' won' : ''}">${logo(id, 16)}<span class="ss-abbr">${esc(t(id).abbr)}</span><b>${g.score ? pts : ''}</b></span>`;
-    const inner = `${side(g.away, as, as > hs)}<span class="ss-at">@</span>${side(g.home, hs, hs > as)}${g.ot ? `<span class="ss-ot">${g.ot > 1 ? `${g.ot}OT` : 'OT'}</span>` : ''}`;
+      `<span class="ss-side${won ? ' won' : ''}">${seed(id)}${logo(id, 16)}<span class="ss-abbr">${esc(t(id).abbr)}</span><b>${g.score ? pts : ''}</b></span>`;
+    const inner = `${side(g.away, as, as > hs)}<span class="ss-at">${g.neutral ? 'VS' : '@'}</span>${side(g.home, hs, hs > as)}${g.ot ? `<span class="ss-ot">${g.ot > 1 ? `${g.ot}OT` : 'OT'}</span>` : ''}`;
     // A played game with a box score: tap it for the box score (4b).
     return g.score && o.hasBox?.(g.id)
       ? `<button type="button" class="ss-score tap${mine ? ' mine' : ''}" data-game="${g.id}">${inner}<span class="ss-box">BOX &gt;</span></button>`
@@ -129,22 +137,39 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     return `
       <div class="ss-h">${title}</div>
       <div class="ss-scores">${games.map(scoreLine).join('')}</div>
-      ${byes.length ? `<div class="ss-note">BYE: ${byes.map((id) => esc(t(id).abbr)).join(' · ')}</div>` : ''}`;
+      ${byes.length && !roundOfWeek(week) ? `<div class="ss-note">BYE: ${byes.map((id) => esc(t(id).abbr)).join(' · ')}</div>` : ''}`;
   };
 
   const seasonView = () => {
-    const over = isOver(s);
     let card: string;
-    if (over) {
-      const r = rows[me];
-      const div = divisionStandings(s, o.teams, t(me).conference, t(me).division, rows);
-      const place = div.findIndex((x) => x.teamId === me) + 1;
+    const round = roundOfWeek(s.week);
+    const champ = championOf(s);
+    if (seasonDone(s) && champ) {
+      // 4e: the season is finished: the champion, the final, and how our season went.
+      const won = champ.champion === me;
+      const sc = champ.game.score!;
+      const [w, l] = champ.champion === champ.game.home ? sc : [sc[1], sc[0]];
+      card = `
+        <div class="ss-card${won ? ' champ' : ''}">
+          <div class="ss-card-title">${won ? 'YOU WON THE CHAMPIONSHIP!' : `SEASON ${s.year} CHAMPIONS`}</div>
+          <div class="ss-big">${logo(champ.champion, 48)}<span>${esc(t(champ.champion).city.toUpperCase())} ${esc(t(champ.champion).nickname.toUpperCase())}</span></div>
+          <div class="ss-note">BEAT ${esc(t(champ.runnerUp).abbr)} ${w}-${l}${champ.game.ot ? ' (OT)' : ''} IN THE CHAMPIONSHIP</div>
+          <div class="ss-note">YOUR SEASON: ${esc(t(me).abbr)} ${rec(me)} · ${resultWords(playoffResult(s, me))}</div>
+          <div class="ss-btns"><button type="button" class="ss-btn go" data-act="next">START NEXT SEASON &gt;</button></div>
+        </div>`;
+    } else if (round && !teamGame(s, me)) {
+      // 4e: playoffs, and we're not playing this round (a bye as a top-2 seed, knocked out, or missed).
+      const res = playoffResult(s, me);
+      const seed = (s.seeds ?? []).find((c) => c.includes(me))?.indexOf(me) ?? -1;
+      const why =
+        res === 'alive' ? `${seed + 1} SEED: A FIRST-ROUND BYE. YOU PLAY IN THE DIVISIONAL ROUND.` : `${esc(t(me).abbr)} ${rec(me)} · ${resultWords(res)}.`;
       card = `
         <div class="ss-card">
-          <div class="ss-card-title">REGULAR SEASON OVER</div>
-          <div class="ss-big">${logo(me, 40)}<span>${esc(t(me).abbr)} ${recordText(r)}</span></div>
-          <div class="ss-note">${['1ST', '2ND', '3RD', '4TH'][place - 1]} IN THE ${esc(o.divisions[t(me).conference][t(me).division].toUpperCase())} · PLAYOFFS COME LATER (4E)</div>
-          <div class="ss-btns"><button type="button" class="ss-btn go" data-act="next">START NEXT SEASON &gt;</button></div>
+          <div class="ss-card-title">PLAYOFFS · ${ROUND_NAMES[round - 1]}</div>
+          <div class="ss-big">${logo(me, 40)}<span>${res === 'alive' ? 'BYE WEEK' : 'SEASON OVER'}</span></div>
+          <div class="ss-note">${why}</div>
+          <div class="ss-btns"><button type="button" class="ss-btn go" data-act="simweek">SIM ${round === 4 ? 'THE CHAMPIONSHIP' : 'ROUND'} &gt;</button>
+            <button type="button" class="ss-btn sim" data-view="playoffs">BRACKET</button></div>
         </div>`;
     } else {
       const g = teamGame(s, me);
@@ -162,7 +187,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
         const [mine, theirs] = home ? g.score : [g.score[1], g.score[0]];
         card = `
           <div class="ss-card">
-            <div class="ss-card-title">WEEK ${s.week} OF ${SEASON_WEEKS}</div>
+            <div class="ss-card-title">${round ? `PLAYOFFS · ${ROUND_NAMES[round - 1]}` : `WEEK ${s.week} OF ${SEASON_WEEKS}`}</div>
             <div class="ss-big">${logo(me, 40)}<span>${mine > theirs ? 'WON' : mine < theirs ? 'LOST' : 'TIED'} ${mine}-${theirs}</span>${logo(home ? g.away : g.home, 40)}</div>
             <div class="ss-note">THE REST OF THE LEAGUE STILL HAS TO PLAY THIS WEEK.</div>
             <div class="ss-btns"><button type="button" class="ss-btn go" data-act="simweek">FINISH THE WEEK &gt;</button></div>
@@ -177,9 +202,10 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
             <div class="ss-trec">${rec(id)}</div>
             <div class="ss-tstars">${starText(t(id).stars)}</div>
           </div>`;
+        const where = g.neutral ? 'NEUTRAL FIELD' : home ? 'HOME' : 'AWAY';
         card = `
           <div class="ss-card">
-            <div class="ss-card-title">WEEK ${s.week} OF ${SEASON_WEEKS} · ${home ? 'HOME' : 'AWAY'}</div>
+            <div class="ss-card-title">${round ? `PLAYOFFS · ${ROUND_NAMES[round - 1]}` : `WEEK ${s.week} OF ${SEASON_WEEKS}`} · ${where}</div>
             <div class="ss-match">${team(me)}<div class="ss-vs">${home ? 'VS' : 'AT'}</div>${team(opp)}</div>
             <div class="ss-note">${esc(t(opp).city.toUpperCase())} ${esc(t(opp).nickname.toUpperCase())}</div>
             <div class="ss-btns">
@@ -189,8 +215,8 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
           </div>`;
       }
     }
-    const results = o.resultsWeek ? weekScores(o.resultsWeek, `WEEK ${o.resultsWeek} RESULTS`) : '';
-    return `<div class="ss-title">SEASON ${s.year}</div>${card}${results}`;
+    const results = o.resultsWeek ? weekScores(o.resultsWeek, `${weekName(o.resultsWeek)} RESULTS`) : '';
+    return `<div class="ss-title">SEASON ${s.year}${inPlayoffs(s) ? ' · PLAYOFFS' : ''}</div>${card}${results}`;
   };
 
   const table = (c: number, d: number) => {
@@ -221,10 +247,11 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
 
   const scheduleView = () => {
     if (weekDetail !== null) {
-      return `<button class="ss-link" type="button" data-act="weeks">&lt; YOUR SCHEDULE</button>${weekScores(weekDetail, `WEEK ${weekDetail}`)}`;
+      return `<button class="ss-link" type="button" data-act="weeks">&lt; YOUR SCHEDULE</button>${weekScores(weekDetail, weekName(weekDetail))}`;
     }
-    const lines = Array.from({ length: SEASON_WEEKS }, (_, i) => {
-      const w = i + 1;
+    // The regular season, then any playoff weeks with a game of ours (4e).
+    const weeks = [...Array.from({ length: SEASON_WEEKS }, (_, i) => i + 1), ...[19, 20, 21, 22].filter((w) => teamGame(s, me, w))];
+    const lines = weeks.map((w) => {
       const g = teamGame(s, me, w);
       const now = w === s.week ? ' now' : '';
       if (!g) return `<button type="button" class="ss-week${now}" data-week="${w}"><span class="ss-wk">WK ${w}</span><span class="ss-bye">BYE</span></button>`;
@@ -236,7 +263,8 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
         const k = mine > theirs ? 'W' : mine < theirs ? 'L' : 'T';
         res = `<span class="ss-res r-${k}">${k} ${mine}-${theirs}${g.ot ? ' OT' : ''}</span>`;
       }
-      return `<button type="button" class="ss-week${now}" data-week="${w}"><span class="ss-wk">WK ${w}</span><span class="ss-opp">${home ? 'VS' : '@'} ${logo(opp, 16)}${esc(t(opp).abbr)}</span>${res}</button>`;
+      const wk = roundOfWeek(w) ? ['WC', 'DIV', 'CONF', 'FINAL'][roundOfWeek(w) - 1] : `WK ${w}`;
+      return `<button type="button" class="ss-week${now}" data-week="${w}"><span class="ss-wk">${wk}</span><span class="ss-opp">${home ? 'VS' : '@'} ${logo(opp, 16)}${esc(t(opp).abbr)}</span>${res}</button>`;
     }).join('');
     return `<div class="ss-title">${esc(t(me).abbr)} SCHEDULE · ${rec(me)}</div><div class="ss-weeks">${lines}</div>`;
   };
@@ -282,6 +310,50 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
       <div class="ss-note">TAP A COLUMN TO SORT (AGAIN TO FLIP). ALW = YARDS ALLOWED. TO = TAKEAWAYS MINUS GIVEAWAYS.</div>`;
   };
 
+  /** 4e: the playoff picture (during the season), or the bracket round by round; past champions below. */
+  const playoffsView = () => {
+    let body: string;
+    if (!s.seeds && !s.games.some((g) => g.score)) {
+      body = '<div class="ss-note">NO GAMES PLAYED YET. THE PLAYOFF PICTURE SHOWS UP AFTER WEEK 1: 6 TEAMS A CONFERENCE GET IN, THE TOP 2 SEEDS SKIP THE WILD CARD ROUND.</div>';
+    } else if (!s.seeds) {
+      const confs = playoffSeeds(s, o.teams);
+      body = `<div class="ss-note">IF THE SEASON ENDED TODAY. DIVISION WINNERS ARE SEEDS 1-4; THE TOP 2 SEEDS SKIP THE WILD CARD ROUND.</div>
+        <div class="ss-divs">${confs
+          .map(
+            (c, ci) => `<div class="ss-div">
+              <div class="ss-h">${esc(o.conferences[ci].toUpperCase())}</div>
+              <table class="ss-table">
+                <tr><th class="l">SEED</th><th>W-L-T</th><th>PCT</th></tr>
+                ${[...c.seeds, ...c.hunt]
+                  .map(
+                    (id, i) => `<tr class="${id === me ? 'mine' : ''}${i === 6 ? ' ss-cut' : ''}"><td class="l"><span class="ss-seed">${i < 6 ? i + 1 : '-'}</span>${logo(id, 16)}<span>${esc(t(id).abbr)}</span></td><td>${rows[id].w}-${rows[id].l}-${rows[id].t}</td><td>${pctText(rows[id].pct)}</td></tr>`,
+                  )
+                  .join('')}
+              </table>
+            </div>`,
+          )
+          .join('')}</div>`;
+    } else {
+      body = [1, 2, 3, 4]
+        .map((r) => {
+          const games = s.games.filter((g) => g.round === r);
+          const todo = r === 1 ? '' : '<div class="ss-note">TO BE DECIDED.</div>';
+          return `<div class="ss-h">${ROUND_NAMES[r - 1]}</div>${games.length ? `<div class="ss-scores">${games.map(scoreLine).join('')}</div>` : todo}`;
+        })
+        .join('');
+    }
+    const past = (o.pastSeasons ?? []).slice().reverse();
+    const history = past.length
+      ? `<div class="ss-h">PAST CHAMPIONS</div><div class="ss-scores">${past
+          .map(
+            (h) => `<div class="ss-score${h.champion === me ? ' mine' : ''}"><span class="ss-wk">SEASON ${h.year}</span>${logo(h.champion, 16)}<span class="ss-abbr">${esc(t(h.champion).abbr)}</span>
+              <span class="ss-at">BEAT ${esc(t(h.runnerUp).abbr)} ${h.score[0]}-${h.score[1]}${h.ot ? ' OT' : ''}</span><span class="ss-box">YOU: ${esc(h.userRecord)}</span></div>`,
+          )
+          .join('')}</div>`
+      : '';
+    return `<div class="ss-title">PLAYOFFS · SEASON ${s.year}</div>${body}${history}`;
+  };
+
   const el = document.createElement('div');
   el.id = 'season-screen';
   el.innerHTML = `
@@ -291,6 +363,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
         <button type="button" class="ss-nav" data-view="season">SEASON</button>
         <button type="button" class="ss-nav" data-view="standings">STANDINGS</button>
         <button type="button" class="ss-nav" data-view="schedule">SCHEDULE</button>
+        <button type="button" class="ss-nav" data-view="playoffs">PLAYOFFS</button>
         ${o.stats ? '<button type="button" class="ss-nav" data-view="stats">STATS</button>' : ''}
         <button type="button" class="ss-nav" data-act="team">TEAM</button>
       </nav>
@@ -299,7 +372,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   const main = el.querySelector<HTMLElement>('.ss-main')!;
   const render = () => {
     el.querySelectorAll<HTMLButtonElement>('.ss-nav[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
-    main.innerHTML = view === 'season' ? seasonView() : view === 'standings' ? standingsView() : view === 'stats' ? statsView() : scheduleView();
+    main.innerHTML = view === 'season' ? seasonView() : view === 'standings' ? standingsView() : view === 'stats' ? statsView() : view === 'playoffs' ? playoffsView() : scheduleView();
     main.querySelectorAll<HTMLButtonElement>('.ss-btn').forEach((b) => (b.disabled = busy));
   };
   const act = (a: string | undefined) => {

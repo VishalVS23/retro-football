@@ -37,7 +37,7 @@ export function weekJobs(league: League, s: Season, week: number, f: ModFeel, sk
       const away = simTeam(league, g.away);
       return {
         gameId: g.id,
-        mods: matchupMods(home, away, f, 0),
+        mods: matchupMods(home, away, f, g.neutral ? null : 0), // the Championship: neutral field
         seed: gameSeed(s, g.id),
         teams: [g.home, g.away] as [number, number],
         units: [statUnit(home), statUnit(away)] as [StatUnit, StatUnit],

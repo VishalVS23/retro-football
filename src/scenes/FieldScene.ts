@@ -172,7 +172,8 @@ import {
   type ClockState,
 } from '../sim/clock';
 import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
-import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame, type Season } from '../league/season';
+import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
+import { afterWeek, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
 import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
 import { addLine, creditLive, creditSnaps, type LivePlay, type Lines, type PlayerLine, type StatUnit } from '../league/playerStats';
 import { createRng } from '../sim/rng';
@@ -180,7 +181,7 @@ import { CREDIT_SALT, closeSeasonStats, creditLog, emptyStats, regroupBoxes, wit
 import { playerOfTheGame, ratingText, unitAverages } from '../league/gameRatings';
 import { closeBoxScore, openBoxScore } from '../ui/boxScoreScreen';
 import { runWeekSims } from '../league/weekSim';
-import { closeSeasonScreen, openSeasonScreen } from '../ui/seasonScreen';
+import { closeSeasonScreen, openSeasonScreen, weekName } from '../ui/seasonScreen';
 import type { SaveData } from '../save/saveFormat';
 import { generateLeague, pickOpponent, teamRatings, type League } from '../league/league';
 import { hexToNumber, kitColors } from '../league/colors';
@@ -2381,7 +2382,7 @@ export class FieldScene extends Phaser.Scene {
       ourAbbr: this.ourAbbr(),
       theirAbbr: this.theirAbbr(),
       ...this.teamColors(),
-      ...(week !== null ? { header: `WEEK ${week}`, buttonLabel: 'CONTINUE', onPlayAgain: () => void this.finishWeek() } : { onPlayAgain: () => this.startNewGame() }),
+      ...(week !== null ? { header: weekName(week), buttonLabel: 'CONTINUE', onPlayAgain: () => void this.finishWeek() } : { onPlayAgain: () => this.startNewGame() }),
     });
     // The game is over: nothing to continue next time.
     if (this.autosave) void saveGameInProgress(null);
@@ -2409,7 +2410,14 @@ export class FieldScene extends Phaser.Scene {
       if (!this.season) {
         this.season = newSeason(league.teams, 1, seasonSeed(save.seed, 1));
         void setSeason(this.season, this.leagueStats);
-      } else if (regroup) void setSeason(this.season, this.leagueStats);
+      } else {
+        // 4e: a save from before the playoffs, finished with the regular season: start them now.
+        const withPlayoffs = withPlayoffGames(this.season, league.teams);
+        if (withPlayoffs !== this.season || regroup) {
+          this.season = withPlayoffs;
+          void setSeason(this.season, this.leagueStats);
+        }
+      }
       this.newOpponent();
       // The play calling screen opened before the league existed: redraw it so TEAM works.
       if (this.state === 'calling') this.openCall();
@@ -2771,6 +2779,10 @@ export class FieldScene extends Phaser.Scene {
       },
       onSimWeek: () => void this.finishWeek(),
       onNextSeason: () => {
+        if (!seasonDone(s)) return;
+        // 4e: a short record of the season for the history list.
+        const summary = summarize(s, me, recordText(standingRows(s, l.teams)[me]));
+        if (summary) this.leagueStats = { ...this.leagueStats, seasons: [...(this.leagueStats.seasons ?? []).filter((x) => x.year !== s.year), summary] };
         const next = newSeason(l.teams, s.year + 1, seasonSeed(this.saveSeed, s.year + 1), finalPlaces(s, l.teams));
         this.season = next;
         // The finished season's box scores become each player's season totals (keeps the save small).
@@ -2779,6 +2791,7 @@ export class FieldScene extends Phaser.Scene {
         this.openSeason();
       },
       onTeam: () => this.openTeam(),
+      pastSeasons: this.leagueStats.seasons ?? [],
       stats: () => this.seasonStats(),
       onPlayer: (id) => {
         const team = l.teams.find((t) => t.roster.includes(id) || t.practice.includes(id));
@@ -2792,7 +2805,7 @@ export class FieldScene extends Phaser.Scene {
   /** 4b: who's at home in this game (0 = us, 1 = them), or null for an exhibition (neutral field). */
   private homeSide(): 0 | 1 | null {
     const g = this.seasonGameId !== null ? this.season?.games[this.seasonGameId] : undefined;
-    if (!g || this.league?.userTeamId === null || this.league?.userTeamId === undefined) return null;
+    if (!g || g.neutral || this.league?.userTeamId === null || this.league?.userTeamId === undefined) return null; // the Championship: neutral
     return g.home === this.league.userTeamId ? 0 : 1;
   }
 
@@ -2928,7 +2941,8 @@ export class FieldScene extends Phaser.Scene {
     try {
       const week = s.week;
       const results = await runWeekSims(weekJobs(l, s, week, feel), { rules: feel.oppDrive, clock: feel.clock });
-      const next = advanceWeek(applyResults(this.season ?? s, results));
+      // On to the next week; in the playoffs this adds the next round's games (4e).
+      const next = afterWeek(applyResults(this.season ?? s, results), l.teams);
       this.season = next;
       this.leagueStats = { ...this.leagueStats, boxes: addBoxes(this.leagueStats.boxes, results) };
       void setSeason(next, this.leagueStats);

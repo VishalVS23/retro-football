@@ -26,7 +26,7 @@ export interface SeasonTeam {
 
 export interface SeasonGame {
   id: number;
-  /** 1-18. */
+  /** 1-18; 19-22 = the playoffs (4e). */
   week: number;
   home: number;
   away: number;
@@ -34,6 +34,10 @@ export interface SeasonGame {
   score?: [number, number];
   /** Overtime periods played (0 = none). */
   ot?: number;
+  /** 4e: a playoff game (1 = Wild Card ... 4 = Championship). Never counts in the standings. */
+  round?: number;
+  /** 4e: the Championship is on a neutral field (no home edge). */
+  neutral?: true;
 }
 
 export interface Season {
@@ -46,6 +50,8 @@ export interface Season {
   games: SeasonGame[];
   /** Where each team finished in its division last season (0 = first): the same-spot games. */
   places: number[];
+  /** 4e: each conference's playoff seeds (team ids, 1 seed first), once the playoffs start. */
+  seeds?: number[][];
 }
 
 const PAIRINGS: [number, number][][] = [
@@ -385,7 +391,7 @@ export function standingRows(s: Season, teams: readonly SeasonTeam[]): StandingR
   const rows: StandingRow[] = teams.map((_, teamId) => ({ teamId, w: 0, l: 0, t: 0, pct: 0, pf: 0, pa: 0, div: { w: 0, l: 0, t: 0 }, conf: { w: 0, l: 0, t: 0 }, streak: '-' }));
   const last: string[][] = teams.map(() => []);
   for (const g of [...s.games].sort((a, b) => a.week - b.week)) {
-    if (!g.score) continue;
+    if (!g.score || g.round) continue; // playoff games don't count
     const [hs, as] = g.score;
     const sameDiv = teams[g.home].conference === teams[g.away].conference && teams[g.home].division === teams[g.away].division;
     const sameConf = teams[g.home].conference === teams[g.away].conference;
@@ -419,7 +425,7 @@ export function standingRows(s: Season, teams: readonly SeasonTeam[]): StandingR
 function headToHead(s: Season, team: number, group: readonly number[]): Record3 {
   const r = { w: 0, l: 0, t: 0 };
   for (const g of s.games) {
-    if (!g.score) continue;
+    if (!g.score || g.round) continue;
     const opp = g.home === team ? g.away : g.away === team ? g.home : -1;
     if (opp < 0 || !group.includes(opp)) continue;
     const [mine, theirs] = g.home === team ? g.score : [g.score[1], g.score[0]];
@@ -477,14 +483,19 @@ export function sanitizeSeason(raw: unknown, teamCount: number): Season | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const s = raw as Record<string, unknown>;
   const int = (v: unknown, min: number, max = Infinity) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
-  if (!int(s.year, 1) || !int(s.seed, 0) || !int(s.week, 1, SEASON_WEEKS + 1) || !Array.isArray(s.games) || !Array.isArray(s.places)) return null;
+  // Weeks 19-22 are the playoffs (4e); 23 = the season is finished.
+  if (!int(s.year, 1) || !int(s.seed, 0) || !int(s.week, 1, SEASON_WEEKS + 5) || !Array.isArray(s.games) || !Array.isArray(s.places)) return null;
   if (s.places.length !== teamCount || !s.places.every((p) => int(p, 0, 3))) return null;
   const games: SeasonGame[] = [];
   for (const [i, g] of (s.games as unknown[]).entries()) {
     if (typeof g !== 'object' || g === null) return null;
     const x = g as Record<string, unknown>;
-    if (x.id !== i || !int(x.week, 1, SEASON_WEEKS) || !int(x.home, 0, teamCount - 1) || !int(x.away, 0, teamCount - 1) || x.home === x.away) return null;
+    const playoff = x.round !== undefined;
+    if (playoff && (!int(x.round, 1, 4) || x.week !== SEASON_WEEKS + (x.round as number))) return null;
+    if (x.id !== i || !int(x.week, 1, playoff ? SEASON_WEEKS + 4 : SEASON_WEEKS) || !int(x.home, 0, teamCount - 1) || !int(x.away, 0, teamCount - 1) || x.home === x.away) return null;
     const game: SeasonGame = { id: i, week: x.week as number, home: x.home as number, away: x.away as number };
+    if (playoff) game.round = x.round as number;
+    if (playoff && x.neutral === true) game.neutral = true;
     if (x.score !== undefined) {
       if (!Array.isArray(x.score) || x.score.length !== 2 || !x.score.every((v) => int(v, 0))) return null;
       game.score = [x.score[0], x.score[1]];
@@ -492,6 +503,10 @@ export function sanitizeSeason(raw: unknown, teamCount: number): Season | null {
     }
     games.push(game);
   }
-  if (games.length !== (teamCount * GAMES_PER_TEAM) / 2) return null;
-  return { year: s.year as number, seed: s.seed as number, week: s.week as number, games, places: s.places as number[] };
+  if (games.filter((g) => !g.round).length !== (teamCount * GAMES_PER_TEAM) / 2 || games.length > (teamCount * GAMES_PER_TEAM) / 2 + 13) return null;
+  const out: Season = { year: s.year as number, seed: s.seed as number, week: s.week as number, games, places: s.places as number[] };
+  if (Array.isArray(s.seeds) && s.seeds.length === 2 && s.seeds.every((c) => Array.isArray(c) && c.length === 6 && c.every((t) => int(t, 0, teamCount - 1))))
+    out.seeds = (s.seeds as number[][]).map((c) => [...c]);
+  else if (games.some((g) => g.round)) return null; // playoff games without seeds: damaged
+  return out;
 }

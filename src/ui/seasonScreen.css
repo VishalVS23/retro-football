@@ -417,3 +417,20 @@
     padding: 4px;
   }
 }
+
+/* ---------- Playoffs (4e) ---------- */
+.ss-seed {
+  display: inline-block;
+  min-width: 10px;
+  font-size: 8px;
+  color: var(--ss-gold);
+}
+.ss-table tr.ss-cut td {
+  border-top: 2px dashed var(--ss-dim);
+}
+.ss-card.champ {
+  border-color: var(--ss-gold);
+}
+.ss-card.champ .ss-card-title {
+  color: var(--ss-gold);
+}

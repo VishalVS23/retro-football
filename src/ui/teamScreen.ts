@@ -105,7 +105,7 @@ function statsHtml(p: Player, info: PlayerStatsInfo): string {
       : '<div class="ts-text">NO STATS THIS SEASON YET.</div>';
   const log = info.log.length
     ? `<table class="ts-stable">${head('WEEK')}${info.log
-        .map((g) => `<tr class="${g.line || g.rating ? '' : 'dim'}"><td class="l">${g.week} ${g.home ? 'VS' : '@'} ${esc(g.opponent)}</td><td>${pill(g.rating)}</td>${cells(g.line)}</tr>`)
+        .map((g) => `<tr class="${g.line || g.rating ? '' : 'dim'}"><td class="l">${g.week > 18 ? ['WC', 'DIV', 'CONF', 'FINAL'][g.week - 19] : g.week} ${g.home ? 'VS' : '@'} ${esc(g.opponent)}</td><td>${pill(g.rating)}</td>${cells(g.line)}</tr>`)
         .join('')}</table>`
     : '<div class="ts-text">NO GAMES PLAYED YET.</div>';
   const past = info.past.length

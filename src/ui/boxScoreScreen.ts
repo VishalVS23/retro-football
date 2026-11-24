@@ -11,6 +11,7 @@ import { totalYards } from '../sim/gameStats';
 import { teamLogoHtml } from './teamLogo';
 import { ratingBand, ratingText } from '../league/gameRatings';
 import { statSummary } from '../league/leaders';
+import { weekName } from './seasonScreen';
 
 export interface BoxTeamInfo {
   abbr: string;
@@ -136,7 +137,7 @@ export function openBoxScore(o: BoxScoreOptions) {
     <div class="bx-wrap" role="dialog" aria-label="Box score">
       <div class="bx-top">
         <button type="button" class="bx-back" data-act="close">&lt; BACK</button>
-        <div class="bx-title">${o.week !== null ? `WEEK ${o.week} · ` : ''}FINAL${o.ot ? ` / ${o.ot > 1 ? `${o.ot}OT` : 'OT'}` : ''}</div>
+        <div class="bx-title">${o.week !== null ? `${weekName(o.week)} · ` : ''}FINAL${o.ot ? ` / ${o.ot > 1 ? `${o.ot}OT` : 'OT'}` : ''}</div>
       </div>
       <div class="bx-body">
         <div class="bx-score">${teamLogoHtml(ai.abbr, ai.color, 28)}<span>${esc(ai.abbr)} ${as} @ ${hs} ${esc(hi.abbr)}</span>${teamLogoHtml(hi.abbr, hi.color, 28)}</div>
