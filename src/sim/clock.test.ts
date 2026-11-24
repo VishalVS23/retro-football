@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beforeSnap, callTimeout, canCallTimeout, clockText, endPlay, newClock, playStopsClock, runOff, tickPlay, type ClockState } from './clock';
+import { beforeSnap, callTimeout, canCallTimeout, clockText, endPlay, huddleTick, newClock, playStopsClock, runOff, shownTime, tickPlay, type ClockState } from './clock';
 
 const R = { quarterLength: 120, huddleRunoff: 5, warningTime: 30, timeoutsPerHalf: 3 };
 const at = (quarter: ClockState['quarter'], timeLeft: number, extra: Partial<ClockState> = {}): ClockState => ({
@@ -103,6 +103,41 @@ describe('clock', () => {
     expect(clockText(at(3, 65))).toBe('Q3 1:05');
     expect(clockText(at(3, 0.2))).toBe('Q3 0:01');
     expect(clockText(at(3, 0))).toBe('Q3 0:00');
+  });
+});
+
+describe('the clock between plays (huddleTick)', () => {
+  const running: ClockState = { ...newClock(R), timeLeft: 100, running: true };
+
+  it('ticks visibly, at most the huddle runoff; the snap still takes the same total', () => {
+    let c = huddleTick(running, 2, R);
+    expect(clockText(c)).toBe('Q1 1:38');
+    c = huddleTick(c, 10, R);
+    expect(shownTime(c)).toBe(95);
+    expect(beforeSnap(c, R).clock.timeLeft).toBe(95);
+    expect(beforeSnap(running, R).clock.timeLeft).toBe(95);
+    expect(beforeSnap(c, R).clock.huddleUsed).toBe(0);
+  });
+
+  it('a timeout stops it where it shows: the rest of the huddle is saved', () => {
+    const c = callTimeout(huddleTick(running, 1.5, R));
+    expect(c.running).toBe(false);
+    expect(c.timeLeft).toBeCloseTo(98.5);
+    expect(c.timeouts).toBe(2);
+    expect(beforeSnap(c, R).clock.timeLeft).toBeCloseTo(98.5);
+  });
+
+  it('never ticks down to the warning or 0:00 (the snap handles those)', () => {
+    const q2: ClockState = { ...running, quarter: 2, timeLeft: 33 };
+    expect(shownTime(huddleTick(q2, 10, R))).toBe(31);
+    expect(beforeSnap(huddleTick(q2, 10, R), R).event).toBe('warning');
+    expect(shownTime(huddleTick({ ...running, timeLeft: 3 }, 10, R))).toBe(1);
+  });
+
+  it('does nothing when the clock is stopped or in overtime; a new play starts fresh', () => {
+    expect(huddleTick({ ...running, running: false }, 3, R).huddleUsed ?? 0).toBe(0);
+    expect(huddleTick({ ...running, ot: 1 }, 3, R).huddleUsed ?? 0).toBe(0);
+    expect(endPlay(huddleTick(running, 3, R), false, R).clock.huddleUsed).toBe(0);
   });
 });
 

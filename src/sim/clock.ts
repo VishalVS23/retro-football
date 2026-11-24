@@ -7,7 +7,8 @@
  * - After the play (endPlay): incompletions, out of bounds, scores and turnovers stop it; a tackle
  *   in bounds keeps it running.
  * - If it's still running at the snap, the huddle takes `huddleRunoff` off first (beforeSnap).
- *   A timeout before the snap stops the clock, so no runoff.
+ *   Part of it is seen ticking between plays (huddleTick: the result banner and lining up, not the
+ *   play calling screen), so the total is the same; a timeout stops it where it shows (callTimeout).
  * - In Q2 and Q4 the clock stops once when it reaches `warningTime` (the late-quarter warning).
  * - Overtime (`ot` > 0, college style) is untimed: nothing here moves the clock, no timeouts.
  */
@@ -37,6 +38,8 @@ export interface ClockState {
   warned: boolean;
   /** Overtime period (1 = OT, 2 = 2OT...); 0 or missing = regulation. Overtime is untimed. */
   ot?: number;
+  /** Seconds of the huddle runoff already run (seen ticking) since the last play ended; missing = 0. */
+  huddleUsed?: number;
 }
 
 /** Something that interrupts the flow between plays. */
@@ -75,7 +78,24 @@ export function endPlay(c: ClockState, stops: boolean, r: ClockRules): { clock: 
   if (hasWarning(c.quarter) && !c.warned && c.timeLeft <= r.warningTime) {
     return { clock: { ...c, running: false, warned: true }, event: 'warning' };
   }
-  return { clock: { ...c, running: !stops }, event: null };
+  return { clock: { ...c, running: !stops, huddleUsed: 0 }, event: null };
+}
+
+/**
+ * Real time passing between plays while the clock is still running: part of the huddle runoff,
+ * never more than all of it, and never down to the warning or 0:00 (the snap handles those).
+ */
+export function huddleTick(c: ClockState, dt: number, r: ClockRules): ClockState {
+  if (!c.running || c.ot) return c;
+  const warningAhead = hasWarning(c.quarter) && !c.warned && c.timeLeft > r.warningTime;
+  const room = c.timeLeft - 1 - (warningAhead ? r.warningTime : 0);
+  const cap = Math.max(0, Math.min(r.huddleRunoff, room));
+  return { ...c, huddleUsed: Math.min(cap, (c.huddleUsed ?? 0) + Math.max(0, dt)) };
+}
+
+/** The time on the scoreboard: time left, less the huddle seconds already ticked off. */
+export function shownTime(c: ClockState): number {
+  return c.timeLeft - (c.running ? (c.huddleUsed ?? 0) : 0);
 }
 
 /**
@@ -87,13 +107,13 @@ export function beforeSnap(c: ClockState, r: ClockRules): { clock: ClockState; e
   if (!c.running || c.ot) return { clock: c, event: null, snap: true };
   const after = c.timeLeft - Math.max(0, r.huddleRunoff);
   if (hasWarning(c.quarter) && !c.warned && c.timeLeft > r.warningTime && after <= r.warningTime) {
-    return { clock: { ...c, timeLeft: r.warningTime, running: false, warned: true }, event: 'warning', snap: false };
+    return { clock: { ...c, timeLeft: r.warningTime, running: false, warned: true, huddleUsed: 0 }, event: 'warning', snap: false };
   }
   if (after <= 0) {
     const end = endOfQuarter({ ...c, timeLeft: 0 }, r);
     return { ...end, snap: false };
   }
-  return { clock: { ...c, timeLeft: after, running: false }, event: null, snap: true };
+  return { clock: { ...c, timeLeft: after, running: false, huddleUsed: 0 }, event: null, snap: true };
 }
 
 /** A timeout only helps while the clock is running between plays. */
@@ -103,7 +123,8 @@ export function canCallTimeout(c: ClockState): boolean {
 
 export function callTimeout(c: ClockState): ClockState {
   if (!canCallTimeout(c)) return c;
-  return { ...c, running: false, timeouts: c.timeouts - 1 };
+  // The clock stops where it shows: the huddle seconds already run are gone, the rest are saved.
+  return { ...c, timeLeft: shownTime(c), running: false, timeouts: c.timeouts - 1, huddleUsed: 0 };
 }
 
 /**
@@ -116,7 +137,7 @@ export function runOff(c: ClockState, seconds: number, r: ClockRules): { clock: 
   if (c.ot) return { clock: { ...c, running: false }, event: null };
   const left = c.timeLeft - Math.max(0, seconds);
   const pastWarning = (q: Quarter, t: number) => hasWarning(q) && t <= r.warningTime;
-  if (left > 0) return { clock: { ...c, timeLeft: left, running: false, warned: c.warned || pastWarning(c.quarter, left) }, event: null };
+  if (left > 0) return { clock: { ...c, timeLeft: left, running: false, huddleUsed: 0, warned: c.warned || pastWarning(c.quarter, left) }, event: null };
   const end = endOfQuarter({ ...c, timeLeft: 0 }, r);
   if (end.event !== 'endQuarter') return end;
   const t = Math.max(1, end.clock.timeLeft + left);
@@ -143,7 +164,7 @@ function endOfQuarter(c: ClockState, r: ClockRules): { clock: ClockState; event:
 /** "Q2 1:05". Shows whole seconds, rounded up (so 0:00 means truly out of time). Overtime: "OT", "2OT". */
 export function clockText(c: ClockState): string {
   if (c.ot) return c.ot === 1 ? 'OT' : `${c.ot}OT`;
-  const s = Math.ceil(c.timeLeft - 1e-9);
+  const s = Math.ceil(shownTime(c) - 1e-9);
   const m = Math.floor(s / 60);
   return `Q${c.quarter} ${m}:${String(s % 60).padStart(2, '0')}`;
 }

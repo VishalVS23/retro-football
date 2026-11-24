@@ -253,6 +253,27 @@ body {
   display: block;
 }
 
+/* TIMEOUT on the field (top right, left of the gear): only while the clock runs between plays. */
+#timeout-btn {
+  position: fixed;
+  right: calc(env(safe-area-inset-right) + 64px);
+  top: calc(env(safe-area-inset-top) + 10px);
+  z-index: 5;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 2px solid #0d1b2a;
+  background: #8a4fd6;
+  color: #fff;
+  font: bold 14px monospace;
+  letter-spacing: 1px;
+  cursor: pointer;
+  touch-action: manipulation;
+  display: none;
+}
+#timeout-btn.show {
+  display: block;
+}
+
 
 /* Kick meter (field goals, extra points): a marker sweeps the bar, tap in the green.
    pointer-events: none so a tap anywhere, even on the meter, reaches the field and kicks. */

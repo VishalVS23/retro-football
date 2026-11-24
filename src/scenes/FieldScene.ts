@@ -152,6 +152,7 @@ import {
   beforeSnap,
   callTimeout,
   canCallTimeout,
+  huddleTick,
   clockText,
   endPlay,
   newClock,
@@ -259,6 +260,7 @@ export class FieldScene extends Phaser.Scene {
   private chaserDots: Phaser.GameObjects.Arc[] = [];
   private skipBtn: HTMLButtonElement | null = null; // DOM button, shown during returns and result banners
   private playsBtn: HTMLButtonElement | null = null; // DOM button: reopen play calling before the snap
+  private timeoutBtn: HTMLButtonElement | null = null; // DOM button, top right: timeout while the clock runs between plays
   private banner: Phaser.GameObjects.Text | null = null;
   private rusherDots: Phaser.GameObjects.Arc[] = [];
   private blockerDots: Phaser.GameObjects.Arc[] = [];
@@ -466,6 +468,22 @@ export class FieldScene extends Phaser.Scene {
     document.body.appendChild(plays);
     this.playsBtn = plays;
 
+    // TIMEOUT on the field: while the clock is running between plays (after a tackle in bounds).
+    const to = document.createElement('button');
+    to.id = 'timeout-btn';
+    to.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.betweenPlaysClock() || !canCallTimeout(this.clock)) return;
+      this.clock = callTimeout(this.clock);
+      this.showBanner(`TIMEOUT (${this.clock.timeouts} LEFT)`);
+      this.updateScoreboard();
+      this.updateLabel();
+    });
+    document.body.appendChild(to);
+    this.timeoutBtn = to;
+    this.events.once('shutdown', () => to.remove());
+
     // Kick meter: taps go straight through it to the field (any tap kicks).
     const meter = document.createElement('div');
     meter.id = 'kick-meter';
@@ -518,6 +536,19 @@ export class FieldScene extends Phaser.Scene {
     const punting = this.state === 'kickFlight' && this.puntPlay !== null;
     this.skipBtn?.classList.toggle('show', this.state === 'return' || this.state === 'result' || punting);
     this.playsBtn?.classList.toggle('show', this.state === 'presnap');
+    const showTimeout = this.betweenPlaysClock() && canCallTimeout(this.clock);
+    if (this.timeoutBtn) {
+      this.timeoutBtn.classList.toggle('show', showTimeout);
+      if (showTimeout) {
+        const t = `TIMEOUT (${this.clock.timeouts})`;
+        if (this.timeoutBtn.textContent !== t) this.timeoutBtn.textContent = t;
+      }
+    }
+    // Between plays a running clock visibly ticks off part of the huddle runoff (not on the play calling screen).
+    if (this.betweenPlaysClock()) {
+      this.clock = huddleTick(this.clock, dt, feel.clock);
+      this.updateScoreboard();
+    }
     if (this.hitPauseLeft > 0) {
       this.hitPauseLeft -= dt; // freeze-frame on a big hit
       return;
@@ -2580,6 +2611,11 @@ export class FieldScene extends Phaser.Scene {
     }
   }
 
+  /** The clock is running between plays and we're on the field (result banner or lined up), not calling a play. */
+  private betweenPlaysClock(): boolean {
+    return this.clock.running && !this.clock.ot && !this.match.tryPending && (this.state === 'result' || this.state === 'presnap');
+  }
+
   /** Their defensive call for the coming snap, weighted by the situation and their aggression. */
   private rollDefCall(roll: number): DefCallId {
     const forced = forcedDefCall(); // ⚙ Force defense (testing)
@@ -2795,7 +2831,7 @@ ${r.tip.toUpperCase()}`);
     this.label.setVisible(this.state !== 'calling'); // the play calling screen covers the field
     if (this.state === 'calling') return;
     if (this.state === 'presnap') {
-      const run = this.clock.running ? ` (clock running: -${Math.round(feel.clock.huddleRunoff)}s)` : '';
+      const run = this.clock.running ? ' (clock running)' : '';
       const tryText = this.match.tryPending ? '2-PT TRY: ' : '';
       const qb = this.ourLineup ? ` · QB ${this.ourLineup.qb.lastName}` : '';
       this.label.setText(`${tryText}${PLAYS[this.playIndex].name}${qb} · TAP to snap${run} · ⚙ = feel`);

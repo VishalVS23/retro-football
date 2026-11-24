@@ -135,7 +135,7 @@ export function openPlayCall(o: PlayCallOptions) {
       ${o.canPunt ? `<button class="pc-btn pc-punt${rec('punt')}" data-act="punt">PUNT</button>` : ''}
       ${o.kickLabel ? `<button class="pc-btn pc-kick${rec('fieldGoal')}" data-act="kick">${o.kickLabel}</button>` : ''}
       <button class="pc-btn pc-audible" data-act="audible" title="Change a receiver's route for this play">AUDIBLE</button>
-      <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock: no huddle time comes off at the snap">TIMEOUT (${o.timeoutsLeft})</button>
+      <button class="pc-btn pc-timeout" data-act="timeout" title="Stops the running clock where it is: the rest of the huddle time is saved">TIMEOUT (${o.timeoutsLeft})</button>
       <button class="pc-btn pc-cancel" data-act="cancel">CANCEL</button>
       <button class="pc-btn pc-team${o.kickLabel || o.canPunt ? ' pc-hide' : ''}" data-act="team"${o.onTeam ? '' : ' disabled'} title="Your roster and players">TEAM</button>
     </div>
