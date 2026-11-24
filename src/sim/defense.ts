@@ -223,7 +223,7 @@ const HALF_OVERLAP_YARDS = 2;
  * receivers; or over his half in a two-deep shell) and backs up to stay deeper than the deepest
  * receiver. After the throw (and a moment to read it) he breaks on the landing spot.
  */
-export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
+export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }, adjust?: (target: Vec) => Vec): Vec {
   let target: Vec;
   let speed: number;
   const brk = ball && safetyBreak(pos, p, ball.landing);
@@ -242,6 +242,8 @@ export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyPara
     target = { x: Math.min(p.maxX, Math.max(p.baseX, deepest + p.cushionYards)), y: (FIELD_MID + avgY) / 2 };
     speed = target.x > pos.x + 0.25 ? p.bailSpeed : p.driftSpeed;
   }
+  // A disguise's rotation shifts where he reads from (not where the ball lands).
+  if (adjust && !(ball && brk && ball.sinceThrow >= brk.reaction)) target = adjust(target);
   return moveToward(pos, target, speed * dt);
 }
 

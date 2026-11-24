@@ -6,11 +6,12 @@ import type { Feel } from '../config/feel';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage, stepZoneSafety } from './defense';
+import type { Vec } from './throw';
 import { ZONE_SHELL, isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { cornerStart, coverParams, safetyParamsFor, safetyRunRead, safetyStart, zoneParams, type ShellId, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { coverParams, lookAlignment, rotatedTarget, safetyParamsFor, safetyRunRead, zoneParams, type Look, type ShellId, stepBlitzer, type DefCallId } from './defCalls';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
@@ -54,6 +55,8 @@ export function simulateRun(
   call: DefCallId = 'man',
   players: RunPlayers = {},
   shell: ShellId = 'twoDeep',
+  /** Disguise (D-a): they line up in this look and play `call` / `shell` from there. */
+  shown?: Look,
 ): { yards: number; by: number; broken: number } {
   const rng = createRng(seed);
   const f = formation(losX);
@@ -70,11 +73,12 @@ export function simulateRun(
     return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };
   };
   const live = () => runners.filter((_, i) => !p.routes[i].block).map((r) => r.pos);
-  let safeties = ([0, 1] as const).map((k) => safetyStart(feel, losX, shell, k));
+  const align = lookAlignment(shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos));
+  const rotation = shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos)) } : null;
+  const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
+  let safeties = [...align.safeties];
   const sp = ([0, 1] as const).map((k) => safetyParamsFor(feel, losX, shell, k, 0));
-  let cover = f.skill.map((s, i) =>
-    startCoverage(i === RB ? linebackerStart(call, feel, losX) : i === TE ? linebacker2Start(feel, losX) : cornerStart(call, feel, s.pos), s.pos),
-  );
+  let cover = f.skill.map((s, i) => startCoverage(align.cover[i], s.pos));
   const rg = feel.runGame;
   const holeY = pathYAt(paths[RB], losX);
   const teHelp = { rusher: TE_SIDE_RUSHER, time: teHelpFor(players.te, players.rush?.[TE_SIDE_RUSHER], true, rg.teHelpTime, feel.ratings) };
@@ -89,10 +93,13 @@ export function simulateRun(
       blitz && i === RB
         ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) }
         : jobs
-          ? stepCoverage(c, zoneTarget(jobs[i], live(), feel), dt, zoneP(i))
-          : stepCoverage(c, runners[i].pos, dt, coveredByLinebacker(i) ? lbCover : cbCover),
+          ? stepCoverage(c, rot(i, t, zoneTarget(jobs[i], live(), feel)), dt, zoneP(i))
+          : stepCoverage(c, rot(i, t, runners[i].pos), dt, coveredByLinebacker(i) ? lbCover : cbCover),
     );
-    if (jobs) safeties = safeties.map((v, k) => stepZoneSafety(v, zoneTarget(jobs[5 + k], live(), feel), dt, sp[k]));
+    // Safeties: zone ones head for their spots; man ones wait (pass first). A disguise's safeties rotate to the real look's spots.
+    safeties = safeties.map((v, k) =>
+      jobs ? stepZoneSafety(v, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, sp[k]) : rotation ? stepZoneSafety(v, rot(5 + k, t, rotation.real.safeties[k]), dt, sp[k]) : v,
+    );
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
   }
   const tk = feel.tackling;

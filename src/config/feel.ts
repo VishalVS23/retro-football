@@ -200,6 +200,15 @@ export const feel = {
     preventOffBonus: 4,
     preventCover2Bonus: 2,
     preventCover3Bonus: 1,
+    /**
+     * Disguises (D-a): a defender who lines up somewhere else than his real call puts him plays his
+     * real job from the snap, but aims off by the gap between the two spots, shrinking to nothing over
+     * this long (the rotation). So he's a step late, and a disguise never gets both looks at once.
+     */
+    disguiseRotateTime: 0.35,
+    /** ...and a defender who rotates more than `disguiseGapYards` reads the throw this much later all play (his eyes were on his rotation). */
+    disguiseReadDelay: 0.2,
+    disguiseGapYards: 3,
     /** 0/1 switch: 0 = always normal man (as before 3d2). */
     enabled: 1,
   },

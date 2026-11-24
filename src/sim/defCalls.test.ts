@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { feel } from '../config/feel';
 import { PLAYS } from './routes';
+import { formation } from './formation';
 import { simulatePass, type PassShot } from './passSim';
 import { simulateRun } from './runSim';
 import { startCoverage, stepCoverage } from './defense';
 import {
   DEF_CALL_IDS,
+  DISGUISE_IDS,
+  disguiseLooks,
+  lookAlignment,
+  rotatedTarget,
+  rotationGap,
+  rotationReadDelay,
+  type Look,
   callWeights,
   cornerStart,
   coverParams,
@@ -220,4 +228,67 @@ describe('balance: defensive calls', () => {
     expect(avg('Dive', 'blitz')).toBeLessThan(avg('Dive', 'man') - 1);
     expect(avg('Toss', 'blitz')).toBeGreaterThanOrEqual(avg('Toss', 'man') - 0.2);
   }, 60000);
+});
+
+describe('disguises (D-a)', () => {
+  const los = 40;
+  const wrs = formation(los).skill.map((s) => s.pos);
+
+  it('each disguise shows one look and plays another; zones bring their own safety look', () => {
+    for (const id of DISGUISE_IDS) {
+      const { shown, real } = disguiseLooks(id, 'twoDeep');
+      expect(JSON.stringify(shown)).not.toBe(JSON.stringify(real));
+    }
+    expect(disguiseLooks('rotateCover3', 'twoDeep').real).toEqual({ call: 'cover3', shell: 'robber' });
+    expect(disguiseLooks('hiddenBlitz', 'robber').shown).toEqual({ call: 'man', shell: 'robber' });
+  });
+
+  it('a rotating defender aims off by his alignment gap, shrinking to nothing; honest snaps and the unmoved are untouched', () => {
+    const { shown, real } = disguiseLooks('rotateCover3', 'twoDeep');
+    const rot = { shown: lookAlignment(shown, feel, los, wrs), real: lookAlignment(real, feel, los, wrs) };
+    const target = { x: 50, y: 20 };
+    const s2 = 6; // S2: two deep half -> Cover 3 curl / flat
+    const gap = rotationGap(rot, s2);
+    expect(gap).toBeGreaterThan(3);
+    const t0 = rotatedTarget(rot, s2, 0, target, feel);
+    expect(Math.hypot(t0.x - target.x, t0.y - target.y)).toBeCloseTo(gap);
+    expect(rotatedTarget(rot, s2, feel.defCalls.disguiseRotateTime, target, feel)).toEqual(target);
+    expect(rotatedTarget(null, s2, 0, target, feel)).toEqual(target);
+    expect(rotationReadDelay(rot, s2, feel)).toBe(feel.defCalls.disguiseReadDelay);
+    expect(rotationReadDelay(rot, 4, feel)).toBe(0); // LB2 lines up over the TE either way
+    expect(rotationReadDelay(null, s2, feel)).toBe(0);
+  });
+
+  // Average QB, run after the catch: [play, receiver, throw time].
+  const rate = (look: Look, shown: Look | undefined, [name, to, throwAt]: [string, number, number], n = 100) => {
+    let c = 0;
+    for (let s = 1; s <= n; s++) {
+      const r = simulatePass(play(name), { to, throwAt, lead: 1 }, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call: look.call, shell: look.shell, shown });
+      if (!r.sacked && r.result === 'catch') c++;
+    }
+    return (c / n) * 100;
+  };
+  const SPREAD: [string, number, number][] = [
+    ['Slants', 0, 1.0], ['Crossers', 0, 1.5], ['Verticals', 0, 1.1], ['Post Corner', 0, 0.8], ['TE Seam', 4, 1.2], ['Curls', 0, 1.5],
+    ['Slants', 1, 1.0], ['Hitch Slant', 0, 1.1], ['Post Corner', 3, 1.0], ['Slants', 2, 0.5], ['Verticals', 2, 1.1], ['Curls', 4, 0.9],
+  ];
+  const avg = (look: Look, shown?: Look) => SPREAD.reduce((sum, shot) => sum + rate(look, shown, shot), 0) / SPREAD.length;
+
+  it('baits: the routes that beat the shown look mostly fail against what they really play', () => {
+    const c3 = disguiseLooks('rotateCover3', 'twoDeep');
+    expect(rate(c3.real, c3.shown, ['Slants', 1, 1.0])).toBeLessThan(rate(c3.shown, undefined, ['Slants', 1, 1.0]) - 30); // out vs off man
+    const c2 = disguiseLooks('robberToCover2', 'twoDeep');
+    expect(rate(c2.real, c2.shown, ['Verticals', 0, 1.1])).toBeLessThan(rate(c2.shown, undefined, ['Verticals', 0, 1.1]) - 20); // go vs one deep
+    const man = disguiseLooks('cover2ToMan', 'twoDeep');
+    expect(rate(man.real, man.shown, ['TE Seam', 4, 1.2])).toBeLessThan(rate(man.shown, undefined, ['TE Seam', 4, 1.2]) - 50); // seam vs Cover 2
+  }, 120000);
+
+  it('a disguise plays about as well as the honest call overall (it costs a step, it never doubles up)', () => {
+    for (const id of ['rotateCover3', 'robberToCover2', 'cover2ToMan'] as const) {
+      const { shown, real } = disguiseLooks(id, 'twoDeep');
+      const d = avg(real, shown) - avg(real);
+      expect(d).toBeGreaterThan(-5);
+      expect(d).toBeLessThan(13);
+    }
+  }, 240000);
 });

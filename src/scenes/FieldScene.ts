@@ -102,21 +102,23 @@ import { coachTip } from '../sim/fourthDown';
 import {
   DEF_CALL_NAMES,
   DEF_CALL_TIPS,
-  cornerStart,
   coverParams,
   lb2BlitzChance,
   lb2Job,
   lb2ZoneSpot,
-  linebacker2Start,
   pickShell,
   safetyBaseReaction,
   safetyParamsFor,
   safetyRunRead,
-  safetyStart,
+  lookAlignment,
+  disguiseLooks,
+  rotatedTarget,
+  rotationReadDelay,
+  type Look,
+  type Rotation,
   SHELL_NAMES,
   SHELL_TIPS,
   type ShellId,
-  linebackerStart,
   pickDefCall,
   stepBlitzer,
   teamAggression,
@@ -128,7 +130,7 @@ import {
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
-import { forcedDefCall } from '../debug/forceDefense';
+import { forcedDefCall, forcedDisguise } from '../debug/forceDefense';
 import { ZONE_SHELL, breaksOn, contestsAsHelp, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
 import {
   TE_SIDE_RUSHER,
@@ -243,6 +245,10 @@ export class FieldScene extends Phaser.Scene {
   private safety2Pos: Vec = { x: 0, y: 0 };
   /** Their safety look this snap (3h-c), rolled with the defensive call; readable from where the safeties stand. */
   private shell: ShellId = 'twoDeep';
+  /** Disguise (D-a): the look they line up in when it isn't what they play (null = honest). */
+  private shown: Look | null = null;
+  /** Both alignments of a disguised snap (who rotates where), else null. */
+  private rotation: Rotation | null = null;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -1509,6 +1515,9 @@ export class FieldScene extends Phaser.Scene {
     // Zone call (Z-a): each defender plays an area (src/sim/zone.ts); only those whose area the ball lands in break on it.
     const jobs = this.zoneJobs();
     const live = this.receivers.filter((_, i) => !this.calledPlay.routes[i].block).map((r) => r.runner.pos);
+    // A disguise (D-a): whoever lined up somewhere else plays his real job a step late and reads the throw later.
+    const rot = (i: number, target: Vec) => rotatedTarget(this.rotation, i, this.playTime, target, feel);
+    const late = (i: number) => rotationReadDelay(this.rotation, i, feel);
     // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
     // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
@@ -1526,13 +1535,14 @@ export class FieldScene extends Phaser.Scene {
         const base = coverFor(this.theirLineup?.cover[i], i === TE ? lb2Cover : i === RB ? lbCover : cover, feel.ratings, !!jobs);
         if (jobs) {
           const zs = zoneCoverScale(jobs[i], feel);
-          const zp = { ...zoneParams(base), ballReactionTime: zs.ballReactionTime, topSpeed: base.topSpeed * zs.speedRatio };
+          const zp = { ...zoneParams(base), ballReactionTime: zs.ballReactionTime + late(i), topSpeed: base.topSpeed * zs.speedRatio };
           const zb = ball && breaksOn(jobs[i], ball.landing, feel) ? { ...ball, help: false } : undefined;
-          r.coverage = stepCoverage(r.coverage, zoneTarget(jobs[i], live, feel), dt, zp, zb);
+          r.coverage = stepCoverage(r.coverage, rot(i, zoneTarget(jobs[i], live, feel)), dt, zp, zb);
         } else {
           // LB2 dropping into his hook zone heads for the spot instead of a man.
           const zone = i === TE && this.lb2Job === 'drop';
-          r.coverage = stepCoverage(r.coverage, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos, dt, zone ? zoneParams(base) : base, myBall);
+          const params = zone ? zoneParams(base) : base;
+          r.coverage = stepCoverage(r.coverage, rot(i, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos), dt, { ...params, ballReactionTime: params.ballReactionTime + late(i) }, myBall);
         }
       }
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
@@ -1545,15 +1555,17 @@ export class FieldScene extends Phaser.Scene {
     const sp = (k: 0 | 1) => {
       const who = k ? this.theirLineup?.safety2 : this.theirLineup?.safety;
       const read = jobs ? zoneBallReaction(jobs[5 + k], feel) : safetyBaseReaction(feel, this.shell, k);
-      return safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
+      const p = safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
+      const d = late(5 + k);
+      return { ...p, ballReactionTime: p.ballReactionTime + d, ...(p.frontBallReactionTime !== undefined && { frontBallReactionTime: p.frontBallReactionTime + d }) };
     };
     if (jobs) {
       const zb = (j: ZoneJob) => (ball && breaksOn(j, ball.landing, feel) ? ball : undefined);
-      this.safetyPos = stepZoneSafety(this.safetyPos, zoneTarget(jobs[5], live, feel), dt, sp(0), zb(jobs[5]));
-      this.safety2Pos = stepZoneSafety(this.safety2Pos, zoneTarget(jobs[6], live, feel), dt, sp(1), zb(jobs[6]));
+      this.safetyPos = stepZoneSafety(this.safetyPos, rot(5, zoneTarget(jobs[5], live, feel)), dt, sp(0), zb(jobs[5]));
+      this.safety2Pos = stepZoneSafety(this.safety2Pos, rot(6, zoneTarget(jobs[6], live, feel)), dt, sp(1), zb(jobs[6]));
     } else {
-      this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball);
-      this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball);
+      this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball, (t) => rot(5, t));
+      this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
     }
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y);
@@ -2521,12 +2533,23 @@ export class FieldScene extends Phaser.Scene {
       this.lb2Roll = rng.next();
       this.shell = feel.defCalls.enabled ? pickShell(this.defSituation(), feel, rng.next()) : 'twoDeep';
       if (isZoneCall(this.defCall)) this.shell = ZONE_SHELL[this.defCall]; // Cover 3: one deep (S2 rotates down); Cover 2: two deep halves
+      // Disguise (D-a: only from the gear panel's Force disguise for now): line up in one look, play another.
+      const dz = forcedDisguise();
+      this.shown = null;
+      if (dz) {
+        const looks = disguiseLooks(dz, this.shell);
+        this.defCall = looks.real.call;
+        this.shell = looks.real.shell;
+        this.shown = looks.shown;
+      }
     }
+    const wrStarts = this.form.skill.map((s) => s.pos);
+    const align = lookAlignment(this.shownLook(), feel, this.match.ballX, wrStarts);
+    this.rotation = this.shown ? { shown: align, real: lookAlignment({ call: this.defCall, shell: this.shell }, feel, this.match.ballX, wrStarts) } : null;
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
-      const cbStart =
-        i === RB ? linebackerStart(this.defCall, feel, this.match.ballX) : i === TE ? linebacker2Start(feel, this.match.ballX) : cornerStart(this.defCall, feel, wr.pos);
+      const cbStart = align.cover[i];
       // Each corner's speed is rolled per snap (the linebackers' aren't).
       const speed = coveredByLinebacker(i) ? 1 : rollCornerSpeed(1, feel.defense.cbSpeedVariance, rng.next());
       return { path, runner: startRunner(path, play.routes[i].stop), atLanding: { ...wr.pos }, coverage: startCoverage(cbStart, wr.pos, speed) };
@@ -2552,8 +2575,8 @@ export class FieldScene extends Phaser.Scene {
     this.underPressure = false;
     this.aimG.clear();
     this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.safety2, this.ball, this.shadow]);
-    this.safetyPos = safetyStart(feel, this.match.ballX, this.shell, 0);
-    this.safety2Pos = safetyStart(feel, this.match.ballX, this.shell, 1);
+    this.safetyPos = { ...align.safeties[0] };
+    this.safety2Pos = { ...align.safeties[1] };
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y).setAlpha(1).setScale(1);
     [...this.cbDots, ...this.rusherDots, ...this.wrDots, this.qb, ...this.blockerDots].forEach((d) => d.setAlpha(1));
@@ -2713,16 +2736,25 @@ export class FieldScene extends Phaser.Scene {
     });
   }
 
-  /** What the defense shows at the line this snap (always the real call: disguises come later). */
+  /** The look they line up in: a disguise's shown look, else what they play. */
+  private shownLook(): Look {
+    return this.shown ?? { call: this.defCall, shell: this.shell };
+  }
+
+  /**
+   * What the defense shows at the line this snap. D-a: on a disguised snap that's the SHOWN look
+   * (as if our QB were fooled); D-b adds his read.
+   */
   private defenseRead() {
+    const { call, shell } = this.shownLook();
     return {
-      call: this.defCall,
-      name: DEF_CALL_NAMES[this.defCall],
-      tip: DEF_CALL_TIPS[this.defCall],
-      shell: this.shell,
+      call,
+      name: DEF_CALL_NAMES[call],
+      tip: DEF_CALL_TIPS[call],
+      shell,
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
-      shellName: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[this.shell],
-      shellTip: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[this.shell],
+      shellName: isZoneCall(call) ? (call === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[shell],
+      shellTip: isZoneCall(call) ? (call === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[shell],
     };
   }
 

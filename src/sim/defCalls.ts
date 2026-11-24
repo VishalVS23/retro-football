@@ -9,7 +9,7 @@ import type { CoverParams, SafetyParams } from './defense';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
-import type { ZoneCallId } from './zone';
+import { ZONE_SHELL, isZoneCall, type ZoneCallId } from './zone';
 
 /** The man calls (3d2). */
 export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
@@ -106,6 +106,89 @@ export const SHELL_TIPS: Record<ShellId, string> = {
   twoDeep: 'Middle open',
   robber: 'Go deep outside',
 };
+
+/** A look: the call and the safety look (alignment and play). */
+export interface Look {
+  call: DefCallId;
+  shell: ShellId;
+}
+
+/**
+ * Disguises (D-a): the defense lines up in one look and plays another, rotating after the snap.
+ * The defenders start from the SHOWN look's spots and play the REAL call from there, so a
+ * disguised call costs them a step on what it's meant to stop, and baits the routes that beat
+ * the shown look. A `shell` of null = the snap's own rolled safety look.
+ */
+export type DisguiseId = 'rotateCover3' | 'robberToCover2' | 'cover2ToMan' | 'hiddenBlitz' | 'fakeBlitz';
+export const DISGUISE_IDS: readonly DisguiseId[] = ['rotateCover3', 'robberToCover2', 'cover2ToMan', 'hiddenBlitz', 'fakeBlitz'];
+export const DISGUISES: Record<DisguiseId, { shown: { call: DefCallId; shell: ShellId | null }; real: { call: DefCallId; shell: ShellId | null } }> = {
+  // Two deep, corners off, at the line; S2 drops down, the corners bail: Cover 3. (Off, not normal man:
+  // corners 5 off can't bail to a deep third in time.)
+  rotateCover3: { shown: { call: 'off', shell: 'twoDeep' }, real: { call: 'cover3', shell: null } },
+  // One deep + robber at the line; the robber bails to a deep half: Cover 2.
+  robberToCover2: { shown: { call: 'man', shell: 'robber' }, real: { call: 'cover2', shell: null } },
+  // Cover 2 at the line (corners shaded outside); a safety comes down, the corners turn and run with their man.
+  cover2ToMan: { shown: { call: 'cover2', shell: 'twoDeep' }, real: { call: 'man', shell: 'robber' } },
+  // Normal LB depth, then he blitzes (from deeper, so a little later).
+  hiddenBlitz: { shown: { call: 'man', shell: null }, real: { call: 'blitz', shell: null } },
+  // LB walked up in the blitz look, then he backs off and covers the RB.
+  fakeBlitz: { shown: { call: 'blitz', shell: null }, real: { call: 'man', shell: null } },
+};
+
+/** The shown and real looks of disguise `id`, with `rolled` filling in "the snap's own safety look" (zones use their own shell). */
+export function disguiseLooks(id: DisguiseId, rolled: ShellId): { shown: Look; real: Look } {
+  const d = DISGUISES[id];
+  const fill = (l: { call: DefCallId; shell: ShellId | null }): Look => ({
+    call: l.call,
+    shell: isZoneCall(l.call) ? ZONE_SHELL[l.call] : (l.shell ?? rolled),
+  });
+  return { shown: fill(d.shown), real: fill(d.real) };
+}
+
+/** Where everyone lines up for a look: [CB1, CB3, CB2, LB1, LB2] over skill spots `wrs`, then S1, S2. */
+export function lookAlignment(look: Look, feel: Feel, losX: number, wrs: Vec[]): { cover: Vec[]; safeties: [Vec, Vec] } {
+  return {
+    cover: wrs.map((wr, i) => (i === 3 ? linebackerStart(look.call, feel, losX) : i === 4 ? linebacker2Start(feel, losX) : cornerStart(look.call, feel, wr))),
+    safeties: [safetyStart(feel, losX, look.shell, 0), safetyStart(feel, losX, look.shell, 1)],
+  };
+}
+
+/** Both alignments of a disguised snap (shown = where they line up, real = where the call they play lines up). */
+export interface Rotation {
+  shown: { cover: Vec[]; safeties: [Vec, Vec] };
+  real: { cover: Vec[]; safeties: [Vec, Vec] };
+}
+
+/** How far defender `i` has to rotate (shown spot to real spot), yards; 0 on an honest snap. */
+export function rotationGap(rot: Rotation | null, i: number): number {
+  if (!rot) return 0;
+  const pick = (a: Rotation['shown']) => (i < 5 ? a.cover[i] : a.safeties[i - 5]);
+  const s = pick(rot.shown);
+  const r = pick(rot.real);
+  return Math.hypot(s.x - r.x, s.y - r.y);
+}
+
+/** A rotating defender's extra delay reading the throw (0 if he lined up where his call puts him). */
+export function rotationReadDelay(rot: Rotation | null, i: number, feel: Feel): number {
+  return rotationGap(rot, i) > feel.defCalls.disguiseGapYards ? feel.defCalls.disguiseReadDelay : 0;
+}
+
+/**
+ * A disguise's rotation: defender `i` ([CB1, CB3, CB2, LB1, LB2, S1, S2]) plays his real job
+ * aiming at `target` shifted by the gap between his shown and real spots, shrinking to nothing
+ * over `disguiseRotateTime`. Honest snaps, defenders lined up where their call puts them, and
+ * after the rotation: `target` unchanged.
+ */
+export function rotatedTarget(rot: Rotation | null, i: number, t: number, target: Vec, feel: Feel): Vec {
+  if (!rot) return target;
+  const T = feel.defCalls.disguiseRotateTime;
+  if (t >= T) return target;
+  const pick = (a: Rotation['shown']) => (i < 5 ? a.cover[i] : a.safeties[i - 5]);
+  const s = pick(rot.shown);
+  const r = pick(rot.real);
+  const k = 1 - t / Math.max(0.01, T);
+  return { x: target.x + (s.x - r.x) * k, y: target.y + (s.y - r.y) * k };
+}
 
 /** Where S1 (k 0) and S2 (k 1) line up for this look. */
 export function safetyStart(feel: Feel, losX: number, shell: ShellId, k: 0 | 1): Vec {
