@@ -384,15 +384,24 @@
   position: absolute;
   left: 4px;
   bottom: 4px;
-  padding: 4px 6px;
+  padding: 5px 7px 4px;
   font-family: 'Press Start 2P', monospace;
   font-size: clamp(7px, 0.95vw, 10px);
-  color: #0d1b2a;
-  background: #7fe7ff;
-  border: 2px solid #0d1b2a;
+  color: #f4efe1;
+  background: #0d1b2aee;
+  border: 2px solid #f4efe1;
   border-radius: 4px;
+  box-shadow: 0 2px 0 #0d1b2a;
   cursor: pointer;
   touch-action: manipulation;
+}
+.pc-form b {
+  color: #ffd166;
+  font-weight: normal;
+}
+.pc-form:active {
+  transform: translateY(2px);
+  box-shadow: none;
 }
 .pc-field.audible .pc-form {
   display: none;

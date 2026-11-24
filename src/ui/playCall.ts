@@ -162,7 +162,7 @@ export function openPlayCall(o: PlayCallOptions) {
   // F-a: the formation, cycled by the button on the big diagram.
   let form: FormationId = o.formation;
   const formBtn = root.querySelector<HTMLButtonElement>('.pc-form')!;
-  const showForm = () => (formBtn.textContent = `FORMATION: ${FORMATION_NAMES[form]} >`);
+  const showForm = () => (formBtn.innerHTML = `FORMATION: <b>${FORMATION_NAMES[form]}</b> &gt;`);
   showForm();
   timeoutBtn.disabled = !o.canTimeout;
 
