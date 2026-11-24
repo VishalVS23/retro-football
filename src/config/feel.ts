@@ -181,16 +181,25 @@ export const feel = {
     weightPress: 2,
     weightOff: 2,
     weightBlitz: 2,
-    /** 3rd / 4th and this many yards or more = long yardage: off man gets this extra weight. */
+    /** Zone calls (Z-c): about a third of ordinary snaps between them. */
+    weightCover3: 2.5,
+    weightCover2: 2.5,
+    /** 3rd / 4th and this many yards or more = long yardage: off man (and the zones) get this extra weight. */
     longYards: 7,
     longOffBonus: 4,
-    /** This many yards or fewer to go = short yardage: press and blitz each get this extra weight. */
+    longCover2Bonus: 2,
+    longCover3Bonus: 1,
+    /** This many yards or fewer to go = short yardage: press and blitz each get this extra weight, zones x this. */
     shortYards: 2,
     shortAggressiveBonus: 2,
-    /** Inside our opponent's 20 (no room to play off): extra press weight. */
+    shortZoneRatio: 0.3,
+    /** Inside our opponent's 20 (no room to play off): extra press weight, zones x this. */
     redZonePressBonus: 2,
-    /** Defending a lead in the last 2 minutes of Q4: extra off-man weight. */
+    redZoneZoneRatio: 0.7,
+    /** Defending a lead in the last 2 minutes of Q4: extra off-man (and zone) weight. */
     preventOffBonus: 4,
+    preventCover2Bonus: 2,
+    preventCover3Bonus: 1,
     /** 0/1 switch: 0 = always normal man (as before 3d2). */
     enabled: 1,
   },

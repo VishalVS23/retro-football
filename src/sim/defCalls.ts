@@ -11,11 +11,12 @@ import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
 import type { ZoneCallId } from './zone';
 
-/** The man calls their coach picks from (3d2). */
+/** The man calls (3d2). */
 export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
-/** Every call, man and zone (zone calls: Z-a Cover 3). */
+/** Every call, man and zone (zone calls: Z-a Cover 3, Z-b Cover 2). */
 export type DefCallId = ManCallId | ZoneCallId;
-export const DEF_CALL_IDS: readonly ManCallId[] = ['man', 'press', 'off', 'blitz'];
+/** Everything their coach picks from (Z-c: the zones too). */
+export const DEF_CALL_IDS: readonly DefCallId[] = ['man', 'press', 'off', 'blitz', 'cover3', 'cover2'];
 
 /** What the hint calls it ("LOOKS LIKE: PRESS MAN"). */
 export const DEF_CALL_NAMES: Record<DefCallId, string> = {
@@ -248,39 +249,56 @@ export interface DefSituation {
 }
 
 /** How likely each call is in this situation (not normalised). */
-export function callWeights(s: DefSituation, feel: Feel): Record<ManCallId, number> {
+export function callWeights(s: DefSituation, feel: Feel): Record<DefCallId, number> {
   const c = feel.defCalls;
-  const w: Record<ManCallId, number> = { man: c.weightMan, press: c.weightPress, off: c.weightOff, blitz: c.weightBlitz };
+  const w: Record<DefCallId, number> = {
+    man: c.weightMan,
+    press: c.weightPress,
+    off: c.weightOff,
+    blitz: c.weightBlitz,
+    cover3: c.weightCover3,
+    cover2: c.weightCover2,
+  };
   const late = s.down >= 3;
   if (late && s.toGo >= c.longYards) {
-    // Long yardage: keep everything in front of them.
+    // Long yardage: keep everything in front of them (Cover 2 sits under the sticks with two deep).
     w.off += c.longOffBonus;
+    w.cover2 += c.longCover2Bonus;
+    w.cover3 += c.longCover3Bonus;
   } else if (s.toGo <= c.shortYards) {
     // Short yardage: get up close and get after it.
     w.press += c.shortAggressiveBonus;
     w.blitz += c.shortAggressiveBonus;
     w.off *= 0.3;
+    w.cover2 *= c.shortZoneRatio;
+    w.cover3 *= c.shortZoneRatio;
   }
-  // Red zone: no room behind them to play off.
+  // Red zone: no room behind them to play off; less room for zones too.
   if (OPP_GOAL_X - s.ballX <= 20) {
     w.off = 0;
     w.press += c.redZonePressBonus;
+    w.cover2 *= c.redZoneZoneRatio;
+    w.cover3 *= c.redZoneZoneRatio;
   }
   // Protecting a late lead: don't give up the big play.
   if (s.lead > 0 && s.quarter >= 4 && s.timeLeft <= 120) {
     w.off += c.preventOffBonus;
+    w.cover2 += c.preventCover2Bonus;
+    w.cover3 += c.preventCover3Bonus;
     w.blitz *= 0.5;
   }
-  // Team personality: aggressive coordinators press and blitz more, soft ones sit back.
+  // Team personality: aggressive coordinators press and blitz more, soft ones sit back (off man, zones).
   const a = Math.max(0, Math.min(1, s.aggression));
   w.press *= 0.5 + a;
   w.blitz *= 0.5 + a;
   w.off *= 1.5 - a;
+  w.cover2 *= 1.5 - a;
+  w.cover3 *= 1.5 - a;
   return w;
 }
 
 /** Picks a call from the weights with one dice roll (0..1). */
-export function pickDefCall(s: DefSituation, feel: Feel, roll: number): ManCallId {
+export function pickDefCall(s: DefSituation, feel: Feel, roll: number): DefCallId {
   const w = callWeights(s, feel);
   const total = DEF_CALL_IDS.reduce((sum, id) => sum + w[id], 0);
   if (total <= 0) return 'man';

@@ -21,11 +21,10 @@ import {
   teamAggression,
   type DefCallId,
   type DefSituation,
-  type ManCallId,
 } from './defCalls';
 
 const base: DefSituation = { down: 1, toGo: 10, ballX: 45, quarter: 1, timeLeft: 100, lead: 0, aggression: 0.5 };
-const share = (s: DefSituation, id: ManCallId) => {
+const share = (s: DefSituation, id: DefCallId) => {
   const w = callWeights(s, feel);
   return w[id] / DEF_CALL_IDS.reduce((sum, k) => sum + w[k], 0);
 };
@@ -55,12 +54,24 @@ describe('choosing the call', () => {
     expect(share({ ...base, quarter: 4, timeLeft: 60, lead: 7 }, 'off')).toBeGreaterThan(share(base, 'off'));
   });
 
+  const zoneShare = (s: DefSituation) => share(s, 'cover2') + share(s, 'cover3');
+  it('zones (Z-c): about a third of ordinary snaps; more on 3rd and long and protecting a late lead, few in short yardage', () => {
+    expect(zoneShare(base)).toBeGreaterThan(0.28);
+    expect(zoneShare(base)).toBeLessThan(0.38);
+    expect(zoneShare({ ...base, down: 3, toGo: 12 })).toBeGreaterThan(zoneShare(base));
+    expect(share({ ...base, down: 3, toGo: 12 }, 'cover2')).toBeGreaterThan(share({ ...base, down: 3, toGo: 12 }, 'cover3'));
+    expect(zoneShare({ ...base, quarter: 4, timeLeft: 60, lead: 7 })).toBeGreaterThan(zoneShare(base));
+    expect(zoneShare({ ...base, down: 3, toGo: 1 })).toBeLessThan(0.15);
+    expect(zoneShare({ ...base, ballX: 95 })).toBeLessThan(zoneShare(base));
+    expect(zoneShare({ ...base, aggression: 0 })).toBeGreaterThan(zoneShare({ ...base, aggression: 1 }) + 0.15);
+  });
+
   it('aggressive teams blitz more than soft ones', () => {
     expect(share({ ...base, aggression: 1 }, 'blitz')).toBeGreaterThan(share({ ...base, aggression: 0 }, 'blitz') * 1.8);
   });
 
   it('the roll picks each call in proportion to its weight', () => {
-    const seen: Record<string, number> = { man: 0, press: 0, off: 0, blitz: 0 };
+    const seen: Record<string, number> = { man: 0, press: 0, off: 0, blitz: 0, cover3: 0, cover2: 0 };
     for (let i = 0; i < 1000; i++) seen[pickDefCall(base, feel, (i + 0.5) / 1000)]++;
     for (const id of DEF_CALL_IDS) expect(seen[id] / 1000).toBeCloseTo(share(base, id), 1);
   });
