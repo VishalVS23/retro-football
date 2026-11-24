@@ -35,6 +35,8 @@ export interface DiagramView {
   call?: DefCallId;
   /** Their safety look (3h-c), shown at the line like the call. */
   shell?: ShellId;
+  /** A-c: S2 bracketing a receiver stands here instead of where the look puts him. */
+  safety2At?: { x: number; y: number };
 }
 
 /**
@@ -229,7 +231,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     const shell = v.shell ?? 'twoDeep';
     s += player(safetyStart(feel, losX, shell, 0), C.defense, dl(dn?.safety, 'S'));
     // The robber sits right behind the linebackers: his name goes above him so the names don't run together.
-    s += player(safetyStart(feel, losX, shell, 1), C.defense, dl(dn?.safety2, 'S'), shell === 'robber' ? 'above' : 'below');
+    s += player(v.safety2At ?? safetyStart(feel, losX, shell, 1), C.defense, dl(dn?.safety2, 'S'), shell === 'robber' && !v.safety2At ? 'above' : 'below');
     f.rush.forEach((r) => (s += player(r, C.defense, null, 'below', LINEMAN_R))); // linemen unlabelled: too tightly packed
   }
   f.block.forEach((b) => (s += player(b, C.offense, null, 'below', LINEMAN_R)));

@@ -327,6 +327,24 @@ export const feel = {
     jumpReactionRatio: 1,
     /** ...but he only goes this share of the way from where his job puts him toward that spot (1 = right on it). */
     jumpBlend: 0.5,
+    /**
+     * A-c, the hot receiver: a WR or the TE with `hotCatches` catches or `hotYards` yards this game (a
+     * fast coach sooner: up to `hotFastCatches` / `hotFastYards` fewer) who is also our most-targeted
+     * receiver gets bracketed on man calls: S2 shadows him over the top (`bracketCushionYards` deeper,
+     * never shallower than `bracketMinDepthYards` past the line, reading and breaking like a deep half
+     * safety; his corner has him underneath; he lines up there too); S1 keeps his own job, so the far
+     * half (two deep) or the middle (robber gone) opens up.
+     */
+    hotCatches: 3,
+    hotYards: 40,
+    hotFastCatches: 1,
+    hotFastYards: 15,
+    bracketCushionYards: 4,
+    bracketMinDepthYards: 12,
+    /** ...and with that help deep, his corner plays him tight underneath: reaction x this, turns x this, cushion at most this. */
+    bracketReactionRatio: 0.5,
+    bracketTurnScale: 1.4,
+    bracketCushionMax: 2,
   },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {

@@ -185,3 +185,36 @@ export function jumpTarget(job: { x: number; y: number }, spot: { x: number; y: 
   const k = Math.max(0, Math.min(1, feel.adjust.jumpBlend));
   return { x: job.x + (spot.x - job.x) * k, y: job.y + (spot.y - job.y) * k };
 }
+
+/** Skill spots that can be bracketed: the three WRs and the TE (the RB is the linebackers'). */
+const BRACKETABLE = [0, 1, 2, 4];
+
+/**
+ * A-c: our hot receiver, or null: a WR / TE with enough catches or yards this game (a fast coach
+ * reacts sooner) who is also the one we throw to most right now.
+ */
+export function hotReceiver(s: Scouting, speed: number, feel: Feel): number | null {
+  const a = feel.adjust;
+  const v = Math.max(0, Math.min(1, speed));
+  const catches = a.hotCatches - a.hotFastCatches * v;
+  const yards = a.hotYards - a.hotFastYards * v;
+  const most = s.targets.reduce((best, t, i) => (t > s.targets[best] ? i : best), 0);
+  if (!BRACKETABLE.includes(most) || s.targets[most] <= 0) return null;
+  return s.catches[most] >= catches || s.yards[most] >= yards ? most : null;
+}
+
+/** A-c: where the bracketing safety aims: deep over the top of the hot receiver (his corner has him underneath). */
+export function bracketTarget(receiver: { x: number; y: number }, losX: number, feel: Feel): { x: number; y: number } {
+  return { x: Math.max(receiver.x + feel.adjust.bracketCushionYards, losX + feel.adjust.bracketMinDepthYards), y: receiver.y };
+}
+
+/** A-c: the bracketed receiver's corner plays him tight underneath (help is over the top). */
+export function bracketCorner<P extends { reactionTime: number; cushionYards: number; turnAcceleration?: number }>(p: P, feel: Feel): P {
+  const a = feel.adjust;
+  return {
+    ...p,
+    reactionTime: p.reactionTime * a.bracketReactionRatio,
+    cushionYards: Math.min(p.cushionYards, a.bracketCushionMax),
+    ...(p.turnAcceleration !== undefined && { turnAcceleration: p.turnAcceleration * a.bracketTurnScale }),
+  };
+}

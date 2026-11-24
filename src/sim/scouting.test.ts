@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { feel } from '../config/feel';
-import { jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type ScoutedSnap } from './scouting';
+import { bracketCorner, bracketTarget, hotReceiver, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type ScoutedSnap } from './scouting';
 import { callWeights, shellWeights, type DefSituation } from './defCalls';
 import { simulatePass } from './passSim';
 import { PLAYS } from './routes';
@@ -130,4 +130,40 @@ describe('balance: a defender sitting on a play (A-b)', () => {
     expect(keyed).toBeGreaterThan(20);
     expect(Math.abs(rate(2, 0.5, jump).pct - rate(2, 0.5).pct)).toBeLessThan(5);
   }, 60000);
+});
+
+describe('the hot receiver (A-c)', () => {
+  const catchTo = (to: number, yards = 12): ScoutedSnap => ({ play: 'Curls', run: false, air: 10, y: 20, to, caught: true, yards });
+  it('a WR or TE with 3 catches (or 40 yards) who we throw to most; a fast coach sooner; never the RB', () => {
+    expect(hotReceiver(many([catchTo(0), catchTo(0)]), 0, feel)).toBeNull();
+    expect(hotReceiver(many([catchTo(0), catchTo(0), catchTo(0)]), 0, feel)).toBe(0);
+    expect(hotReceiver(many([catchTo(4, 45)]), 0, feel)).toBe(4);
+    expect(hotReceiver(many([catchTo(0), catchTo(0)]), 1, feel)).toBe(0);
+    expect(hotReceiver(many([catchTo(3), catchTo(3), catchTo(3), catchTo(3)]), 1, feel)).toBeNull();
+    // Three catches early, but now we throw to someone else: not the one we lean on any more.
+    expect(hotReceiver(many([catchTo(0), catchTo(0), catchTo(0), catchTo(2, 3), catchTo(2, 3), catchTo(2, 3), catchTo(2, 3)]), 0, feel)).toBe(2);
+  });
+  it('the bracket sits deep over the top; his corner plays him tight', () => {
+    expect(bracketTarget({ x: 40, y: 15 }, 35, feel).x).toBe(35 + feel.adjust.bracketMinDepthYards);
+    expect(bracketTarget({ x: 55, y: 15 }, 35, feel).x).toBe(55 + feel.adjust.bracketCushionYards);
+    const c = bracketCorner({ reactionTime: 0.2, cushionYards: 5, turnAcceleration: 17 }, feel);
+    expect(c.cushionYards).toBe(feel.adjust.bracketCushionMax);
+    expect(c.reactionTime).toBeLessThan(0.2);
+  });
+
+  it('balance: throws to him get harder (deep most), the others do not', () => {
+    const rate = (name: string, to: number, t: number, bracket?: number) => {
+      let c = 0, g = 0;
+      for (const shell of ['twoDeep', 'robber'] as const)
+        for (let s = 1; s <= 100; s++) {
+          const r = simulatePass(PLAYS.find((p) => p.name === name)!, { to, throwAt: t, lead: 1 }, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call: 'man', shell, bracket });
+          if (!r.sacked && r.result === 'catch') { c++; g += r.gain ?? 0; }
+        }
+      return { pct: c / 2, yds: g / 200 };
+    };
+    expect(rate('Post Corner', 0, 0.8, 0).pct).toBeLessThan(rate('Post Corner', 0, 0.8).pct - 20);
+    expect(rate('Curls', 0, 1.5, 0).pct).toBeLessThan(rate('Curls', 0, 1.5).pct - 8);
+    expect(rate('Verticals', 0, 1.1, 0).yds).toBeLessThan(rate('Verticals', 0, 1.1).yds - 3);
+    expect(rate('Verticals', 2, 1.1, 0).pct).toBeGreaterThan(rate('Verticals', 2, 1.1).pct - 3); // the far side
+  }, 120000);
 });

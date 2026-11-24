@@ -180,7 +180,7 @@ import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor, qbReadChance } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
-import { LEAN_HINTS, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
+import { LEAN_HINTS, bracketCorner, bracketTarget, hotReceiver, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
 import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT } from '../debug/gameControls';
@@ -255,6 +255,8 @@ export class FieldScene extends Phaser.Scene {
   private qbRead = false;
   /** A-b: the defender sitting on a play we keep calling (where those throws land), or null. */
   private jump: { cover: number; spot: Vec; play: string } | null = null;
+  /** A-c: the hot receiver (skill spot) S2 brackets this snap, or null. */
+  private bracket: number | null = null;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -1561,7 +1563,7 @@ export class FieldScene extends Phaser.Scene {
         } else {
           // LB2 dropping into his hook zone heads for the spot instead of a man.
           const zone = (i === TE && this.lb2Job === 'drop') || jumping;
-          const params = zone ? zoneParams(base) : base;
+          const params = zone ? zoneParams(base) : this.bracket === i ? bracketCorner(base, feel) : base;
           const target = i === TE && this.lb2Job === 'drop' ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos;
           r.coverage = stepCoverage(r.coverage, rot(i, sit(target)), dt, { ...params, ballReactionTime: (params.ballReactionTime + late(i)) * quick }, myBall);
         }
@@ -1576,7 +1578,11 @@ export class FieldScene extends Phaser.Scene {
     const sp = (k: 0 | 1) => {
       const who = k ? this.theirLineup?.safety2 : this.theirLineup?.safety;
       const read = jobs ? zoneBallReaction(jobs[5 + k], feel) : safetyBaseReaction(feel, this.shell, k);
-      const p = safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
+      // A-c: the bracketing S2 plays deep: he reads and breaks like a two-deep half safety.
+      const bracketing = k === 1 && this.bracket !== null;
+      const p = bracketing
+        ? safetyParamsFor(feel, this.match.ballX, 'twoDeep', 1, safetyReadTime(who, feel.defense.twoDeepBallReactionTime, feel.ratings))
+        : safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
       const d = late(5 + k);
       return { ...p, ballReactionTime: p.ballReactionTime + d, ...(p.frontBallReactionTime !== undefined && { frontBallReactionTime: p.frontBallReactionTime + d }) };
     };
@@ -1586,7 +1592,10 @@ export class FieldScene extends Phaser.Scene {
       this.safety2Pos = stepZoneSafety(this.safety2Pos, rot(6, zoneTarget(jobs[6], live, feel)), dt, sp(1), zb(jobs[6]));
     } else {
       this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball, (t) => rot(5, t));
-      this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
+      this.safety2Pos =
+        this.bracket !== null
+          ? stepZoneSafety(this.safety2Pos, bracketTarget(this.receivers[this.bracket].runner.pos, this.match.ballX, feel), dt, sp(1), ball)
+          : stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
     }
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y);
@@ -2581,6 +2590,9 @@ export class FieldScene extends Phaser.Scene {
       // A-b: sitting on a play we keep calling (no dice: it's in his scouting memory).
       const key = feel.defCalls.enabled && !forcedDefCall() && !forcedDz ? playKey(this.scouting, teamAdjustSpeed(this.opponentId), feel) : null;
       this.jump = key && !(this.defCall === 'blitz' && key.to === RB) ? { cover: key.to, spot: { x: this.match.ballX + key.dx, y: key.y }, play: key.play } : null;
+      // A-c: bracket our hot receiver on man calls (not on a disguise: one trick at a time).
+      const hot = feel.defCalls.enabled && !forcedDefCall() && !dz && !isZoneCall(this.defCall) ? hotReceiver(this.scouting, teamAdjustSpeed(this.opponentId), feel) : null;
+      this.bracket = hot;
       if (dz) {
         const looks = disguiseLooks(dz, this.shell);
         this.defCall = looks.real.call;
@@ -2621,7 +2633,7 @@ export class FieldScene extends Phaser.Scene {
     this.aimG.clear();
     this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.safety2, this.ball, this.shadow]);
     this.safetyPos = { ...align.safeties[0] };
-    this.safety2Pos = { ...align.safeties[1] };
+    this.safety2Pos = this.bracket !== null ? bracketTarget(wrStarts[this.bracket], this.match.ballX, feel) : { ...align.safeties[1] };
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y).setAlpha(1).setScale(1);
     [...this.cbDots, ...this.rusherDots, ...this.wrDots, this.qb, ...this.blockerDots].forEach((d) => d.setAlpha(1));
@@ -2800,18 +2812,34 @@ export class FieldScene extends Phaser.Scene {
     const lean = feel.defCalls.enabled && this.readOk && !forcedDefCall() ? mainLean(leans(this.scouting, feel), feel) : null;
     // A-b: sitting on a play (named, with the receiver) beats a general lean for the hint.
     const who = this.jump ? this.ourLineup?.skill[this.jump.cover]?.lastName : undefined;
-    const keyHint = this.jump && this.readOk ? `They're sitting on ${this.jump.play}${who ? ` to ${who}` : ''}` : null;
+    const hotName = this.bracket !== null ? this.ourLineup?.skill[this.bracket]?.lastName : undefined;
+    const keyHint =
+      this.jump && this.bracket === this.jump.cover && this.readOk
+        ? `They're doubling ${hotName ?? 'him'} and sitting on ${this.jump.play}`
+        : this.jump && this.readOk
+        ? `They're sitting on ${this.jump.play}${who ? ` to ${who}` : ''}`
+        : this.bracket !== null && this.readOk
+          ? `They're doubling ${hotName ?? 'your hot receiver'} over the top`
+          : null;
     const { call, shell } = read ? { call: this.defCall, shell: this.shell } : stand;
     return {
       call: stand.call,
       shell: stand.shell,
       read,
       ...((keyHint || lean) && { hint: keyHint ?? LEAN_HINTS[lean!] }),
+      ...(this.bracket !== null && { safety2At: bracketTarget(this.form.skill[this.bracket].pos, this.match.ballX, feel) }),
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
-      shellName: isZoneCall(call) ? (call === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[shell],
-      shellTip: isZoneCall(call) ? (call === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[shell],
+      // A-c: a bracketing S2 is plain to see (he stands over our receiver), so the safety line says so.
+      shellName: isZoneCall(call) ? (call === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : this.bracket !== null ? 'ONE DEEP + ONE OVER THE TOP' : SHELL_NAMES[shell],
+      shellTip: isZoneCall(call)
+        ? call === 'cover2'
+          ? 'Two deep halves, five under'
+          : 'Three deep, four under'
+        : this.bracket !== null
+          ? 'Throw away from the double'
+          : SHELL_TIPS[shell],
     };
   }
 

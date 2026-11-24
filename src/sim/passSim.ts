@@ -12,7 +12,7 @@ import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } f
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pursuerFor, shedTimeFor, tackleFor, teHelpFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
 import { createRng } from './rng';
-import { jumpTarget } from './scouting';
+import { bracketCorner, bracketTarget, jumpTarget } from './scouting';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
@@ -50,6 +50,8 @@ export interface PassOptions {
   shown?: Look;
   /** A-b: defender `cover` (0-4) sits on `spot` (he expects a throw there), reads the throw quicker and contests at full strength. */
   jump?: { cover: number; spot: Vec };
+  /** A-c: S2 brackets this skill spot (man calls only: the look becomes one deep + the bracket). */
+  bracket?: number;
   /** Our TE stays in to block (his route is Block): what LB2 does. Default: drops into the short middle. */
   lb2?: 'drop' | 'blitz';
   /**
@@ -99,6 +101,8 @@ export function simulatePass(
     }
     return i === TE && job === 'drop' ? zoneParams(rated) : rated;
   });
+  // A-c: the bracketed receiver's corner plays him tight underneath.
+  if (opts.bracket !== undefined && !isZoneCall(call)) coverP[opts.bracket] = bracketCorner(coverP[opts.bracket], feel);
   // A-b: the jumper sits on his spot (no cushion) and reads the throw quicker.
   const jumper = opts.jump && !(blitz && opts.jump.cover === RB) && !(opts.jump.cover === TE && job === 'blitz') ? opts.jump : null;
   if (jumper) {
@@ -107,6 +111,7 @@ export function simulatePass(
   }
   const zoneSpot = lb2ZoneSpot(feel, losX);
   // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber. Cover 3: one deep (S1 in the middle third), S2 rotates down.
+  const bracket = !isZoneCall(call) && opts.bracket !== undefined ? opts.bracket : null;
   const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
   // Where they line up: the look they show (a disguise) or the one they play.
   const align = lookAlignment(opts.shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos));
@@ -129,6 +134,8 @@ export function simulatePass(
   const coverTarget = (i: number) => (jumper && i === jumper.cover ? jumpTarget(jobTarget(i), jumper.spot, feel) : jobTarget(i));
   const KS = [0, 1] as const;
   let safeties: Vec[] = [...align.safeties];
+  // A-c: the bracketing S2 lines up deep over the hot receiver (the tell).
+  if (bracket !== null) safeties[1] = bracketTarget(f.skill[bracket].pos, losX, feel);
   const safetyPlayers = [def?.safety ?? null, def?.safety2 ?? null];
   const qbStart = f.qb;
   const qbAt = (t: number) => {
@@ -142,6 +149,11 @@ export function simulatePass(
     const late = rotationReadDelay(rotation, 5 + k, feel);
     return { ...sp, ballReactionTime: sp.ballReactionTime + late, ...(sp.frontBallReactionTime !== undefined && { frontBallReactionTime: sp.frontBallReactionTime + late }) };
   });
+  // A-c: the bracketing S2 plays deep, so he reads and breaks like a two-deep half safety.
+  if (bracket !== null) {
+    const read = feel.defense.twoDeepBallReactionTime;
+    safetyParams[1] = safetyParamsFor(feel, losX, 'twoDeep', 1, def ? safetyReadTime(safetyPlayers[1], read, R) : read);
+  }
 
 
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
@@ -169,9 +181,11 @@ export function simulatePass(
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
     cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : i === TE && lb2Rush ? c : stepCoverage(c, rot(i, t, coverTarget(i)), dt, coverP[i])));
     safeties = safeties.map((s, k) =>
-      jobs
-        ? stepZoneSafety(s, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, safetyParams[k])
-        : stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], undefined, (p) => rot(5 + k, t, p)),
+      k === 1 && bracket !== null
+        ? stepZoneSafety(s, bracketTarget(runners[bracket].pos, losX, feel), dt, safetyParams[k])
+        : jobs
+          ? stepZoneSafety(s, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, safetyParams[k])
+          : stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], undefined, (p) => rot(5 + k, t, p)),
     );
     const q = qbAt(t + dt);
     rushers = rushers.map((r) => stepRusher(r, q, t + dt, dt, rushP));
@@ -212,6 +226,7 @@ export function simulatePass(
     );
     safeties = safeties.map((s, k) => {
       const ball = !jobs || breaksOn(jobs[5 + k], landing, feel) ? { landing, sinceThrow: e + dt } : undefined;
+      if (k === 1 && bracket !== null) return stepZoneSafety(s, bracketTarget(runners[bracket].pos, losX, feel), dt, safetyParams[k], ball);
       return jobs
         ? stepZoneSafety(s, rot(5 + k, t + e, zoneTarget(jobs[5 + k], live(), feel)), dt, safetyParams[k], ball)
         : stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], ball, (p) => rot(5 + k, t + e, p));
