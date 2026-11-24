@@ -24,6 +24,7 @@ import {
   rollCornerSpeed,
   startCoverage,
   stepSafety,
+  stepZoneSafety,
   stepCoverage,
   stepRusher,
   type Coverage,
@@ -127,6 +128,8 @@ import {
 import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
+import { forcedDefCall } from '../debug/forceDefense';
+import { breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
 import {
   TE_SIDE_RUSHER,
   blockerEdges,
@@ -876,7 +879,9 @@ export class FieldScene extends Phaser.Scene {
     const m = def.map((p) => contestMods(p, R));
     return {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
-      zone: def.map((_, i) => i === TE && this.lb2Job === 'drop'),
+      zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop')),
+      // Underneath zone defenders (Z-a) come from their spots to rally: help strength.
+      under: this.zoneJobs()?.map((j) => j.kind === 'under'),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
       contested: off.map((p) => contestedCatchRatio(p, R)),
       breakup: m.map((x) => x.breakup),
@@ -1455,6 +1460,9 @@ export class FieldScene extends Phaser.Scene {
         : undefined;
     // Corners and linebacker play this snap's call (press / off / normal man); the LB holds near the line against a run.
     const { cb: cover, lb: lbCover, lb2: lb2Cover } = coverParams(this.defCall, feel, this.match.ballX, !!this.calledPlay.run);
+    // Zone call (Z-a): each defender plays an area (src/sim/zone.ts); only those whose area the ball lands in break on it.
+    const jobs = this.zoneJobs();
+    const live = this.receivers.filter((_, i) => !this.calledPlay.routes[i].block).map((r) => r.runner.pos);
     // Man coverage: each defender follows his own man, and all of them break on a thrown ball.
     // A defender whose own man isn't the target is a step later to help.
     this.receivers.forEach((r, i) => {
@@ -1469,10 +1477,17 @@ export class FieldScene extends Phaser.Scene {
         this.lb2Rush = stepRusher(this.lb2Rush, this.qbPos, this.playTime, dt, this.rushParams());
         r.coverage = { ...r.coverage, pos: { ...this.lb2Rush.pos } };
       } else {
-        const base = coverFor(this.theirLineup?.cover[i], i === TE ? lb2Cover : i === RB ? lbCover : cover, feel.ratings);
-        // LB2 dropping into his hook zone heads for the spot instead of a man.
-        const zone = i === TE && this.lb2Job === 'drop';
-        r.coverage = stepCoverage(r.coverage, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos, dt, zone ? zoneParams(base) : base, myBall);
+        const base = coverFor(this.theirLineup?.cover[i], i === TE ? lb2Cover : i === RB ? lbCover : cover, feel.ratings, !!jobs);
+        if (jobs) {
+          const zs = zoneCoverScale(jobs[i], feel);
+          const zp = { ...zoneParams(base), ballReactionTime: zs.ballReactionTime, topSpeed: base.topSpeed * zs.speedRatio };
+          const zb = ball && breaksOn(jobs[i], ball.landing, feel) ? { ...ball, help: false } : undefined;
+          r.coverage = stepCoverage(r.coverage, zoneTarget(jobs[i], live, feel), dt, zp, zb);
+        } else {
+          // LB2 dropping into his hook zone heads for the spot instead of a man.
+          const zone = i === TE && this.lb2Job === 'drop';
+          r.coverage = stepCoverage(r.coverage, zone ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos, dt, zone ? zoneParams(base) : base, myBall);
+        }
       }
       this.cbDots[i].setPosition(r.coverage.pos.x, r.coverage.pos.y);
     });
@@ -1483,10 +1498,17 @@ export class FieldScene extends Phaser.Scene {
     const wrs = this.receivers.map((r) => r.runner.pos);
     const sp = (k: 0 | 1) => {
       const who = k ? this.theirLineup?.safety2 : this.theirLineup?.safety;
-      return safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, safetyBaseReaction(feel, this.shell, k), feel.ratings));
+      const read = jobs ? zoneBallReaction(jobs[5 + k], feel) : safetyBaseReaction(feel, this.shell, k);
+      return safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
     };
-    this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball);
-    this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball);
+    if (jobs) {
+      const zb = (j: ZoneJob) => (ball && breaksOn(j, ball.landing, feel) ? ball : undefined);
+      this.safetyPos = stepZoneSafety(this.safetyPos, zoneTarget(jobs[5], live, feel), dt, sp(0), zb(jobs[5]));
+      this.safety2Pos = stepZoneSafety(this.safety2Pos, zoneTarget(jobs[6], live, feel), dt, sp(1), zb(jobs[6]));
+    } else {
+      this.safetyPos = stepSafety(this.safetyPos, wrs, dt, sp(0), ball);
+      this.safety2Pos = stepSafety(this.safety2Pos, wrs, dt, sp(1), ball);
+    }
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y);
 
@@ -1632,7 +1654,10 @@ export class FieldScene extends Phaser.Scene {
             speed: coveredByLinebacker(i) ? feel.defense.lbPursuitSpeed : db,
             stunned: 0,
             // On a run the linebackers read it first, and the corners stay with their receivers a moment (pass first).
-            wait: this.calledPlay.run ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : i === TE ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) : 0,
+            // Underneath zone defenders read pass first (Z-a): a step later on a run.
+            wait: this.calledPlay.run
+              ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : i === TE ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) + this.zoneRunRead(i)
+              : 0,
             // LB2 blitzing on a scramble: still on our TE until he beats him.
             held: i === TE && this.lb2Rush && blocking ? Math.max(0, this.lb2Rush.shedAt - this.playTime) : 0,
           },
@@ -1641,8 +1666,8 @@ export class FieldScene extends Phaser.Scene {
         ),
       ),
       // Two-deep safeties read pass first on a run play (3h-c).
-      rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) : 0 }, them?.safety, 'S'),
-      rated({ pos: { ...this.safety2Pos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) : 0 }, them?.safety2, 'S'),
+      rated({ pos: { ...this.safetyPos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) + this.zoneRunRead(5) : 0 }, them?.safety, 'S'),
+      rated({ pos: { ...this.safety2Pos }, speed: db, stunned: 0, wait: this.calledPlay.run ? safetyRunRead(feel, this.shell) + this.zoneRunRead(6) : 0 }, them?.safety2, 'S'),
       ...this.rushers.map((r, i) =>
         rated({ pos: { ...r.pos }, speed: dl, stunned: 0, held: blocking ? Math.max(0, r.shedAt - this.playTime) : 0 }, them?.rush[i], 'DL'),
       ),
@@ -2449,6 +2474,7 @@ export class FieldScene extends Phaser.Scene {
       this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
       this.lb2Roll = rng.next();
       this.shell = feel.defCalls.enabled ? pickShell(this.defSituation(), feel, rng.next()) : 'twoDeep';
+      if (isZoneCall(this.defCall)) this.shell = 'robber'; // Cover 3: one deep safety in the middle, S2 rotates down
     }
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -2541,8 +2567,21 @@ export class FieldScene extends Phaser.Scene {
 
   /** Their defensive call for the coming snap, weighted by the situation and their aggression. */
   private rollDefCall(roll: number): DefCallId {
+    const forced = forcedDefCall(); // ⚙ Force defense (testing)
+    if (forced) return forced;
     if (!feel.defCalls.enabled) return 'man';
     return pickDefCall(this.defSituation(), feel, roll);
+  }
+
+  /** This snap's zone jobs ([3 corners, 2 LBs, 2 safeties]), or null in man coverage. */
+  private zoneJobs(): ZoneJob[] | null {
+    return isZoneCall(this.defCall) ? zoneJobs(this.defCall, feel, this.match.ballX) : null;
+  }
+
+  /** Extra run read for defender i (0-4 cover, 5-6 safeties) when he plays an underneath zone. */
+  private zoneRunRead(i: number): number {
+    const j = this.zoneJobs()?.[i];
+    return j && j.kind === 'under' ? feel.zone.underRunReadTime : 0;
   }
 
   /** The situation their coach reads for his calls (down, distance, field, clock, score, aggression). */
@@ -2620,7 +2659,15 @@ export class FieldScene extends Phaser.Scene {
           : null,
       ...this.diagramPeople(),
       defenseRead: this.callAtLine
-        ? { call: this.defCall, name: DEF_CALL_NAMES[this.defCall], tip: DEF_CALL_TIPS[this.defCall], shell: this.shell, shellName: SHELL_NAMES[this.shell], shellTip: SHELL_TIPS[this.shell] }
+        ? {
+            call: this.defCall,
+            name: DEF_CALL_NAMES[this.defCall],
+            tip: DEF_CALL_TIPS[this.defCall],
+            shell: this.shell,
+            // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
+            shellName: isZoneCall(this.defCall) ? 'ONE DEEP' : SHELL_NAMES[this.shell],
+            shellTip: isZoneCall(this.defCall) ? 'Three deep, four under' : SHELL_TIPS[this.shell],
+          }
         : null,
     });
   }

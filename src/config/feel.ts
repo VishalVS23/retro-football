@@ -187,6 +187,42 @@ export const feel = {
     /** 0/1 switch: 0 = always normal man (as before 3d2). */
     enabled: 1,
   },
+  /** Zone calls (Z-a): where each zone defender sets up and how far his area reaches (src/sim/zone.ts). */
+  zone: {
+    /** Cover 3: the middle deep third is this far either side of the middle; the outside thirds are the rest. */
+    thirdEdgeYards: 9,
+    /** Deep-third corners set up this deep, this far from the middle (centre of their third). */
+    deepThirdDepthYards: 15,
+    deepThirdSpotYards: 15,
+    /** ...and line up this far off their receiver before the snap (backed off: the Cover 3 tell). */
+    cover3CushionYards: 7,
+    /** Deep defenders stay this much deeper than the deepest receiver in their lane. */
+    deepCushionYards: 1,
+    /** Underneath landmarks: this deep; hooks this far from the middle, curl / flat this far. */
+    underDepthYards: 5,
+    hookYards: 3,
+    curlFlatYards: 11,
+    /** An underneath defender carries a receiver at most this far past his landmark, then lets the deep man have him. */
+    underCarryYards: 5,
+    /** A receiver this far outside a lane still counts as in it (handoffs at the edges). */
+    laneOverlapYards: 1.5,
+    /** Underneath defenders shade toward a receiver in their area but stay within this of their landmark. */
+    underReachYards: 3.5,
+    /** When the ball is thrown only the defenders whose area it lands in break on it: lanes count this much wider... */
+    breakMarginYards: 1,
+    /** ...underneath defenders take balls up to this far past their landmark, deep ones balls up to this far in front of theirs. */
+    underBreakDepthYards: 6,
+    deepBreakYards: 4,
+    /** Zone defenders read the throw and turn on it this long after it leaves the QB's hand (man help defenders: cbHelpBallReactionTime): deep ones (bailing)... */
+    deepBallReactionTime: 0.45,
+    /** ...underneath ones (eyes on the QB) quicker. */
+    underBallReactionTime: 0.1,
+    /** On a run, underneath zone defenders read pass first: they're this much later to come up after the handoff than in man. */
+    underRunReadTime: 0.25,
+    /** ...deep ones give ground at this share of their speed (bailing), and outside thirds keep this much outside leverage. */
+    deepSpeedRatio: 0.92,
+    deepLeverageYards: 1,
+  },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
     /** Running back's speed with the ball (later: his speed rating). */

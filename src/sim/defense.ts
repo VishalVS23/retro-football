@@ -235,6 +235,16 @@ export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyPara
   return moveToward(pos, target, speed * dt);
 }
 
+/**
+ * A safety playing a zone (Z-a): he heads for the spot his zone gives him (`zoneTarget`), at bail
+ * speed when it's deeper than him, else drift speed; after the throw (and his read) he breaks on
+ * the ball like `stepSafety`.
+ */
+export function stepZoneSafety(pos: Vec, target: Vec, dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
+  if (ball && ball.sinceThrow >= p.ballReactionTime) return moveToward(pos, ball.landing, p.ballSpeed * dt);
+  return moveToward(pos, target, (target.x > pos.x + 0.25 ? p.bailSpeed : p.driftSpeed) * dt);
+}
+
 // ---------- Pass rush ----------
 
 export interface RushParams {
@@ -339,6 +349,8 @@ export function closestIndex(points: Vec[], to: Vec): number {
 export interface PlayerContestMods {
   /** Defender i plays a zone this snap (covers no one): he contests at full strength, like the safety. */
   zone?: boolean[];
+  /** Defender i plays an UNDERNEATH zone (Z-a): he comes from his spot to rally, so he always contests at help strength. */
+  under?: boolean[];
   receiverCatch?: number[];
   contested?: number[];
   breakup?: number[];
@@ -357,7 +369,7 @@ export function resolveTargetedPass(
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
   // Defender i < receivers.length covers receiver i man-to-man; anyone beyond that is the deep safety.
-  const isHelp = (d: number) => d < receivers.length && d !== receiver && !mods.zone?.[d];
+  const isHelp = (d: number) => !!mods.under?.[d] || (d < receivers.length && d !== receiver && !mods.zone?.[d]);
   let defender = closestIndex(defenders, landing);
   // When the receiver can get to it, the defender who contests HARDEST makes the play: his own man
   // right on him beats a help defender (half strength) who happens to stand a step closer (3h-b).

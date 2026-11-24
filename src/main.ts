@@ -5,6 +5,7 @@ import { addSaveControls } from './debug/saveControls';
 import { addSamplePlayers } from './debug/samplePlayers';
 import { addGameControls } from './debug/gameControls';
 import { addDisplayControls } from './debug/displayOptions';
+import { addForceDefenseControl } from './debug/forceDefense';
 import { startSaveSession } from './save/saveSession';
 import { registerSW } from 'virtual:pwa-register';
 
@@ -29,6 +30,7 @@ void startSaveSession().then(() => {
   addSaveControls(feelPanel.panel, feelPanel.flash);
   addDisplayControls(feelPanel.panel);
   addGameControls(feelPanel.panel);
+  addForceDefenseControl(feelPanel.panel);
   addSamplePlayers(feelPanel.panel);
 });
 

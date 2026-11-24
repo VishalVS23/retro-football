@@ -21,10 +21,11 @@ import {
   teamAggression,
   type DefCallId,
   type DefSituation,
+  type ManCallId,
 } from './defCalls';
 
 const base: DefSituation = { down: 1, toGo: 10, ballX: 45, quarter: 1, timeLeft: 100, lead: 0, aggression: 0.5 };
-const share = (s: DefSituation, id: DefCallId) => {
+const share = (s: DefSituation, id: ManCallId) => {
   const w = callWeights(s, feel);
   return w[id] / DEF_CALL_IDS.reduce((sum, k) => sum + w[k], 0);
 };

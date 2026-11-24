@@ -5,11 +5,12 @@
 import type { Feel } from '../config/feel';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
-import { startCoverage, stepCoverage } from './defense';
+import { startCoverage, stepCoverage, stepZoneSafety } from './defense';
+import { isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { cornerStart, coverParams, safetyRunRead, safetyStart, type ShellId, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
+import { cornerStart, coverParams, safetyParamsFor, safetyRunRead, safetyStart, zoneParams, type ShellId, linebacker2Start, linebackerStart, stepBlitzer, type DefCallId } from './defCalls';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
@@ -61,6 +62,16 @@ export function simulateRun(
   const d = feel.defense;
   const blitz = call === 'blitz';
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
+  // Zone call (Z-a): before the handoff everyone drops toward his area (corners bail, LBs to their spots).
+  const jobs = isZoneCall(call) ? zoneJobs(call, feel, losX) : null;
+  if (jobs) shell = 'robber';
+  const zoneP = (i: number) => {
+    const base = zoneParams(coveredByLinebacker(i) ? lbCover : cbCover);
+    return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };
+  };
+  const live = () => runners.filter((_, i) => !p.routes[i].block).map((r) => r.pos);
+  let safeties = ([0, 1] as const).map((k) => safetyStart(feel, losX, shell, k));
+  const sp = ([0, 1] as const).map((k) => safetyParamsFor(feel, losX, shell, k, 0));
   let cover = f.skill.map((s, i) =>
     startCoverage(i === RB ? linebackerStart(call, feel, losX) : i === TE ? linebacker2Start(feel, losX) : cornerStart(call, feel, s.pos), s.pos),
   );
@@ -75,8 +86,13 @@ export function simulateRun(
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, feel.routes));
     // A blitzing linebacker shoots his gap, straight at the QB (a run away from him gets outside him).
     cover = cover.map((c, i) =>
-      blitz && i === RB ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) } : stepCoverage(c, runners[i].pos, dt, coveredByLinebacker(i) ? lbCover : cbCover),
+      blitz && i === RB
+        ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) }
+        : jobs
+          ? stepCoverage(c, zoneTarget(jobs[i], live(), feel), dt, zoneP(i))
+          : stepCoverage(c, runners[i].pos, dt, coveredByLinebacker(i) ? lbCover : cbCover),
     );
+    if (jobs) safeties = safeties.map((v, k) => stepZoneSafety(v, zoneTarget(jobs[5 + k], live(), feel), dt, sp[k]));
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
   }
   const tk = feel.tackling;
@@ -91,13 +107,13 @@ export function simulateRun(
           speed: coveredByLinebacker(i) ? d.lbPursuitSpeed : tk.dbPursuitSpeed,
           stunned: 0,
           // A blitzer is already coming: no read.
-          wait: i === RB ? (blitz ? 0 : rg.lbReadTime) : i === TE ? rg.lbReadTime : rg.cbReadTime,
+          wait: (i === RB ? (blitz ? 0 : rg.lbReadTime) : i === TE ? rg.lbReadTime : rg.cbReadTime) + (jobs && jobs[i].kind === 'under' ? feel.zone.underRunReadTime : 0),
         },
         R,
       ),
     ),
     ...([0, 1] as const).map((k) =>
-      pursuerFor(k ? players.safety2 : players.safety, 'S', { pos: safetyStart(feel, losX, shell, k), speed: tk.dbPursuitSpeed, stunned: 0, wait: safetyRunRead(feel, shell) }, R),
+      pursuerFor(k ? players.safety2 : players.safety, 'S', { pos: { ...safeties[k] }, speed: tk.dbPursuitSpeed, stunned: 0, wait: safetyRunRead(feel, shell) + (jobs && jobs[5 + k].kind === 'under' ? feel.zone.underRunReadTime : 0) }, R),
     ),
     ...rushers.map((r, i) =>
       pursuerFor(players.rush?.[i], 'DL', { pos: { ...r.pos }, speed: tk.dlPursuitSpeed, stunned: 0, held: Math.max(0, r.shedAt - t) }, R),

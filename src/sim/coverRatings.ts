@@ -55,13 +55,15 @@ export function receiverCatchChance(wr: Player | null | undefined, base: number,
 const gambles = (d: Player | null | undefined, p: RatingSwitch) => !!d && !!p.enabled && d.traits.includes('gamblesOnPicks');
 
 /** A corner's (or the linebacker's) coverage: speed, reaction to his man's moves, guessing. */
-export function coverFor(def: Player | null | undefined, base: CoverParams, p: CoverRatingParams): CoverParams {
+export function coverFor(def: Player | null | undefined, base: CoverParams, p: CoverRatingParams, zone = false): CoverParams {
+  // In a zone (Z-a) his read of who's entering his area is zone coverage + anticipation, not man coverage.
+  const read = zone ? blend(def, [['zoneCoverage', 1], ['anticipation', 1]], p) : attr(def, 'manCoverage', p);
   return {
     ...base,
     topSpeed: base.topSpeed * scale(attr(def, 'speed', p), p.speedPerPoint),
     acceleration: base.acceleration * scale(attr(def, 'acceleration', p), p.accelerationPerPoint),
-    reactionTime: base.reactionTime * halving(1, attr(def, 'manCoverage', p), p.coverReactionHalvingPoints, Infinity),
-    turnAcceleration: base.turnAcceleration === undefined ? undefined : base.turnAcceleration * scale(attr(def, 'manCoverage', p), p.coverTurnPerPoint),
+    reactionTime: base.reactionTime * halving(1, read, p.coverReactionHalvingPoints, Infinity),
+    turnAcceleration: base.turnAcceleration === undefined ? undefined : base.turnAcceleration * scale(read, p.coverTurnPerPoint),
     anticipation: base.anticipation === undefined ? undefined : Math.min(1, base.anticipation + (gambles(def, p) ? p.gambleAnticipationBonus : 0)),
   };
 }

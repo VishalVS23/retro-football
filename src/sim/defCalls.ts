@@ -9,9 +9,13 @@ import type { CoverParams, SafetyParams } from './defense';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
+import type { ZoneCallId } from './zone';
 
-export type DefCallId = 'man' | 'press' | 'off' | 'blitz';
-export const DEF_CALL_IDS: readonly DefCallId[] = ['man', 'press', 'off', 'blitz'];
+/** The man calls their coach picks from (3d2). */
+export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
+/** Every call, man and zone (zone calls: Z-a Cover 3). */
+export type DefCallId = ManCallId | ZoneCallId;
+export const DEF_CALL_IDS: readonly ManCallId[] = ['man', 'press', 'off', 'blitz'];
 
 /** What the hint calls it ("LOOKS LIKE: PRESS MAN"). */
 export const DEF_CALL_NAMES: Record<DefCallId, string> = {
@@ -19,6 +23,7 @@ export const DEF_CALL_NAMES: Record<DefCallId, string> = {
   press: 'PRESS MAN',
   off: 'OFF MAN',
   blitz: 'LB BLITZ',
+  cover3: 'COVER 3',
 };
 
 /** One-line tip for the play-call screen: how to beat it. */
@@ -27,6 +32,7 @@ export const DEF_CALL_TIPS: Record<DefCallId, string> = {
   press: 'Corners pressed: take a shot deep',
   off: 'Corners off: hitches and quick outs are open',
   blitz: 'Blitz coming: throw quick, the RB is open',
+  cover3: 'Flats, curls and seams open',
 };
 
 /** The corners' cushion for this call: how far off they line up and how long it takes to close. */
@@ -35,6 +41,7 @@ export function cornerCushion(call: DefCallId, feel: Feel): { yards: number; clo
   const c = feel.defCalls;
   if (call === 'press') return { yards: c.pressCushionYards, closeTime: c.pressCloseTime };
   if (call === 'off') return { yards: c.offCushionYards, closeTime: c.offCloseTime };
+  if (call === 'cover3') return { yards: feel.zone.cover3CushionYards, closeTime: d.cbCushionCloseTime };
   return { yards: d.cbCushionYards, closeTime: d.cbCushionCloseTime };
 }
 
@@ -227,9 +234,9 @@ export interface DefSituation {
 }
 
 /** How likely each call is in this situation (not normalised). */
-export function callWeights(s: DefSituation, feel: Feel): Record<DefCallId, number> {
+export function callWeights(s: DefSituation, feel: Feel): Record<ManCallId, number> {
   const c = feel.defCalls;
-  const w: Record<DefCallId, number> = { man: c.weightMan, press: c.weightPress, off: c.weightOff, blitz: c.weightBlitz };
+  const w: Record<ManCallId, number> = { man: c.weightMan, press: c.weightPress, off: c.weightOff, blitz: c.weightBlitz };
   const late = s.down >= 3;
   if (late && s.toGo >= c.longYards) {
     // Long yardage: keep everything in front of them.
@@ -259,7 +266,7 @@ export function callWeights(s: DefSituation, feel: Feel): Record<DefCallId, numb
 }
 
 /** Picks a call from the weights with one dice roll (0..1). */
-export function pickDefCall(s: DefSituation, feel: Feel, roll: number): DefCallId {
+export function pickDefCall(s: DefSituation, feel: Feel, roll: number): ManCallId {
   const w = callWeights(s, feel);
   const total = DEF_CALL_IDS.reduce((sum, id) => sum + w[id], 0);
   if (total <= 0) return 'man';
