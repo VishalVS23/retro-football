@@ -470,6 +470,14 @@ export function tripsCheckOn(formationId: FormationId, call: DefCallId, bracket:
   return (formationId === 'trips' || formationId === 'bunch') && !isZoneCall(call) && bracket === null;
 }
 
+/**
+ * F-c2: do they use the Spread check this snap? SPREAD, a man call, S2 not already doubling someone:
+ * S2 comes down on the split-out TE (LB2 can't run with him out there) and LB2 drops or blitzes.
+ */
+export function spreadCheckOn(formationId: FormationId, call: DefCallId, bracket: number | null): boolean {
+  return formationId === 'spread' && !isZoneCall(call) && bracket === null;
+}
+
 /** The empty-side corner's flat zone in the Trips check (`zoneTarget` / `breaksOn` play it). */
 export function tripsCornerJob(feel: Feel, losX: number, sides: FormationSides): ZoneJob {
   const f = feel.formations;

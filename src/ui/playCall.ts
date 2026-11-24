@@ -14,7 +14,7 @@ import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
 import { playDiagramSvg, type DiagramDefense } from './playDiagram';
 import type { DefCallId, ShellId } from '../sim/defCalls';
-import { FORMATION_NAMES, nextFormation, type FormationId } from '../sim/formation';
+import { FORMATION_NAMES, nextFormation, playFor, type FormationId } from '../sim/formation';
 
 export interface PlayCallOptions {
   match: GameState;
@@ -187,7 +187,9 @@ export function openPlayCall(o: PlayCallOptions) {
     });
   };
   const drawBig = () => {
-    const hot = routes.map((r, i) => r.name !== plays[selected].routes[i].name);
+    // Compared as run from this formation (SPREAD's TE runs receiver versions of his routes).
+    const own = playFor(plays[selected], form).routes;
+    const hot = playFor(calledPlay(), form).routes.map((r, i) => r.name !== own[i].name);
     drawInto(field, calledPlay(), BIG, true, { hot, tappable: audible });
   };
   const setAudible = (on: boolean) => {
@@ -225,7 +227,8 @@ export function openPlayCall(o: PlayCallOptions) {
     const wr = (e.target as Element).closest('[data-wr]')?.getAttribute('data-wr');
     if (wr == null) return;
     const k = Number(wr);
-    routes[k] = nextRoute(routes[k], k);
+    // SPREAD: the split-out TE cycles through the receiver routes (starting from what he'd run there).
+    routes[k] = nextRoute(playFor(calledPlay(), form).routes[k], k, form === 'spread');
     drawBig();
   });
   root.querySelector('.pc-btns')!.addEventListener('click', (e) => {

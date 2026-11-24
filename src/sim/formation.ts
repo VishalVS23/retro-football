@@ -3,6 +3,7 @@
  * Pure (no Phaser), shared by the field and the play-call diagrams.
  */
 import { FIELD_WIDTH } from './field';
+import { TE, wideTeRoute, type PlayDef } from './routes';
 import type { Vec } from './throw';
 
 /** Running back's spot: behind the QB, a step toward the bottom (his routes and runs go that way). */
@@ -39,16 +40,16 @@ const RUSH_Y = [-5.5, -2, 2, 5.5];
  * FLIP: the same mirrored top <-> bottom (and their rushers with it, so every matchup by index stays
  * the same: blocker i still takes rusher i, the TE still helps the edge rusher on his side).
  */
-export type FormationId = 'normal' | 'flip' | 'trips' | 'bunch';
-export const FORMATION_IDS: readonly FormationId[] = ['normal', 'flip', 'trips', 'bunch'];
-export const FORMATION_NAMES: Record<FormationId, string> = { normal: 'NORMAL', flip: 'FLIP', trips: 'TRIPS', bunch: 'BUNCH' };
+export type FormationId = 'normal' | 'flip' | 'trips' | 'bunch' | 'spread';
+export const FORMATION_IDS: readonly FormationId[] = ['normal', 'flip', 'trips', 'bunch', 'spread'];
+export const FORMATION_NAMES: Record<FormationId, string> = { normal: 'NORMAL', flip: 'FLIP', trips: 'TRIPS', bunch: 'BUNCH', spread: 'SPREAD' };
 
 /**
  * Receiver spots per formation, as y offsets from the middle (negative = top) and how far off the
  * line: [wide top, slot, third receiver]. TRIPS (F-b): all three on top (wide, slot, inside slot);
  * the third receiver runs the routes he'd run from wide bottom, now from inside (his "inside" = down).
  */
-const WR_SPOTS: Record<'normal' | 'trips' | 'bunch', { y: number; back: number; toward: 1 | -1 }[]> = {
+const WR_SPOTS: Record<'normal' | 'trips' | 'bunch' | 'spread', { y: number; back: number; toward: 1 | -1 }[]> = {
   normal: [
     { y: -13, back: 0.5, toward: 1 },
     { y: -7.5, back: 1, toward: 1 },
@@ -66,7 +67,26 @@ const WR_SPOTS: Record<'normal' | 'trips' | 'bunch', { y: number; back: number; 
     { y: -10, back: 0.5, toward: 1 },
     { y: -8, back: 1.5, toward: 1 },
   ],
+  // SPREAD (F-c2): two by two. The third receiver moves into the bottom slot; the TE goes out wide (TE_WIDE_Y).
+  spread: [
+    { y: -13, back: 0.5, toward: 1 },
+    { y: -7.5, back: 1, toward: 1 },
+    { y: 7.5, back: 1, toward: -1 },
+  ],
 };
+
+/** SPREAD: the receiver in the bottom slot (wide bottom in NORMAL): he blocks his corner on runs. */
+export const SPREAD_SLOT = 2;
+
+/** SPREAD: the tight end split out wide at the bottom, a step off the line (no longer next to the tackle). */
+export const TE_WIDE_Y = 13;
+
+/** The play as run from this formation: in SPREAD the tight end runs receiver routes (`wideTeRoute`). */
+export function playFor(play: PlayDef, id: FormationId = 'normal'): PlayDef {
+  if (id !== 'spread' || !play.routes[TE]) return play;
+  const route = wideTeRoute(play.routes[TE], !!play.run);
+  return route === play.routes[TE] ? play : { ...play, routes: play.routes.map((r, i) => (i === TE ? route : r)) };
+}
 
 /** The next formation in the FORMATION button's cycle. */
 export function nextFormation(id: FormationId): FormationId {
@@ -97,14 +117,15 @@ export function formation(losX: number, id: FormationId = 'normal') {
   const t = (d: 1 | -1): 1 | -1 => (flip ? (-d as 1 | -1) : d);
   const rush: Vec[] = RUSH_Y.map((y) => ({ x: losX + 1, y: m(y) }));
   // Wide top, slot top (a yard wider since 3h-b: off the tackle), wide bottom; or the formation's own spots.
-  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = WR_SPOTS[id === 'trips' || id === 'bunch' ? id : 'normal'].map((w) => ({
+  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = WR_SPOTS[id === 'trips' || id === 'bunch' || id === 'spread' ? id : 'normal'].map((w) => ({
     pos: { x: losX - w.back, y: m(w.y) },
     towardMiddle: t(w.toward),
   }));
   // The RB counts as "below the middle", so negative route y (toward his sideline) = the bottom side.
   const rb: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX + RB_OFFSET.x, y: m(RB_OFFSET.y) }, towardMiddle: t(-1) };
   // Tight end on the bottom side, on the line: his routes' negative y = toward the bottom sideline, like the RB's.
-  const te: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX - 1, y: m(TE_Y) }, towardMiddle: t(-1) };
+  // SPREAD: split out wide, half a yard off the line like the other wide receivers.
+  const te: { pos: Vec; towardMiddle: 1 | -1 } = id === 'spread' ? { pos: { x: losX - 0.5, y: m(TE_WIDE_Y) }, towardMiddle: t(-1) } : { pos: { x: losX - 1, y: m(TE_Y) }, towardMiddle: t(-1) };
   return {
     // A step behind the centre so the two don't overlap (3h-a); his dropback is shorter to match,
     // so he still sets up 5 yards behind the line.

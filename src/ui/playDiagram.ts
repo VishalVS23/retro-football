@@ -5,7 +5,7 @@
  */
 import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
-import { formation, SLOT, type FormationId } from '../sim/formation';
+import { formation, playFor, SLOT, type FormationId } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, TE, routePath, type PlayDef } from '../sim/routes';
@@ -274,6 +274,7 @@ const circleBox = (p: Vec, r: number): Box => ({ x0: p.x - r, y0: p.y - r, x1: p
 
 export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, v: DiagramView): string {
   const f = formation(losX, v.formation);
+  play = playFor(play, v.formation); // SPREAD: the split-out TE's routes
   const x1 = v.x0 + v.w;
   let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(v.x0)} ${n(v.y0)} ${n(v.w)} ${n(v.h)}" preserveAspectRatio="xMidYMid meet">`;
 

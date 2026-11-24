@@ -45,7 +45,7 @@ import {
   type Pursuer,
   type Trailer,
 } from '../sim/carry';
-import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, RETURN_SKILL, SLOT, FORMATION_NAMES, type FormationId } from '../sim/formation';
+import { BLOCKER_OF, CENTRE, formation, playFor, SPREAD_SLOT, RETURN_LINE, RETURN_RUSH, RETURN_SKILL, SLOT, FORMATION_NAMES, type FormationId } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
@@ -112,6 +112,7 @@ import {
   safetyRunRead,
   lookAlignment,
   disguiseLooks,
+  spreadCheckOn,
   tripsCheckOn,
   tripsCornerJob,
   tripsSafetyStart,
@@ -263,6 +264,8 @@ export class FieldScene extends Phaser.Scene {
   private bracket: number | null = null;
   /** F-b: the Trips check this snap (the empty-side corner's flat zone), or null. */
   private tripsJob: ZoneJob | null = null;
+  /** F-c2: the Spread check this snap (S2 down on the split-out TE; LB2 drops or blitzes). */
+  private spreadChk = false;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -958,7 +961,7 @@ export class FieldScene extends Phaser.Scene {
     return {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
       zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop') || this.jump?.cover === i || (!!this.tripsJob && i === 2)),
-      ...(this.tripsJob && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, 2] }),
+      ...(this.s2Man() !== null && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, this.s2Man()!] }),
       // Underneath zone defenders (Z-a) come from their spots to rally: help strength.
       under: this.zoneJobs()?.map((j, i) => contestsAsHelp(j, landing, feel) && this.jump?.cover !== i) ?? (this.tripsJob ? def.map((_, i) => i === 2) : undefined),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
@@ -1595,8 +1598,8 @@ export class FieldScene extends Phaser.Scene {
       // A-c: the bracketing S2 plays deep: he reads and breaks like a two-deep half safety.
       const bracketing = k === 1 && this.bracket !== null;
       // Trips check: S2 on the slot reads like the robber on throws to his man, like a help defender on the rest.
-      const onSlot = k === 1 && this.tripsJob !== null;
-      const slotRead = Math.max(feel.defense.robberBallReactionTime, this.targetIndex === 2 ? 0 : feel.defense.cbHelpBallReactionTime);
+      const onSlot = k === 1 && this.s2Man() !== null;
+      const slotRead = Math.max(feel.defense.robberBallReactionTime, this.targetIndex === this.s2Man() ? 0 : feel.defense.cbHelpBallReactionTime);
       const p = bracketing
         ? safetyParamsFor(feel, this.match.ballX, 'twoDeep', 1, safetyReadTime(who, feel.defense.twoDeepBallReactionTime, feel.ratings))
         : onSlot
@@ -1614,8 +1617,8 @@ export class FieldScene extends Phaser.Scene {
       this.safety2Pos =
         this.bracket !== null
           ? stepZoneSafety(this.safety2Pos, bracketTarget(this.receivers[this.bracket].runner.pos, this.match.ballX, feel), dt, sp(1), ball)
-          : this.tripsJob
-            ? stepZoneSafety(this.safety2Pos, tripsSafetyTarget(this.receivers[2].runner.pos, feel), dt, sp(1), ball)
+          : this.s2Man() !== null
+            ? stepZoneSafety(this.safety2Pos, tripsSafetyTarget(this.receivers[this.s2Man()!].runner.pos, feel), dt, sp(1), ball)
             : stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
     }
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
@@ -1640,6 +1643,11 @@ export class FieldScene extends Phaser.Scene {
     });
     this.stepCentre(this.rushers[this.helped], run ? { x: this.rushers[this.helped].pos.x - 5, y: this.rushers[this.helped].pos.y } : this.qbPos, dt);
     if (this.teBlocks()) this.stepTeBlock(dt);
+  }
+
+  /** The receiver S2 comes down on this snap (Trips check: the inside slot; Spread check: the split-out TE), or null. */
+  private s2Man(): number | null {
+    return this.tripsJob ? 2 : this.spreadChk ? TE : null;
   }
 
   /** Our TE stays in to block this snap (his route is Block; always on a run). */
@@ -1767,8 +1775,13 @@ export class FieldScene extends Phaser.Scene {
             wait: this.calledPlay.run
               ? (i === RB ? (this.defCall === 'blitz' ? 0 : feel.runGame.lbReadTime) : i === TE ? feel.runGame.lbReadTime : feel.runGame.cbReadTime) + this.zoneRunRead(i)
               : 0,
-            // LB2 blitzing on a scramble: still on our TE until he beats him.
-            held: i === TE && this.lb2Rush && blocking ? Math.max(0, this.lb2Rush.shedAt - this.playTime) : 0,
+            // LB2 blitzing on a scramble: still on our TE until he beats him. SPREAD run: the bottom slot blocks his corner.
+            held:
+              i === TE && this.lb2Rush && blocking
+                ? Math.max(0, this.lb2Rush.shedAt - this.playTime)
+                : this.calledPlay.run && this.formationId === 'spread' && i === SPREAD_SLOT
+                  ? feel.formations.spreadSlotBlockTime
+                  : 0,
           },
           them?.cover[i],
           coveredByLinebacker(i) ? 'LB' : 'CB',
@@ -1804,8 +1817,15 @@ export class FieldScene extends Phaser.Scene {
     const c = this.chase.carrier.pos;
     this.carrierDot?.setPosition(c.x, c.y);
     // Teammates without the ball pull up and jog after the play (downfield blocking comes later).
+    const slotHeld = run && this.formationId === 'spread' && (this.chase.pursuers[SPREAD_SLOT]?.held ?? 0) > 0;
     this.trailers = this.trailers.map((t, i) => {
       if (i === this.targetIndex) return t;
+      if (slotHeld && i === SPREAD_SLOT) {
+        // SPREAD run: the slot stands in front of his corner while he blocks him (looks only).
+        const cb = this.chase.pursuers[SPREAD_SLOT].pos;
+        this.slideToward(this.wrDots[i], blockerSpot({ pos: cb, shedAt: 0 }, c, PLAYER_RADIUS * 2), dt);
+        return { ...t, pos: { x: this.wrDots[i].x, y: this.wrDots[i].y } };
+      }
       const next = stepTrailer(t, c, this.chase.t, dt, feel.teammates);
       this.wrDots[i].setPosition(next.pos.x, next.pos.y);
       return next;
@@ -2594,6 +2614,7 @@ export class FieldScene extends Phaser.Scene {
     this.form = formation(this.match.ballX, this.formationId); // line up wherever the last play left the ball
     const qbStart = this.form.qb;
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
+    this.calledPlay = playFor(this.calledPlay, this.formationId); // SPREAD: the split-out TE runs receiver routes
     const play = this.calledPlay;
     const rng = getRngOrFallback();
     if (call) {
@@ -2627,11 +2648,12 @@ export class FieldScene extends Phaser.Scene {
     // F-b: against Trips in man coverage the empty-side corner stays home and S2 comes down on the inside slot
     // (worked out when we line up: the formation can change on the play-call screen after their call).
     this.tripsJob = tripsCheckOn(this.formationId, this.defCall, this.bracket) && !this.shown ? tripsCornerJob(feel, this.match.ballX, this.form.sides) : null;
+    // F-c2: against SPREAD in man coverage S2 comes down on the split-out TE (LB2 can't run with him out there).
+    this.spreadChk = spreadCheckOn(this.formationId, this.defCall, this.bracket) && !this.shown;
     const align = lookAlignment(this.shownLook(), feel, this.match.ballX, wrStarts, this.form.sides);
-    if (this.tripsJob) {
-      align.cover[2] = { ...this.tripsJob.spot };
-      align.safeties[1] = tripsSafetyStart(wrStarts[2], this.match.ballX, feel);
-    }
+    if (this.tripsJob) align.cover[2] = { ...this.tripsJob.spot };
+    const s2Man = this.s2Man();
+    if (s2Man !== null) align.safeties[1] = tripsSafetyStart(wrStarts[s2Man], this.match.ballX, feel);
     this.rotation = this.shown ? { shown: align, real: lookAlignment({ call: this.defCall, shell: this.shell }, feel, this.match.ballX, wrStarts, this.form.sides) } : null;
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -2684,11 +2706,13 @@ export class FieldScene extends Phaser.Scene {
     // holds longer with him, unless LB2 blitzes (decided now, no tell before the snap), then he picks LB2 up.
     const te = this.ourLineup?.skill[TE];
     const edgeMan = this.theirLineup?.rush[TE_SIDE_RUSHER];
-    const teHelp = play.run ? { rusher: TE_SIDE_RUSHER, time: teHelpFor(te, edgeMan, true, feel.runGame.teHelpTime, feel.ratings) } : undefined;
+    const teHelp = play.run && this.formationId !== 'spread' ? { rusher: TE_SIDE_RUSHER, time: teHelpFor(te, edgeMan, true, feel.runGame.teHelpTime, feel.ratings) } : undefined;
     const sheds = lineShedTimes(this.ourLineup?.line, this.theirLineup?.rush, !!play.run, shed, () => rng.next(), feel.ratings, hole, teHelp);
     this.helped = sheds.helped;
-    this.lb2Job = play.run ? 'cover' : lb2Job(!!play.routes[TE]?.block, this.lb2Roll, lb2BlitzChance(this.defSituation(), feel));
-    if (this.lb2Job === 'drop') {
+    // Spread check: LB2 has nobody, so he drops (on a run he stays in the box at his hook spot) or, less often, blitzes unblocked.
+    const spreadScale = this.spreadChk ? feel.formations.spreadBlitzScale : 1;
+    this.lb2Job = play.run ? (this.spreadChk ? 'drop' : 'cover') : lb2Job(!!play.routes[TE]?.block || this.spreadChk, this.lb2Roll, lb2BlitzChance(this.defSituation(), feel) * spreadScale);
+    if (this.lb2Job === 'drop' && this.teBlocks()) {
       const extra = teHelpFor(te, edgeMan, false, feel.pocket.teProtectTime, feel.ratings);
       sheds.shedAt = sheds.shedAt.map((t) => t + extra);
     }
@@ -2698,7 +2722,10 @@ export class FieldScene extends Phaser.Scene {
       this.lb2Job === 'blitz'
         ? {
             pos: { ...this.receivers[TE].coverage.pos },
-            shedAt: shedTimeFor(te, this.theirLineup?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
+            // Spread: no TE to pick him up.
+            shedAt: this.spreadChk
+              ? feel.formations.spreadBlitzFreeTime
+              : shedTimeFor(te, this.theirLineup?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng.next() * 2 - 1, () => rng.next(), feel.ratings),
           }
         : null;
     this.rushers.forEach((r, i) => this.rusherDots[i].setPosition(r.pos.x, r.pos.y));
@@ -2864,6 +2891,7 @@ export class FieldScene extends Phaser.Scene {
         safety2At: tripsSafetyStart(this.form.skill[2].pos, this.match.ballX, feel),
         coverAt: [undefined, undefined, { ...this.tripsJob.spot }],
       }),
+      ...(this.spreadChk && { safety2At: tripsSafetyStart(this.form.skill[TE].pos, this.match.ballX, feel) }),
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
@@ -2876,7 +2904,9 @@ export class FieldScene extends Phaser.Scene {
           ? 'ONE DEEP + ONE OVER THE TOP'
           : this.tripsJob
             ? 'ONE DEEP + SAFETY DOWN ON THE SLOT'
-            : SHELL_NAMES[shell],
+            : this.spreadChk
+              ? 'ONE DEEP + SAFETY ON THE TE'
+              : SHELL_NAMES[shell],
       shellTip: isZoneCall(call)
         ? call === 'cover2'
           ? 'Two deep halves, five under'
@@ -2885,7 +2915,9 @@ export class FieldScene extends Phaser.Scene {
           ? 'Throw away from the double'
           : this.tripsJob
             ? 'Their corner stays home on the TE side'
-            : SHELL_TIPS[shell],
+            : this.spreadChk
+              ? 'Their LB sits in the middle or blitzes'
+              : SHELL_TIPS[shell],
     };
   }
 

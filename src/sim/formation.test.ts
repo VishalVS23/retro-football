@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { feel } from '../config/feel';
 import { FIELD_WIDTH } from './field';
-import { FORMATION_IDS, formation, nextFormation } from './formation';
-import { PLAYS, routePath } from './routes';
+import { FORMATION_IDS, formation, nextFormation, playFor } from './formation';
+import { PLAYS, ROUTES, TE, nextRoute, routePath } from './routes';
 import { simulatePass } from './passSim';
 import { simulateRun } from './runSim';
 import { zoneJobs } from './zone';
-import { linebacker2Start, lb2ZoneSpot, tripsCheckOn, tripsCornerJob } from './defCalls';
+import { linebacker2Start, lb2ZoneSpot, spreadCheckOn, tripsCheckOn, tripsCornerJob } from './defCalls';
 import type { DefCallId, ShellId } from './defCalls';
 
 const mid = FIELD_WIDTH / 2;
@@ -112,6 +112,70 @@ describe('TRIPS (F-b)', () => {
       return y / (looks.length * 120);
     };
     expect(Math.abs(runs('trips') - runs('normal'))).toBeLessThan(0.35);
+  }, 240000);
+});
+
+describe('SPREAD (F-c2)', () => {
+  it('two by two: the third receiver in the bottom slot, the TE split out wide at the bottom', () => {
+    const f = formation(40, 'spread');
+    expect(f.wrs[0].pos.y).toBeLessThan(mid);
+    expect(f.wrs[1].pos.y).toBeLessThan(mid);
+    expect(f.wrs[2].pos.y).toBeGreaterThan(mid);
+    expect(f.te.pos.y).toBeGreaterThan(f.wrs[2].pos.y + 3);
+    expect(f.te.pos.y - mid).toBeGreaterThan(10);
+  });
+
+  it('the split-out TE runs receiver routes: Block = Hitch on a pass, Go on a run; Seam = Go; Drag = Drag; Flat = Out', () => {
+    expect(playFor(play('Crossers'), 'spread').routes[TE].name).toBe('Hitch');
+    expect(playFor(play('Dive'), 'spread').routes[TE].name).toBe('Go');
+    expect(playFor(play('TE Seam'), 'spread').routes[TE].name).toBe('Go');
+    expect(playFor(play('TE Drag'), 'spread').routes[TE].points).toEqual(ROUTES.find((r) => r.name === 'Drag')!.points);
+    expect(playFor(play('Curls'), 'spread').routes[TE].name).toBe('Out');
+    expect(playFor(play('Crossers'), 'spread').routes[TE].block).toBeFalsy();
+    // Other formations: unchanged.
+    expect(playFor(play('Crossers'), 'trips')).toBe(play('Crossers'));
+    // AUDIBLE: out wide he cycles the receiver routes.
+    expect(ROUTES).toContain(nextRoute(ROUTES[0], TE, true));
+  });
+
+  it('the Spread check: man calls only, not with a bracket', () => {
+    expect(spreadCheckOn('spread', 'man', null)).toBe(true);
+    expect(spreadCheckOn('spread', 'press', null)).toBe(true);
+    expect(spreadCheckOn('spread', 'cover3', null)).toBe(false);
+    expect(spreadCheckOn('spread', 'man', 1)).toBe(false);
+    expect(spreadCheckOn('trips', 'man', null)).toBe(false);
+  });
+
+  it('balance: passing within ~10% of NORMAL; the Dive the same; the Toss weaker (no TE) but helped by the slot block', () => {
+    const looks: [DefCallId, ShellId][] = [['man', 'twoDeep'], ['man', 'robber'], ['cover3', 'robber'], ['cover2', 'twoDeep']];
+    const T: Record<string, number> = { Slant: 0.5, Out: 1.0, Go: 1.1, Post: 0.8, Corner: 0.8, Dig: 1.5, Drag: 1.0, Hitch: 1.1, Curl: 1.5, Flat: 1.0, Check: 1.3, Wheel: 1.4, Seam: 1.2 };
+    const yards = (f: 'normal' | 'spread') => {
+      let g = 0, n = 0;
+      for (const p of PLAYS) {
+        if (p.run) continue;
+        playFor(p, f).routes.forEach((r, to) => {
+          if (r.block || T[r.name] === undefined) return;
+          for (const [call, shell] of looks)
+            for (let s = 1; s <= 15; s++) {
+              const res = simulatePass(p, { to, throwAt: T[r.name], lead: 1 }, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call, shell, formation: f });
+              g += res.sacked ? -6 : res.result === 'catch' ? res.gain ?? 0 : 0;
+              n++;
+            }
+        });
+      }
+      return g / n;
+    };
+    const a = yards('normal'), b = yards('spread');
+    expect(Math.abs(b - a) / a).toBeLessThan(0.12);
+    const runs = (f: 'normal' | 'spread', n: string, fl = feel) => {
+      let y = 0;
+      for (const [call, shell] of looks) for (let s = 1; s <= 60; s++) y += simulateRun(play(n), s * 7919, fl, 2.5, 45, undefined, call, {}, shell, undefined, f).yards;
+      return y / (looks.length * 60);
+    };
+    expect(Math.abs(runs('spread', 'Dive') - runs('normal', 'Dive'))).toBeLessThan(0.25);
+    const toss = runs('spread', 'Toss');
+    expect(toss).toBeLessThan(runs('normal', 'Toss'));
+    expect(toss).toBeGreaterThan(runs('spread', 'Toss', { ...feel, formations: { ...feel.formations, spreadSlotBlockTime: 0 } }) + 0.3);
   }, 240000);
 });
 

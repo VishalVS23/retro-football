@@ -105,10 +105,23 @@ export const PLAYS: PlayDef[] = [
  * Hot route: the next route in that player's list (receiver, RB or TE routes; `index` = his
  * formation spot), wrapping round. A run path isn't in a list, so it stays as it is.
  */
-export function nextRoute(current: RouteDef, index: number): RouteDef {
-  const list = index === TE ? TE_ROUTES : index === RB ? RB_ROUTES : ROUTES;
+export function nextRoute(current: RouteDef, index: number, teWide = false): RouteDef {
+  const list = index === TE && !teWide ? TE_ROUTES : index === RB ? RB_ROUTES : ROUTES;
   const i = list.findIndex((r) => r.name === current.name);
   return i >= 0 ? list[(i + 1) % list.length] : current;
+}
+
+/**
+ * F-c2: a tight end split out wide (SPREAD) runs receiver routes: his own become their wide-receiver
+ * versions (Seam = Go, his Drag = the receiver Drag, Flat = Out), and Block = a Hitch on a pass, a Go
+ * on a run (taking his man away from the play). Receiver routes (a hot route) stay as they are.
+ */
+export function wideTeRoute(route: RouteDef, run: boolean): RouteDef {
+  if (route === BLOCK) return run ? GO : HITCH;
+  if (route === SEAM) return GO;
+  if (route === TE_DRAG) return DRAG;
+  if (route === TE_FLAT) return OUT;
+  return route;
 }
 
 /** A copy of `play` with receiver `wr` running `route` instead. The playbook itself never changes. */

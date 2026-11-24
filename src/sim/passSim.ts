@@ -4,7 +4,7 @@
  * resolved. Used by the balance tests to measure how open each route gets.
  */
 import type { Feel } from '../config/feel';
-import { formation, type FormationId } from './formation';
+import { formation, playFor, type FormationId } from './formation';
 import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, stepZoneSafety, type PassResult, type Rusher } from './defense';
 import { ZONE_SHELL, breaksOn, contestsAsHelp, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
@@ -16,7 +16,7 @@ import { bracketCorner, bracketTarget, jumpTarget } from './scouting';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
-import { coverParams, lb2ZoneSpot, lookAlignment, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, rotationReadDelay, safetyBaseReaction, safetyParamsFor, type Look, type ShellId, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
+import { coverParams, lb2ZoneSpot, lookAlignment, spreadCheckOn, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, rotationReadDelay, safetyBaseReaction, safetyParamsFor, type Look, type ShellId, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
 
 const dt = 1 / 60;
 /** Where a player who can't catch the ball (the TE in to block) is put for the catch check. */
@@ -78,6 +78,7 @@ export function simulatePass(
   const rng = createRng(seed);
   const d = feel.defense;
   const f = formation(losX, opts.formation);
+  play = playFor(play, opts.formation); // SPREAD: the split-out TE runs receiver routes
   const paths = f.skill.map((s, i) => routePath(s.pos, play.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, play.routes[i].stop));
   const R = feel.ratings;
@@ -90,7 +91,9 @@ export function simulatePass(
   const def = opts.defense;
   // LB2 (3h-b) covers the TE, or with the TE in to block drops into the short middle / blitzes.
   const teBlocks = !!play.routes[TE]?.block;
-  const job: Lb2Job = teBlocks ? (opts.lb2 ?? 'drop') : 'cover';
+  // F-c2, the Spread check: S2 takes the split-out TE, LB2 drops or blitzes (like with the TE in to block).
+  const spreadChk = spreadCheckOn(opts.formation ?? 'normal', call, !isZoneCall(call) && opts.bracket !== undefined ? opts.bracket : null) && !opts.shown;
+  const job: Lb2Job = teBlocks || spreadChk ? (opts.lb2 ?? 'drop') : 'cover';
   // Zone call (Z-a): everyone plays an area instead of a man (LB2 still blitzes when the TE blocks and the dice say so).
   const zone = isZoneCall(call);
   const jobs = zone ? zoneJobs(call, feel, losX, f.sides.strongSide) : null;
@@ -121,10 +124,10 @@ export function simulatePass(
   const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
   // Where they line up: the look they show (a disguise) or the one they play.
   const align = lookAlignment(opts.shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
-  if (tripsJob) {
-    align.cover[2] = { ...tripsJob.spot };
-    align.safeties[1] = tripsSafetyStart(f.skill[2].pos, losX, feel);
-  }
+  if (tripsJob) align.cover[2] = { ...tripsJob.spot };
+  // The safety coming down on a man (Trips: the inside slot; Spread: the split-out TE).
+  const s2Man = trips ? 2 : spreadChk ? TE : null;
+  if (s2Man !== null) align.safeties[1] = tripsSafetyStart(f.skill[s2Man].pos, losX, feel);
   // A disguise rotates: each defender plays his real job, a step late (`rotatedTarget`).
   const rotation = opts.shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
@@ -166,9 +169,9 @@ export function simulatePass(
     safetyParams[1] = safetyParamsFor(feel, losX, 'twoDeep', 1, def ? safetyReadTime(safetyPlayers[1], read, R) : read);
   }
   // Trips check: S2 down on the slot reads like the robber on throws to his man, like a help defender on the rest.
-  if (trips) safetyParams[1] = safetyParamsFor(feel, losX, 'robber', 1, def ? safetyReadTime(safetyPlayers[1], d.robberBallReactionTime, R) : d.robberBallReactionTime);
-  if (trips && shot.to !== 2) safetyParams[1] = { ...safetyParams[1], ballReactionTime: Math.max(safetyParams[1].ballReactionTime, d.cbHelpBallReactionTime) };
-  const s2Target = (): Vec | null => (bracket !== null ? bracketTarget(runners[bracket].pos, losX, feel) : trips ? tripsSafetyTarget(runners[2].pos, feel) : null);
+  if (s2Man !== null) safetyParams[1] = safetyParamsFor(feel, losX, 'robber', 1, def ? safetyReadTime(safetyPlayers[1], d.robberBallReactionTime, R) : d.robberBallReactionTime);
+  if (s2Man !== null && shot.to !== s2Man) safetyParams[1] = { ...safetyParams[1], ballReactionTime: Math.max(safetyParams[1].ballReactionTime, d.cbHelpBallReactionTime) };
+  const s2Target = (): Vec | null => (bracket !== null ? bracketTarget(runners[bracket].pos, losX, feel) : s2Man !== null ? tripsSafetyTarget(runners[s2Man].pos, feel) : null);
 
 
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
@@ -180,14 +183,18 @@ export function simulatePass(
   // TE in to block: he helps on the edge on his side (first, so the centre helps someone else), or picks up LB2 if he blitzes.
   const te = opts.offense?.[TE];
   const sheds = lineShedTimes(opts.line, def?.rush, false, pk, () => rng2.next(), R);
-  if (job === 'drop') {
+  if (job === 'drop' && teBlocks) {
     const extra = teHelpFor(te, def?.rush?.[TE_SIDE_RUSHER], false, pk.teProtectTime, R);
     sheds.shedAt = sheds.shedAt.map((t) => t + extra);
   }
   let rushers: Rusher[] = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
   let lb2Rush: Rusher | null =
     job === 'blitz'
-      ? { pos: { ...cover[TE].pos }, shedAt: shedTimeFor(te, def?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng2.next() * 2 - 1, () => rng2.next(), R) }
+      ? {
+          pos: { ...cover[TE].pos },
+          // Spread: no TE to pick him up.
+          shedAt: spreadChk ? feel.formations.spreadBlitzFreeTime : shedTimeFor(te, def?.cover[TE], false, { shedTime: pk.tePickupTime, shedTimeVariance: pk.shedTimeVariance }, rng2.next() * 2 - 1, () => rng2.next(), R),
+        }
       : null;
   const rushP = { blockedSpeed: pk.rushBlockedSpeed, freeSpeed: pk.rushFreeSpeed, sackReachYards: pk.sackReachYards };
   let sacked = false;
@@ -267,7 +274,7 @@ export function simulatePass(
   }, qb, {
     zone: cover.map((_, i) => zone || (i === TE && job === 'drop') || i === jumper?.cover || (trips && i === 2)),
     under: jobs ? jobs.map((j, i) => contestsAsHelp(j, landing, feel) && i !== jumper?.cover) : trips ? cover.map((_, i) => i === 2) : undefined,
-    ...(trips && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, 2] }),
+    ...(s2Man !== null && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, s2Man] }),
     ...(opts.offense && {
       receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),

@@ -360,6 +360,21 @@ export const feel = {
     tripsCornerInsideYards: 3,
     tripsSafetyDepthYards: 7,
     tripsSafetyCushionYards: 2,
+    /**
+     * F-c2, the SPREAD check (man calls): S2 comes down on the split-out TE (same depth / cushion as the
+     * Trips safety), and LB2, with nobody to cover, drops into his hook zone or blitzes. His blitz
+     * chance is the usual one (`lb2BlitzChance`) x this, and with no TE to pick him up he is free after
+     * this long (the RB / centre get a piece of him first).
+     */
+    spreadBlitzScale: 0.6,
+    spreadBlitzFreeTime: 0.6,
+    /**
+     * SPREAD on a run: the bottom slot receiver blocks his corner (who starts right next to the Toss lane)
+     * for this long after the handoff: pushed back, can't tackle (like a held rusher). Without it the Toss
+     * from SPREAD averaged ~1.0 yd vs 2.3 from NORMAL; with it ~1.7 (longer blocks change nothing: then LB2,
+     * with no TE to block him, makes the tackle).
+     */
+    spreadSlotBlockTime: 0.8,
   },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {

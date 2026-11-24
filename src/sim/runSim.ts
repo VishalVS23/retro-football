@@ -3,7 +3,7 @@
  * Used by the balance tests now, and a starting point for the league sim (stage 4).
  */
 import type { Feel } from '../config/feel';
-import { formation, type FormationId } from './formation';
+import { formation, playFor, SPREAD_SLOT, type FormationId } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage, stepZoneSafety } from './defense';
 import type { Vec } from './throw';
@@ -11,7 +11,7 @@ import { ZONE_SHELL, isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { coverParams, lookAlignment, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, safetyParamsFor, safetyRunRead, zoneParams, type Look, type ShellId, stepBlitzer, type DefCallId } from './defCalls';
+import { coverParams, lookAlignment, spreadCheckOn, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, safetyParamsFor, safetyRunRead, zoneParams, type Look, type ShellId, stepBlitzer, type DefCallId } from './defCalls';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
@@ -62,6 +62,7 @@ export function simulateRun(
 ): { yards: number; by: number; broken: number } {
   const rng = createRng(seed);
   const f = formation(losX, formationId);
+  p = playFor(p, formationId); // SPREAD: the split-out TE runs a Go to take his man away
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, p.routes[i].stop));
   const d = feel.defense;
@@ -72,6 +73,9 @@ export function simulateRun(
   if (isZoneCall(call)) shell = ZONE_SHELL[call];
   // F-b, the Trips check: the empty-side corner stays home in a flat zone, S2 comes down on the inside slot, S1 single high.
   const tripsJob = tripsCheckOn(formationId, call, null) && !shown ? tripsCornerJob(feel, losX, f.sides) : null;
+  // F-c2, the Spread check: S2 comes down on the split-out TE, LB2 holds his spot in the box.
+  const spreadChk = spreadCheckOn(formationId, call, null) && !shown;
+  const s2Man = tripsJob ? 2 : spreadChk ? TE : null;
   const zoneP = (i: number) => {
     const base = zoneParams(coveredByLinebacker(i) ? lbCover : cbCover);
     return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };
@@ -80,16 +84,15 @@ export function simulateRun(
   const align = lookAlignment(shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
   const rotation = shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
-  if (tripsJob) {
-    align.cover[2] = { ...tripsJob.spot };
-    align.safeties[1] = tripsSafetyStart(f.skill[2].pos, losX, feel);
-  }
+  if (tripsJob) align.cover[2] = { ...tripsJob.spot };
+  if (s2Man !== null) align.safeties[1] = tripsSafetyStart(f.skill[s2Man].pos, losX, feel);
   let safeties = [...align.safeties];
   const sp = ([0, 1] as const).map((k) => safetyParamsFor(feel, losX, shell, k, 0));
   let cover = f.skill.map((s, i) => startCoverage(align.cover[i], s.pos));
   const rg = feel.runGame;
   const holeY = pathYAt(paths[RB], losX);
-  const teHelp = { rusher: TE_SIDE_RUSHER, time: teHelpFor(players.te, players.rush?.[TE_SIDE_RUSHER], true, rg.teHelpTime, feel.ratings) };
+  // The TE helps on the edge, unless he's split out wide (SPREAD).
+  const teHelp = formationId === 'spread' ? undefined : { rusher: TE_SIDE_RUSHER, time: teHelpFor(players.te, players.rush?.[TE_SIDE_RUSHER], true, rg.teHelpTime, feel.ratings) };
   const sheds = lineShedTimes(players.line, players.rush, true, rg, () => rng.next(), feel.ratings, pointOfAttack(f.rush.map((r) => r.y), holeY), teHelp);
   let rushers = f.rush.map((pos, i) => ({ pos: { ...pos }, shedAt: sheds.shedAt[i] }));
   let t = 0;
@@ -104,12 +107,14 @@ export function simulateRun(
           ? stepCoverage(c, zoneTarget(tripsJob, live(), feel), dt, zoneParams(cbCover))
           : jobs
           ? stepCoverage(c, rot(i, t, zoneTarget(jobs[i], live(), feel)), dt, zoneP(i))
-          : stepCoverage(c, rot(i, t, runners[i].pos), dt, coveredByLinebacker(i) ? lbCover : cbCover),
+          : spreadChk && i === TE
+            ? stepCoverage(c, align.cover[TE], dt, zoneParams(lbCover)) // Spread check on a run: LB2 has no man, he holds his spot in the box
+            : stepCoverage(c, rot(i, t, runners[i].pos), dt, coveredByLinebacker(i) ? lbCover : cbCover),
     );
     // Safeties: zone ones head for their spots; man ones wait (pass first). A disguise's safeties rotate to the real look's spots.
     safeties = safeties.map((v, k) =>
-      tripsJob && k === 1
-        ? stepZoneSafety(v, tripsSafetyTarget(runners[2].pos, feel), dt, sp[k])
+      s2Man !== null && k === 1
+        ? stepZoneSafety(v, tripsSafetyTarget(runners[s2Man].pos, feel), dt, sp[k])
         : jobs ? stepZoneSafety(v, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, sp[k]) : rotation ? stepZoneSafety(v, rot(5 + k, t, rotation.real.safeties[k]), dt, sp[k]) : v,
     );
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
@@ -127,6 +132,8 @@ export function simulateRun(
           stunned: 0,
           // A blitzer is already coming: no read.
           wait: (i === RB ? (blitz ? 0 : rg.lbReadTime) : i === TE ? rg.lbReadTime : rg.cbReadTime) + (jobs && jobs[i].kind === 'under' ? feel.zone.underRunReadTime : 0),
+          // SPREAD: the bottom slot blocks his corner.
+          held: formationId === 'spread' && i === SPREAD_SLOT ? feel.formations.spreadSlotBlockTime : 0,
         },
         R,
       ),
