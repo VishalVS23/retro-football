@@ -17,7 +17,8 @@ export interface BoxTeamInfo {
 
 export interface BoxScoreOptions {
   box: BoxScore;
-  week: number;
+  /** null = an exhibition game (no week). */
+  week: number | null;
   ot: number;
   /** [home, away]. */
   teams: [BoxTeamInfo, BoxTeamInfo];
@@ -53,7 +54,7 @@ function table(title: string, head: string[], rows: string[][]): string {
 
 function playerTables(t: TeamBox, o: BoxScoreOptions): string {
   const rows: Row[] = Object.entries(t.lines).map(([id, l]) => [Number(id), l]);
-  if (!rows.length) return '<div class="bx-note">NO PLAYER STATS FOR THIS GAME (GAMES YOU PLAY GET THEM IN THE NEXT UPDATE).</div>';
+  if (!rows.length) return '<div class="bx-note">NO PLAYER STATS FOR THIS GAME (PLAYED BEFORE STATS WERE KEPT).</div>';
   const who = (id: number) => {
     const p = o.player(id);
     return `<span class="bx-pos">${esc(p.pos)}</span>${esc(p.name)}`;
@@ -113,7 +114,7 @@ export function openBoxScore(o: BoxScoreOptions) {
     <div class="bx-wrap" role="dialog" aria-label="Box score">
       <div class="bx-top">
         <button type="button" class="bx-back" data-act="close">&lt; BACK</button>
-        <div class="bx-title">WEEK ${o.week} · FINAL${o.ot ? ` / ${o.ot > 1 ? `${o.ot}OT` : 'OT'}` : ''}</div>
+        <div class="bx-title">${o.week !== null ? `WEEK ${o.week} · ` : ''}FINAL${o.ot ? ` / ${o.ot > 1 ? `${o.ot}OT` : 'OT'}` : ''}</div>
       </div>
       <div class="bx-body">
         <div class="bx-score">${teamLogoHtml(ai.abbr, ai.color, 28)}<span>${esc(ai.abbr)} ${as} @ ${hs} ${esc(hi.abbr)}</span>${teamLogoHtml(hi.abbr, hi.color, 28)}</div>

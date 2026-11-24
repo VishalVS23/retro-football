@@ -22,6 +22,8 @@ export interface EndGameOptions {
   buttonLabel?: string;
   /** 4a: shown before FINAL, e.g. WEEK 3. */
   header?: string;
+  /** 4b-2: BOX SCORE button (every player's line); missing = no button. */
+  onBoxScore?: () => void;
 }
 
 let root: HTMLDivElement | null = null;
@@ -83,12 +85,16 @@ export function openEndGame(o: EndGameOptions) {
       </div>
       <div class="eg-right">
         ${team}
-        <button class="eg-btn" type="button">${o.buttonLabel ?? 'PLAY AGAIN'} &gt;</button>
+        <div class="eg-btns">
+          ${o.onBoxScore ? '<button class="eg-btn eg-box" type="button">BOX SCORE</button>' : ''}
+          <button class="eg-btn eg-go" type="button">${o.buttonLabel ?? 'PLAY AGAIN'} &gt;</button>
+        </div>
       </div>
     </div>`;
   // Taps on the panel never reach the field underneath.
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
-  el.querySelector('button')!.addEventListener('click', () => o.onPlayAgain());
+  el.querySelector('.eg-go')!.addEventListener('click', () => o.onPlayAgain());
+  el.querySelector('.eg-box')?.addEventListener('click', () => o.onBoxScore?.());
   document.body.appendChild(el);
   root = el;
   againFn = o.onPlayAgain;

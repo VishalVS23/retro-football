@@ -5,7 +5,7 @@
 import { addDrive, newSideStats, type SideStats } from '../sim/gameStats';
 import type { SimGameResult } from '../sim/simGame';
 import type { Rng } from '../sim/rng';
-import { addLine, creditSnaps, sanitizeLines, type Lines, type StatUnit } from './playerStats';
+import { addLine, creditSnaps, regroupLines, sanitizeLines, type Lines, type StatUnit } from './playerStats';
 
 export interface TeamBox {
   teamId: number;
@@ -42,24 +42,54 @@ export function boxFromSim(gameId: number, result: SimGameResult, teamIds: [numb
     while (me.byPeriod.length <= i) me.byPeriod.push(0);
     while (teams[other].byPeriod.length <= i) teams[other].byPeriod.push(0);
     me.byPeriod[i] += e.points;
-    if (e.drive) {
-      me.stats = addDrive(me.stats, e.drive);
-      creditSnaps(me.lines, e.drive.snaps, units[e.side], units[other], rng);
-    } else if (e.try?.kind === 'extraPoint') {
-      // A try on its own (after a touchdown scored before the sim took over).
-      creditSnaps(me.lines, [{ k: 'try', kind: 'extraPoint', good: e.try.good }], units[e.side], units[other], rng);
-    }
+    if (e.drive) me.stats = addDrive(me.stats, e.drive);
   }
+  creditLog([teams[0].lines, teams[1].lines], result.log, units, rng);
   return { gameId, teams };
+}
+
+/**
+ * Player credit for a sim log (whole games, and the simmed parts of a game the user plays: CPU
+ * drives, SIM): side 0's lines first. Mutates `lines`.
+ */
+export function creditLog(lines: [Lines, Lines], log: SimGameResult['log'], units: [StatUnit, StatUnit], rng: Rng) {
+  for (const e of log) {
+    const other = (1 - e.side) as 0 | 1;
+    if (e.drive) creditSnaps(lines[e.side], lines[other], e.drive.snaps, units[e.side], units[other], rng);
+    else if (e.try?.kind === 'extraPoint')
+      // A try on its own (after a touchdown scored before the sim took over).
+      creditSnaps(lines[e.side], lines[other], [{ k: 'try', kind: 'extraPoint', good: e.try.good }], units[e.side], units[other], rng);
+  }
+}
+
+/**
+ * 4b-1 saves filed defenders under the team with the ball: puts every player back in his own team's
+ * box. `teamOf(id)` = the player's team id (undefined = unknown: left where he is).
+ */
+export function regroupBoxes(boxes: BoxScores, teamOf: (id: number) => number | undefined): BoxScores {
+  const out: BoxScores = {};
+  for (const [key, b] of Object.entries(boxes)) {
+    const [h, a] = b.teams;
+    const inH = new Set(Object.keys(h.lines).map(Number));
+    const isHome = (id: number) => {
+      const t = teamOf(id);
+      return t === undefined ? inH.has(id) : t === h.teamId;
+    };
+    const [hl, al] = regroupLines(h.lines, a.lines, isHome);
+    out[Number(key)] = { ...b, teams: [{ ...h, lines: hl }, { ...a, lines: al }] };
+  }
+  return out;
 }
 
 /** Everything the stats keep (4b): this season's box scores, and every past season's totals per player. */
 export interface StatsStore {
   boxes: BoxScores;
   history: { year: number; lines: Lines }[];
+  /** 4b-2: the box scores have every player in his own team's lines (missing = a 4b-1 save: regroup once). */
+  grouped?: true;
 }
 
-export const emptyStats = (): StatsStore => ({ boxes: {}, history: [] });
+export const emptyStats = (): StatsStore => ({ boxes: {}, history: [], grouped: true });
 
 /** Each player's totals for the season so far (from the box scores). */
 export function seasonTotals(boxes: BoxScores): Lines {
@@ -70,7 +100,7 @@ export function seasonTotals(boxes: BoxScores): Lines {
 
 /** A finished season: its totals go into the history, its box scores are dropped (keeps the save small). */
 export function closeSeasonStats(s: StatsStore, year: number): StatsStore {
-  return { boxes: {}, history: [...s.history.filter((h) => h.year !== year), { year, lines: seasonTotals(s.boxes) }] };
+  return { boxes: {}, history: [...s.history.filter((h) => h.year !== year), { year, lines: seasonTotals(s.boxes) }], grouped: true };
 }
 
 export function sanitizeStats(raw: unknown): StatsStore {
@@ -84,7 +114,7 @@ export function sanitizeStats(raw: unknown): StatsStore {
       const year = h && (h as { year: unknown }).year;
       if (lines && typeof year === 'number' && Number.isInteger(year) && year >= 1) history.push({ year, lines });
     }
-  return { boxes, history };
+  return r.grouped === true ? { boxes, history, grouped: true } : { boxes, history };
 }
 
 export function sanitizeBoxScores(raw: unknown): BoxScores | null {

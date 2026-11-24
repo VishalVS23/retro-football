@@ -11,6 +11,7 @@ import type { GameState } from '../sim/drive';
 import type { GameStats, QbLine, SideStats } from '../sim/gameStats';
 import { sanitizeScouting, type Scouting } from '../sim/scouting';
 import { FORMATION_IDS, type FormationId } from '../sim/formation';
+import { sanitizeLines, type Lines } from '../league/playerStats';
 
 export interface SavedGame {
   match: GameState;
@@ -26,6 +27,8 @@ export interface SavedGame {
   formation?: FormationId;
   /** 4a: the season game this is (its id in the season's schedule). Missing = an exhibition game. */
   seasonGameId?: number;
+  /** 4b-2: each player's line so far (ours, theirs). Missing in older saves = start from nothing. */
+  lines?: { us: Lines; them: Lines };
 }
 
 /** Nothing has happened yet (no snaps, no points, full first quarter): not worth a CONTINUE. */
@@ -116,6 +119,11 @@ export function sanitizeSavedGame(raw: unknown, playCount = Infinity): SavedGame
   if (isInt(raw.opponentId, 0)) game.opponentId = raw.opponentId;
   if (isInt(raw.seasonGameId, 0)) game.seasonGameId = raw.seasonGameId;
   if (raw.scouting !== undefined) game.scouting = sanitizeScouting(raw.scouting);
+  if (isObj(raw.lines)) {
+    const us = sanitizeLines(raw.lines.us);
+    const them = sanitizeLines(raw.lines.them);
+    if (us && them) game.lines = { us, them };
+  }
   if (typeof raw.formation === 'string' && (FORMATION_IDS as readonly string[]).includes(raw.formation)) game.formation = raw.formation as FormationId;
   return snapshotGame(game);
 }

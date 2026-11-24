@@ -81,6 +81,15 @@ describe('game in progress', () => {
     }
   });
 
+  it("keeps each player's line so far (4b-2); an older save has none; a damaged one is dropped", () => {
+    const g = { ...midGame(), lines: { us: { 12: { pa: 10, pc: 7, py: 88 } }, them: { 40: { tk: 3, sck: 1 } } } };
+    expect(sanitizeSavedGame(JSON.parse(JSON.stringify(g)))?.lines).toEqual(g.lines);
+    expect(sanitizeSavedGame(midGame())?.lines).toBeUndefined();
+    const bad = sanitizeSavedGame({ ...midGame(), lines: { us: { 12: { pa: 'ten' } }, them: {} } });
+    expect(bad).not.toBeNull();
+    expect(bad?.lines).toBeUndefined();
+  });
+
   it('falls back to the first play if the playbook got smaller', () => {
     expect(sanitizeSavedGame(midGame(), 2)?.playIndex).toBe(0);
     expect(sanitizeSavedGame(midGame(), 6)?.playIndex).toBe(3);

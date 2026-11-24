@@ -31,8 +31,8 @@ describe('save format', () => {
     expect(up.version).toBe(SAVE_VERSION);
     expect(up.season).toBeNull();
     // 4b: version 5 adds the stats store (empty for older saves).
-    expect(up.stats).toEqual({ boxes: {}, history: [] });
-    expect(migrate({ ...createNewSave(9, fixedDate), stats: 'junk' }).stats).toEqual({ boxes: {}, history: [] });
+    expect(up.stats).toEqual({ boxes: {}, history: [], grouped: true });
+    expect(migrate({ ...createNewSave(9, fixedDate), stats: 'junk' }).stats).toEqual({ boxes: {}, history: [], grouped: true });
     const season = newSeason(TEAM_DEFS, 1, 123);
     expect(migrate({ ...createNewSave(9, fixedDate), season }).season).toEqual(season);
     expect(migrate({ ...createNewSave(9, fixedDate), season: { ...season, games: [] } }).season).toBeNull();

@@ -4,7 +4,8 @@ import { generateLeague } from './league';
 import { advanceWeek, isOver, newSeason } from './season';
 import { addBoxes, applyResults, weekJobs } from './seasonRun';
 import { simGames } from './weekSim';
-import { addLine, sanitizeLines, type Lines } from './playerStats';
+import { addLine, creditLive, regroupLines, sanitizeLines, type Lines } from './playerStats';
+import type { Player } from '../players/player';
 import { sanitizeBoxScores, type BoxScores } from './boxScore';
 
 describe('player stats in simmed games (4b)', () => {
@@ -81,4 +82,57 @@ describe('player stats in simmed games (4b)', () => {
     expect(sanitizeBoxScores({ 3: { gameId: 4 } })).toBeNull();
     expect(sanitizeLines({ 5: { py: 'lots' } })).toBeNull();
   }, 60000);
+
+  it("every player is in his own team's box (tackles, sacks and picks go to the defending team)", () => {
+    withBoxes();
+    const teamOf = new Map<number, number>();
+    for (const t of league.teams) for (const id of [...t.roster, ...t.practice]) teamOf.set(id, t.id);
+    for (const b of Object.values(boxes)) for (const t of b.teams) for (const id of Object.keys(t.lines)) expect(teamOf.get(Number(id))).toBe(t.teamId);
+  }, 60000);
+});
+
+describe('player stats in games the user plays (4b-2)', () => {
+  const pl = (id: number) => ({ id }) as Player;
+  const [qb, wr, rb, cb, lb, dl, k, p] = [1, 2, 3, 10, 11, 12, 4, 5].map(pl);
+
+  it('a catch: QB and receiver get the yards, the tackler a tackle; a fumble = a forced fumble, lost only if they fell on it', () => {
+    const off: Lines = {};
+    const def: Lines = {};
+    creditLive(off, def, { k: 'catch', qb, to: wr, yards: 14, td: false, tackler: cb });
+    creditLive(off, def, { k: 'catch', qb, to: wr, yards: 6, td: false, tackler: cb, fumble: 'kept' });
+    creditLive(off, def, { k: 'catch', qb, to: wr, yards: 30, td: true });
+    expect(off[1]).toEqual({ pa: 3, pc: 3, py: 50, ptd: 1 });
+    expect(off[2]).toEqual({ tg: 3, rec: 3, rcy: 50, rcl: 30, rctd: 1 });
+    expect(def[10]).toEqual({ tk: 2, ff: 1 });
+    creditLive(off, def, { k: 'run', carrier: rb, yards: -2, td: false, tackler: dl, fumble: 'lost' });
+    expect(off[3]).toEqual({ ra: 1, ry: -2, rl: -2, fl: 1 });
+    expect(def[12]).toEqual({ tk: 1, ff: 1 });
+  });
+
+  it('incompletions, picks, sacks, kicks and punts; fillers and missing players get nothing', () => {
+    const off: Lines = {};
+    const def: Lines = {};
+    creditLive(off, def, { k: 'inc', qb, to: wr, defended: cb });
+    creditLive(off, def, { k: 'inc', qb, to: wr });
+    creditLive(off, def, { k: 'int', qb, to: wr, by: cb });
+    creditLive(off, def, { k: 'sack', qb, by: lb });
+    creditLive(off, def, { k: 'fg', kicker: k, yards: 44, good: true });
+    creditLive(off, def, { k: 'fg', kicker: k, yards: 51, good: false });
+    creditLive(off, def, { k: 'xp', kicker: k, good: true });
+    creditLive(off, def, { k: 'punt', punter: p, net: 38 });
+    creditLive(off, def, { k: 'run', carrier: pl(-1), yards: 5, td: false, tackler: null });
+    expect(off[1]).toEqual({ pa: 3, pint: 1, sk: 1 });
+    expect(off[2]).toEqual({ tg: 3 });
+    expect(def[10]).toEqual({ pd: 2, dint: 1 });
+    expect(def[11]).toEqual({ sck: 1, tk: 1 });
+    expect(off[4]).toEqual({ fga: 2, fgm: 1, fgl: 44, xpa: 1, xpm: 1 });
+    expect(off[5]).toEqual({ pu: 1, puy: 38 });
+    expect(off[-1]).toBeUndefined();
+  });
+
+  it("regroups lines from a 4b-1 box score into each player's own team", () => {
+    const [a, b] = regroupLines({ 1: { pa: 5 }, 20: { tk: 3 } }, { 2: { rec: 2 }, 10: { tk: 1 } }, (id) => id < 10);
+    expect(a).toEqual({ 1: { pa: 5 }, 2: { rec: 2 } });
+    expect(b).toEqual({ 20: { tk: 3 }, 10: { tk: 1 } });
+  });
 });

@@ -132,24 +132,27 @@ function catchTackler(def: DefenseLineup, to: number, yards: number, rng: Rng): 
   return tackler(def, { cover, safety: [s, s], dl: c.dl }, rng);
 }
 
-/** Credits one simulated drive's snaps: `u` = the team with the ball, `d` = the defense. Mutates `lines`. */
-export function creditSnaps(lines: Lines, snaps: readonly Snap[], u: StatUnit, d: StatUnit, rng: Rng) {
+/**
+ * Credits one simulated drive's snaps: `u` = the team with the ball (its lines in `off`), `d` = the
+ * defense (its lines in `def`: tackles, sacks, picks go to the defending team's box). Mutates both.
+ */
+export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: StatUnit, d: StatUnit, rng: Rng) {
   const qb = u.off.qb;
   const c = CREDIT;
   for (const s of snaps) {
     switch (s.k) {
       case 'run': {
         const carrier = rng.next() < c.qbRunShare ? qb : u.off.skill[3];
-        add(lines, carrier, 'ra');
-        add(lines, carrier, 'ry', s.yards);
-        best(lines, carrier, 'rl', s.yards);
-        if (s.td) add(lines, carrier, 'rtd');
+        add(off, carrier, 'ra');
+        add(off, carrier, 'ry', s.yards);
+        best(off, carrier, 'rl', s.yards);
+        if (s.td) add(off, carrier, 'rtd');
         else {
           const tk = runTackler(d.def, s.yards, rng);
-          add(lines, tk, 'tk');
+          add(def, tk, 'tk');
           if (s.fumble) {
-            add(lines, tk, 'ff');
-            add(lines, carrier, 'fl');
+            add(def, tk, 'ff');
+            add(off, carrier, 'fl');
           }
         }
         break;
@@ -157,75 +160,174 @@ export function creditSnaps(lines: Lines, snaps: readonly Snap[], u: StatUnit, d
       case 'pass': {
         const to = target(u, s.yards, rng);
         const rec = u.off.skill[to];
-        add(lines, qb, 'pa');
-        add(lines, qb, 'pc');
-        add(lines, qb, 'py', s.yards);
-        add(lines, rec, 'tg');
-        add(lines, rec, 'rec');
-        add(lines, rec, 'rcy', s.yards);
-        best(lines, rec, 'rcl', s.yards);
+        add(off, qb, 'pa');
+        add(off, qb, 'pc');
+        add(off, qb, 'py', s.yards);
+        add(off, rec, 'tg');
+        add(off, rec, 'rec');
+        add(off, rec, 'rcy', s.yards);
+        best(off, rec, 'rcl', s.yards);
         if (s.td) {
-          add(lines, qb, 'ptd');
-          add(lines, rec, 'rctd');
+          add(off, qb, 'ptd');
+          add(off, rec, 'rctd');
         } else {
           const tk = catchTackler(d.def, to, s.yards, rng);
-          add(lines, tk, 'tk');
+          add(def, tk, 'tk');
           if (s.fumble) {
-            add(lines, tk, 'ff');
-            add(lines, rec, 'fl');
+            add(def, tk, 'ff');
+            add(off, rec, 'fl');
           }
         }
         break;
       }
       case 'inc': {
         const to = target(u, null, rng);
-        add(lines, qb, 'pa');
-        add(lines, u.off.skill[to], 'tg');
-        if (rng.next() < c.defendedShare) add(lines, rng.next() < 0.7 ? d.def.cover[to] : rng.next() < 0.5 ? d.def.safety : d.def.safety2, 'pd');
+        add(off, qb, 'pa');
+        add(off, u.off.skill[to], 'tg');
+        if (rng.next() < c.defendedShare) add(def, rng.next() < 0.7 ? d.def.cover[to] : rng.next() < 0.5 ? d.def.safety : d.def.safety2, 'pd');
         break;
       }
       case 'int': {
         const to = target(u, null, rng);
-        add(lines, qb, 'pa');
-        add(lines, qb, 'pint');
-        add(lines, u.off.skill[to], 'tg');
+        add(off, qb, 'pa');
+        add(off, qb, 'pint');
+        add(off, u.off.skill[to], 'tg');
         const people = [...d.def.cover.slice(0, 3), d.def.cover[to], d.def.safety, d.def.safety2];
         const w = [...d.def.cover.slice(0, 3).map(() => c.pick.cb), c.pick.own, c.pick.safety, c.pick.safety];
         const who = pick(people, w.map((x, i) => x * lean(people[i], ['ballSkills'], c.ballSkillsDoublingPoints)), rng);
-        add(lines, who, 'dint');
-        add(lines, who, 'pd');
+        add(def, who, 'dint');
+        add(def, who, 'pd');
         break;
       }
       case 'sack': {
-        add(lines, qb, 'sk');
+        add(off, qb, 'sk');
         const people = [...d.def.rush, d.def.cover[3], d.def.cover[4]];
         const w = [...d.def.rush.map((p) => lean(p, ['passRush'], c.sackDoublingPoints)), c.sackLbWeight, c.sackLbWeight];
         const who = pick(people, w, rng);
-        add(lines, who, 'sck');
-        add(lines, who, 'tk');
+        add(def, who, 'sck');
+        add(def, who, 'tk');
         break;
       }
       case 'fg':
-        add(lines, u.kick.k, 'fga');
+        add(off, u.kick.k, 'fga');
         if (s.good) {
-          add(lines, u.kick.k, 'fgm');
-          best(lines, u.kick.k, 'fgl', s.yards);
+          add(off, u.kick.k, 'fgm');
+          best(off, u.kick.k, 'fgl', s.yards);
         }
         break;
       case 'try':
         if (s.kind === 'extraPoint') {
-          add(lines, u.kick.k, 'xpa');
-          if (s.good) add(lines, u.kick.k, 'xpm');
+          add(off, u.kick.k, 'xpa');
+          if (s.good) add(off, u.kick.k, 'xpm');
         }
         break;
       case 'punt':
-        add(lines, u.kick.p, 'pu');
-        add(lines, u.kick.p, 'puy', s.yards);
+        add(off, u.kick.p, 'pu');
+        add(off, u.kick.p, 'puy', s.yards);
         break;
       case 'kneel':
         break;
     }
   }
+}
+
+/**
+ * One snap of a game the user PLAYED (4b-2): the scene knows exactly who did what, so no dice.
+ * Players may be missing (no league yet, or a filler): they just get nothing.
+ * `fumble`: the tackler knocked it loose ('kept' = we fell on it, 'lost' = they did).
+ */
+type P = Player | null | undefined;
+export type LivePlay =
+  | { k: 'catch'; qb: P; to: P; yards: number; td: boolean; tackler?: P; fumble?: 'kept' | 'lost' }
+  | { k: 'run'; carrier: P; yards: number; td: boolean; tackler?: P; fumble?: 'kept' | 'lost' }
+  | { k: 'inc'; qb: P; to: P; defended?: P }
+  | { k: 'int'; qb: P; to: P; by: P }
+  | { k: 'sack'; qb: P; by?: P; fumble?: 'kept' | 'lost' }
+  | { k: 'fg'; kicker: P; yards: number; good: boolean }
+  | { k: 'xp'; kicker: P; good: boolean }
+  | { k: 'punt'; punter: P; net: number };
+
+/** Credits one live snap: `off` = the team with the ball's lines, `def` = the defense's. Mutates both. */
+export function creditLive(off: Lines, def: Lines, p: LivePlay) {
+  const loose = (tackler: P, carrier: P, fumble?: 'kept' | 'lost') => {
+    if (!fumble) return;
+    add(def, tackler, 'ff');
+    if (fumble === 'lost') add(off, carrier, 'fl');
+  };
+  switch (p.k) {
+    case 'catch':
+      add(off, p.qb, 'pa');
+      add(off, p.qb, 'pc');
+      add(off, p.qb, 'py', p.yards);
+      add(off, p.to, 'tg');
+      add(off, p.to, 'rec');
+      add(off, p.to, 'rcy', p.yards);
+      best(off, p.to, 'rcl', p.yards);
+      if (p.td) {
+        add(off, p.qb, 'ptd');
+        add(off, p.to, 'rctd');
+      }
+      add(def, p.tackler, 'tk');
+      loose(p.tackler, p.to, p.fumble);
+      break;
+    case 'run':
+      add(off, p.carrier, 'ra');
+      add(off, p.carrier, 'ry', p.yards);
+      best(off, p.carrier, 'rl', p.yards);
+      if (p.td) add(off, p.carrier, 'rtd');
+      add(def, p.tackler, 'tk');
+      loose(p.tackler, p.carrier, p.fumble);
+      break;
+    case 'inc':
+      add(off, p.qb, 'pa');
+      add(off, p.to, 'tg');
+      add(def, p.defended, 'pd');
+      break;
+    case 'int':
+      add(off, p.qb, 'pa');
+      add(off, p.qb, 'pint');
+      add(off, p.to, 'tg');
+      add(def, p.by, 'dint');
+      add(def, p.by, 'pd');
+      break;
+    case 'sack':
+      add(off, p.qb, 'sk');
+      add(def, p.by, 'sck');
+      add(def, p.by, 'tk');
+      loose(p.by, p.qb, p.fumble);
+      break;
+    case 'fg':
+      add(off, p.kicker, 'fga');
+      if (p.good) {
+        add(off, p.kicker, 'fgm');
+        best(off, p.kicker, 'fgl', p.yards);
+      }
+      break;
+    case 'xp':
+      add(off, p.kicker, 'xpa');
+      if (p.good) add(off, p.kicker, 'xpm');
+      break;
+    case 'punt':
+      add(off, p.punter, 'pu');
+      add(off, p.punter, 'puy', p.net);
+      break;
+  }
+}
+
+/**
+ * Re-sorts two teams' lines so every player is in his own team's (4b-1 saved defenders under the
+ * team with the ball). `isA(id)` = he plays for the first team.
+ */
+export function regroupLines(a: Lines, b: Lines, isA: (id: number) => boolean): [Lines, Lines] {
+  const outA: Lines = {};
+  const outB: Lines = {};
+  for (const src of [a, b])
+    for (const [key, l] of Object.entries(src)) {
+      const id = Number(key);
+      const into = isA(id) ? outA : outB;
+      into[id] = addLine(into[id] ?? {}, l);
+    }
+  return [outA, outB];
 }
 
 /** Adds one line into another (season totals). */

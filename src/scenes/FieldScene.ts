@@ -173,8 +173,10 @@ import {
 } from '../sim/clock';
 import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
 import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame, type Season } from '../league/season';
-import { addBoxes, applyResults, weekJobs } from '../league/seasonRun';
-import { closeSeasonStats, emptyStats, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
+import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
+import { creditLive, creditSnaps, type LivePlay, type Lines, type StatUnit } from '../league/playerStats';
+import { createRng } from '../sim/rng';
+import { CREDIT_SALT, closeSeasonStats, creditLog, emptyStats, regroupBoxes, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
 import { closeBoxScore, openBoxScore } from '../ui/boxScoreScreen';
 import { runWeekSims } from '../league/weekSim';
 import { closeSeasonScreen, openSeasonScreen } from '../ui/seasonScreen';
@@ -307,6 +309,8 @@ export class FieldScene extends Phaser.Scene {
   private match: GameState = newGame();
   /** Box score for the end-of-game screen. */
   private stats = newGameStats();
+  /** 4b-2: every player's line this game (ours, theirs): live snaps, CPU drives and SIM portions. */
+  private lines: { us: Lines; them: Lines } = { us: {}, them: {} };
   /** Their coach's scouting memory of this game (A-a: in-game adjustments). */
   private scouting: Scouting = newScouting();
   /** Our QB's read this snap (vision + decisions): sees through a disguise, spots an adjustment. */
@@ -1039,7 +1043,10 @@ export class FieldScene extends Phaser.Scene {
       this.floatText(catcher.x, catcher.y - 2, 'OUT OF BOUNDS', '#f4efe1');
     }
 
+    const qb = this.ourLineup?.qb;
+    const target = this.ourLineup?.skill[pass.receiver];
     if (result === 'interception') {
+      this.credit({ k: 'int', qb, to: target, by: this.theirDefender(pass.defender) });
       this.statPlay({ kind: 'pass', result: 'interception' });
       this.ball.setVisible(false);
       this.shadow.setVisible(false);
@@ -1070,6 +1077,7 @@ export class FieldScene extends Phaser.Scene {
       this.skidBall(th.to, { x: th.to.x - th.from.x, y: th.to.y - th.from.y });
       this.showBanner('INCOMPLETE');
     }
+    this.credit({ k: 'inc', qb, to: target, defended: result === 'breakup' || result === 'droppedInt' ? this.theirDefender(pass.defender) : null });
     this.statPlay({ kind: 'pass', result: 'incomplete' });
     this.recordPlay({ kind: 'incomplete' });
     this.scheduleReset();
@@ -1380,6 +1388,8 @@ export class FieldScene extends Phaser.Scene {
     this.kickMeter?.classList.remove('show');
     const losX = this.match.ballX;
     const r = play.returner;
+    // Net punt yards (4b-2): to where their ball ends up; a return TD nets back to our goal line.
+    this.credit({ k: 'punt', punter: this.ourKickers?.p, net: Math.round((end.kind === 'returnTD' ? OWN_GOAL_LINE_X : end.spotX) - losX) });
     const textX = Math.min(Math.max(play.ball.x, 6), TOTAL_LENGTH - 6);
     let result: { state: GameState; event: DriveEvent };
     if (end.kind === 'returnTD') {
@@ -1467,6 +1477,8 @@ export class FieldScene extends Phaser.Scene {
     this.tweens.add({ targets: [this.ball, this.shadow], alpha: 0, duration: feel.pacing.bannerTime * 1000 });
     this.showBanner(text);
     this.floatText(Math.min(f.to.x, TOTAL_LENGTH - 6), FIELD_WIDTH / 2 - 6, `${this.kickDistance} YD`, good ? '#ffd166' : '#ff8a8a');
+    const kicker = this.ourKickers?.k;
+    this.credit(this.kickKind === 'extraPoint' ? { k: 'xp', kicker, good } : { k: 'fg', kicker, yards: this.kickDistance, good });
     const { state, event } = applyKick(this.match, this.kickKind === 'extraPoint' ? 'extraPoint' : 'fieldGoal', good);
     this.finishPlay(state, event, true);
     this.scheduleReset();
@@ -1873,6 +1885,17 @@ export class FieldScene extends Phaser.Scene {
     const c = this.chase.carrier.pos;
     const yards = Math.round((how === 'touchdown' ? GOAL_LINE_X : c.x) - this.match.ballX);
     const shake = (mult: number) => this.shakeScreen(mult);
+    // Player credit (4b-2): who carried it, who brought him down.
+    const tackledBy = how === 'tackled' && tackler ? this.theirDefender(this.chase.pursuers.indexOf(tackler)) : null;
+    const scrambleSack = this.qbRun && how === 'tackled' && c.x < this.match.ballX;
+    const onTry = this.match.tryPending;
+    const live = (fumble?: 'kept' | 'lost'): LivePlay =>
+      scrambleSack
+        ? { k: 'sack', qb: this.ourLineup?.qb, by: tackledBy, fumble }
+        : this.qbRun || this.calledPlay.run
+          ? { k: 'run', carrier: this.carrierPlayer(), yards, td: how === 'touchdown', tackler: tackledBy, fumble }
+          : { k: 'catch', qb: this.ourLineup?.qb, to: this.carrierPlayer(), yards, td: how === 'touchdown', tackler: tackledBy, fumble };
+    if (how !== 'tackled') this.credit(live(), onTry);
     // Box score: a catch is a completion; a scramble stopped behind the line is a sack.
     if (this.qbRun) this.statPlay(how === 'tackled' && c.x < this.match.ballX ? { kind: 'sack', yards } : { kind: 'run', yards });
     else if (this.calledPlay.run) this.statPlay({ kind: 'run', yards });
@@ -1890,10 +1913,11 @@ export class FieldScene extends Phaser.Scene {
       const ratio = securityRatio(this.carrierPlayer(), this.carrierRole(), feel.ratings) * (tackler?.fumbleRatio ?? 1);
       if (rollFumble({ tacklerSpeed: tackler?.speed, sack: sacked, ratio, bigHitter: tackler?.bigHitter }, feel.fumble, () => rng.next())) {
         this.floatText(c.x, c.y - 2, `${yards >= 0 ? '+' : ''}${yards} YDS`, yards < 0 ? '#ff8a8a' : '#ffd166');
-        this.ourFumble(c);
+        this.credit(live(this.ourFumble(c) ? 'kept' : 'lost'), onTry);
         this.scheduleReset();
         return;
       }
+      this.credit(live(), onTry);
       this.showBanner(sacked ? 'SACKED' : this.calledPlay.run && yards <= 0 ? 'STUFFED!' : 'TACKLED');
     } else if (how === 'down') {
       this.showBanner(this.qbRun ? 'SLIDE' : 'DOWN'); // went down on his own: in bounds, clock keeps running
@@ -1922,11 +1946,21 @@ export class FieldScene extends Phaser.Scene {
     this.shakeScreen();
     const loss = Math.round(this.qbPos.x - this.match.ballX);
     this.floatText(this.qbPos.x, this.qbPos.y - 2, `${loss} YDS`, '#ff8a8a');
+    // Who got there: the nearest rusher (the four linemen, then LB2 if he blitzed, then a blitzing LB1).
+    const threats = this.rushThreats();
+    let near = 0;
+    threats.forEach((r, i) => {
+      if (Math.hypot(r.pos.x - this.qbPos.x, r.pos.y - this.qbPos.y) < Math.hypot(threats[near].pos.x - this.qbPos.x, threats[near].pos.y - this.qbPos.y)) near = i;
+    });
+    const t = this.theirLineup;
+    const sacker = !t ? null : near < this.rushers.length ? t.rush[near] : this.lb2Rush && near === this.rushers.length ? t.cover[TE] : t.cover[RB];
+    const onTry = this.match.tryPending;
     this.statPlay({ kind: 'sack', yards: loss });
     const rng = getRngOrFallback();
     if (rollFumble({ sack: true, ratio: securityRatio(this.ourLineup?.qb, 'QB', feel.ratings) }, feel.fumble, () => rng.next())) {
-      this.ourFumble(this.qbPos);
+      this.credit({ k: 'sack', qb: this.ourLineup?.qb, by: sacker, fumble: this.ourFumble(this.qbPos) ? 'kept' : 'lost' }, onTry);
     } else {
+      this.credit({ k: 'sack', qb: this.ourLineup?.qb, by: sacker }, onTry);
       this.showBanner('SACKED');
       this.recordPlay({ kind: 'spot', x: this.qbPos.x });
     }
@@ -1964,7 +1998,7 @@ export class FieldScene extends Phaser.Scene {
    * We were tackled and the ball came out at `at`: whoever has more players around it is likelier to
    * fall on it. FUMBLE! stays the headline; the text under it says who has it.
    */
-  private ourFumble(at: { x: number; y: number }) {
+  private ourFumble(at: { x: number; y: number }): boolean {
     const rng = getRngOrFallback();
     const kept = rollRecovery(at, this.offenseSpots(), this.defenseSpots(), feel.fumble, () => rng.next());
     const { state, event } = applyFumble(this.match, at.x, kept);
@@ -1979,6 +2013,7 @@ export class FieldScene extends Phaser.Scene {
     };
     const text = (kept ? 'RECOVERED' : 'LOST') + ((event && after[event]) ?? '');
     this.floatText(at.x, Math.min(at.y + 6, FIELD_WIDTH - 2), text, kept && event !== 'safety' && event !== 'turnoverOnDowns' ? '#ffd166' : '#ff8a8a');
+    return kept;
   }
 
   /**
@@ -2083,6 +2118,8 @@ export class FieldScene extends Phaser.Scene {
       if (e.drive) stats = e.side === 0 ? recordOurSimDrive(stats, e.drive) : recordTheirDrive(stats, e.drive);
       stats = addPoints(stats, e.period, e.side === 0 ? e.points : 0, e.side === 1 ? e.points : 0);
     }
+    const units = this.statUnits();
+    if (units) creditLog([this.lines.us, this.lines.them], result.log, units, this.creditRng());
     this.stats = stats;
     this.match = { ...this.match, us: result.score[0], them: result.score[1], tryPending: false, oppStartX: null };
     this.nextClock = null;
@@ -2191,6 +2228,7 @@ export class FieldScene extends Phaser.Scene {
     this.setClock(r.clock, r.event);
     this.pendingBreak = r.event;
     const after = applyOppDrive(this.match, drive);
+    this.creditCpuDrive(drive);
     this.stats = addPoints(recordTheirDrive(this.stats, drive), r.clock.quarter, after.us - this.match.us, after.them - this.match.them);
     this.match = after;
     this.updateScoreboard();
@@ -2284,6 +2322,7 @@ export class FieldScene extends Phaser.Scene {
     const m = this.match;
     const sit = { quarter: 5, timeLeft: 1e6, quarterLength: feel.clock.quarterLength, us: m.us, them: m.them, overtime: true };
     const drive = simulateOppDrive(OWN_GOAL_LINE_X + 25, sit, feel.oppDrive, rng, this.cpuDriveMods());
+    this.creditCpuDrive(drive);
     this.stats = addPoints(recordTheirDrive(this.stats, drive), this.statPeriod(), 0, drive.points);
     this.match = { ...m, them: m.them + drive.points };
     this.updateScoreboard();
@@ -2324,8 +2363,10 @@ export class FieldScene extends Phaser.Scene {
     this.updateScoreboard();
     this.updateLabel();
     // 4a: a season game goes in the standings; CONTINUE sims the rest of the week. Exhibition: PLAY AGAIN.
+    const gameId = this.seasonGameId;
     const week = this.recordSeasonGame();
     openEndGame({
+      onBoxScore: this.league?.userTeamId !== null && this.league && this.opponentId !== null ? () => this.showFinalBox(gameId) : undefined,
       us: this.match.us,
       them: this.match.them,
       stats: this.stats,
@@ -2347,13 +2388,20 @@ export class FieldScene extends Phaser.Scene {
     this.league = league;
     this.saveSeed = save.seed;
     this.leagueStats = save.stats;
+    // 4b-1 saves filed defenders under the team with the ball: put everyone back in his own team's box (once).
+    const regroup = !this.leagueStats.grouped;
+    if (regroup) {
+      const teamOf = new Map<number, number>();
+      for (const t of league.teams) for (const id of [...t.roster, ...t.practice]) teamOf.set(id, t.id);
+      this.leagueStats = { ...this.leagueStats, boxes: regroupBoxes(this.leagueStats.boxes, (id) => teamOf.get(id)), grouped: true };
+    }
     const ready = () => {
       // 4a: the season (a new save, or one from before seasons existed, starts week 1 of season 1).
       this.season = save.season;
       if (!this.season) {
         this.season = newSeason(league.teams, 1, seasonSeed(save.seed, 1));
-        void setSeason(this.season);
-      }
+        void setSeason(this.season, this.leagueStats);
+      } else if (regroup) void setSeason(this.season, this.leagueStats);
       this.newOpponent();
       // The play calling screen opened before the league existed: redraw it so TEAM works.
       if (this.state === 'calling') this.openCall();
@@ -2387,6 +2435,7 @@ export class FieldScene extends Phaser.Scene {
     this.match = newGame();
     this.clock = newClock(feel.clock);
     this.stats = newGameStats();
+    this.lines = { us: {}, them: {} };
     this.scouting = newScouting();
     this.otOursDone = false;
     this.nextStep = null;
@@ -2686,11 +2735,8 @@ export class FieldScene extends Phaser.Scene {
     const theirs = this.match.them;
     this.season = recordResult(s, id, g.home === me ? [ours, theirs] : [theirs, ours], this.clock.ot ?? 0);
     this.seasonGameId = null;
-    // Our box score: the team stats and the score by quarter (player lines for games we play: 4b-2).
-    const opp = g.home === me ? g.away : g.home;
-    const us: TeamBox = { teamId: me, stats: { ...this.stats.us }, byPeriod: [...this.stats.byQuarter.us], lines: {} };
-    const them: TeamBox = { teamId: opp, stats: { ...this.stats.them }, byPeriod: [...this.stats.byQuarter.them], lines: {} };
-    const box: BoxScore = { gameId: id, teams: g.home === me ? [us, them] : [them, us] };
+    // Our box score: team stats, the score by quarter and every player's line (4b-2).
+    const box = this.gameBox(id, me, g.home === me ? g.away : g.home, g.home === me);
     this.leagueStats = { ...this.leagueStats, boxes: { ...this.leagueStats.boxes, [id]: box } };
     void setSeason(this.season, this.leagueStats);
     return g.week;
@@ -2698,26 +2744,81 @@ export class FieldScene extends Phaser.Scene {
 
   /** 4b: one game's box score, over the season screen. */
   private showBoxScore(gameId: number) {
-    const l = this.league;
-    const s = this.season;
     const box = this.leagueStats.boxes[gameId];
-    const g = s?.games[gameId];
-    if (!l || !box || !g) return;
+    const g = this.season?.games[gameId];
+    if (box && g) this.openBox(box, g.week, g.ot ?? 0);
+  }
+
+  /** 4b-2: the game that just ended (an exhibition isn't in the season: its box is made here). */
+  private showFinalBox(gameId: number | null) {
+    if (gameId !== null && this.leagueStats.boxes[gameId]) {
+      this.showBoxScore(gameId);
+      return;
+    }
+    const me = this.league?.userTeamId;
+    if (me === null || me === undefined || this.opponentId === null) return;
+    this.openBox(this.gameBox(-1, me, this.opponentId, true), null, this.clock.ot ?? 0);
+  }
+
+  /** This game's box score as it stands ([home, away]). */
+  private gameBox(gameId: number, me: number, opp: number, weAreHome: boolean): BoxScore {
+    const copy = (l: Lines): Lines => JSON.parse(JSON.stringify(l)) as Lines;
+    const us: TeamBox = { teamId: me, stats: { ...this.stats.us }, byPeriod: [...this.stats.byQuarter.us], lines: copy(this.lines.us) };
+    const them: TeamBox = { teamId: opp, stats: { ...this.stats.them }, byPeriod: [...this.stats.byQuarter.them], lines: copy(this.lines.them) };
+    return { gameId, teams: weAreHome ? [us, them] : [them, us] };
+  }
+
+  private openBox(box: BoxScore, week: number | null, ot: number) {
+    const l = this.league;
+    if (!l) return;
     const info = (id: number) => ({ abbr: l.teams[id].abbr, color: l.teams[id].colors[0] });
     const me = l.userTeamId;
+    const [home, away] = [box.teams[0].teamId, box.teams[1].teamId];
     openBoxScore({
       box,
-      week: g.week,
-      ot: g.ot ?? 0,
-      teams: [info(g.home), info(g.away)],
+      week,
+      ot,
+      teams: [info(home), info(away)],
       player: (id) => {
         const p = l.players[id];
         return p ? { name: `${p.firstName[0]}. ${p.lastName}`.toUpperCase(), pos: p.position } : { name: '?', pos: '' };
       },
       // Start on our players when it's our game, else the away team's.
-      side: g.home === me ? 0 : 1,
+      side: home === me ? 0 : 1,
       onClose: () => {},
     });
+  }
+
+  /** 4b-2: credits one live snap to the players. 2-point tries don't count (extra points do). */
+  private credit(p: LivePlay, onTry = this.match.tryPending) {
+    if (onTry && p.k !== 'xp') return;
+    creditLive(this.lines.us, this.lines.them, p);
+  }
+
+  /** Their defender at index i of [corners / LBs 0-4, S1, S2, rushers 0-3] (the chase and pass-contest order). */
+  private theirDefender(i: number) {
+    const t = this.theirLineup;
+    return t && i >= 0 ? [...t.cover, t.safety, t.safety2, ...t.rush][i] : null;
+  }
+
+  /** Both teams' players for crediting simmed snaps (ours, theirs). */
+  private statUnits(): [StatUnit, StatUnit] | null {
+    const l = this.league;
+    if (!l || l.userTeamId === null || this.opponentId === null) return null;
+    return [statUnit(simTeam(l, l.userTeamId)), statUnit(simTeam(l, this.opponentId))];
+  }
+
+  /** Credit dice for simmed snaps: their own (the game's dice never move), from where the game stands. */
+  private creditRng() {
+    const c = this.clock;
+    const key = this.stats.us.plays + 131 * this.stats.them.plays + 17 * this.match.us + 7919 * c.quarter + 104729 * (c.ot ?? 0);
+    return createRng((CREDIT_SALT ^ Math.imul(key + Math.round(c.timeLeft * 10), 2654435761)) >>> 0);
+  }
+
+  /** A simulated CPU drive in our game: their offense and our defense get the credit. */
+  private creditCpuDrive(drive: { snaps: Parameters<typeof creditSnaps>[2] }) {
+    const u = this.statUnits();
+    if (u) creditSnaps(this.lines.them, this.lines.us, drive.snaps, u[1], u[0], this.creditRng());
   }
 
   /** 4a: sims every other game of this week in the background, moves on a week, and shows the scores. */
@@ -2748,6 +2849,7 @@ export class FieldScene extends Phaser.Scene {
     this.match = g.match;
     this.clock = g.clock;
     this.stats = g.stats;
+    this.lines = g.lines ?? { us: {}, them: {} };
     this.scouting = sanitizeScouting(g.scouting);
     this.playIndex = g.playIndex;
     this.formationId = g.formation ?? 'normal';
@@ -2766,7 +2868,7 @@ export class FieldScene extends Phaser.Scene {
   private autosaveGame() {
     if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
-    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId };
+    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId, lines: this.lines };
     if (this.opponentId !== null) game.opponentId = this.opponentId;
     if (this.seasonGameId !== null) game.seasonGameId = this.seasonGameId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
