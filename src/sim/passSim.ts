@@ -7,7 +7,7 @@ import type { Feel } from '../config/feel';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, stepZoneSafety, type PassResult, type Rusher } from './defense';
-import { breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
+import { ZONE_SHELL, breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
 import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pursuerFor, shedTimeFor, tackleFor, teHelpFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
@@ -107,7 +107,7 @@ export function simulatePass(
   const live = () => runners.filter((_, i) => !(i === TE && teBlocks)).map((r) => r.pos);
   const coverTarget = (i: number) => (jobs ? zoneTarget(jobs[i], live(), feel) : i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
   // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber. Cover 3: one deep (S1 in the middle third), S2 rotates down.
-  const shell = zone ? 'robber' : (opts.shell ?? 'twoDeep');
+  const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
   const KS = [0, 1] as const;
   let safeties: Vec[] = KS.map((k) => safetyStart(feel, losX, shell, k));
   const safetyPlayers = [def?.safety ?? null, def?.safety2 ?? null];

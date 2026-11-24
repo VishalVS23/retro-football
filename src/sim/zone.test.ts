@@ -6,6 +6,7 @@ import { simulatePass, type PassShot } from './passSim';
 import { simulateRun } from './runSim';
 import { breaksOn, isZoneCall, zoneJobs, zoneTarget } from './zone';
 import { coverFor } from './coverRatings';
+import { cornerStart } from './defCalls';
 import { makeFiller } from '../league/league';
 import type { Player } from '../players/player';
 
@@ -75,7 +76,7 @@ describe('zone jobs (Cover 3)', () => {
 
 // ---------- Balance (Z-a): every route against Cover 3, average QB, run after the catch ----------
 
-function rate(name: string, shot: PassShot, call: 'man' | 'cover3', n = 300) {
+function rate(name: string, shot: PassShot, call: 'man' | 'cover3' | 'cover2', n = 300) {
   let c = 0;
   for (let s = 1; s <= n; s++) {
     const r = simulatePass(play(name), shot, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call, shell: 'robber' });
@@ -130,5 +131,66 @@ describe('balance: runs against Cover 3', () => {
     expect(tz).toBeGreaterThan(tm + 0.3);
     expect(dz).toBeGreaterThan(1);
     expect(Math.abs((dz + tz) / 2 - (dm + tm) / 2)).toBeLessThan(0.5);
+  }, 60000);
+});
+
+// ---------- Cover 2 (Z-b) ----------
+
+describe('zone jobs (Cover 2)', () => {
+  const c2 = zoneJobs('cover2', feel, los);
+  it('two deep halves (S1 top, S2 bottom), five under (flat corners, slot curl, LB hook and curl)', () => {
+    expect(c2.map((j) => j.kind)).toEqual(['under', 'under', 'under', 'under', 'under', 'deep', 'deep']);
+    expect(c2[5].yMax).toBeCloseTo(mid);
+    expect(c2[6].yMin).toBeCloseTo(mid);
+    // The outside corners squat in the flats, low and wide.
+    expect(c2[0].spot.y).toBeLessThan(mid - 12);
+    expect(c2[2].spot.y).toBeGreaterThan(mid + 12);
+    expect(c2[0].spot.x).toBeLessThan(los + 7);
+  });
+
+  it('the tell against two-deep man: Cover 2 corners line up OUTSIDE their man and closer than man coverage', () => {
+    const wr = { x: los - 0.5, y: mid - 13 };
+    const c2Start = cornerStart('cover2', feel, wr);
+    const manStart = cornerStart('man', feel, wr);
+    expect(c2Start.y).toBeLessThan(wr.y - 1.5); // outside (toward the top sideline)
+    expect(manStart.y).toBe(wr.y); // head up
+    expect(c2Start.x).toBeLessThan(manStart.x);
+    expect(cornerStart('cover2', feel, { x: los, y: mid + 13 }).y).toBeGreaterThan(mid + 14.5); // bottom side: outside = down
+  });
+});
+
+describe('balance: Cover 2', () => {
+  it('open against Cover 2: the corner route (10% against Cover 3), the seam, the middle', () => {
+    expect(rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover2')).toBeGreaterThan(75);
+    expect(rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover3')).toBeLessThan(25);
+    expect(rate('TE Seam', { to: 4, throwAt: 1.2, lead: 1 }, 'cover2')).toBeGreaterThan(70);
+  }, 120000);
+
+  it('tough against Cover 2: the flats (the corners sit on them) and the deep ball outside, never hopeless', () => {
+    const rbFlat = rate('Post Corner', { to: 3, throwAt: 1.0, lead: 1 }, 'cover2');
+    expect(rbFlat).toBeLessThan(rate('Post Corner', { to: 3, throwAt: 1.0, lead: 1 }, 'cover3') - 25);
+    const go = rate('Verticals', { to: 0, throwAt: 1.1, lead: 1 }, 'cover2');
+    expect(go).toBeGreaterThan(20);
+    expect(go).toBeLessThan(45);
+  }, 120000);
+
+  it('the drags are no free throw either: across both, about two in three', () => {
+    const te = rate('TE Drag', { to: 4, throwAt: 1.0, lead: 1 }, 'cover2');
+    const wr = rate('Crossers', { to: 1, throwAt: 1.0, lead: 1 }, 'cover2');
+    expect((te + wr) / 2).toBeLessThan(80);
+    expect(Math.min(te, wr)).toBeGreaterThan(35);
+  }, 120000);
+});
+
+describe('balance: runs against Cover 2', () => {
+  it('about the same as man overall', () => {
+    const avg = (name: string, call: 'man' | 'cover2') => {
+      let y = 0;
+      for (let s = 1; s <= 300; s++) y += simulateRun(play(name), s * 7919, feel, 2.5, 45, undefined, call, {}, 'twoDeep').yards;
+      return y / 300;
+    };
+    const man = (avg('Dive', 'man') + avg('Toss', 'man')) / 2;
+    const c2 = (avg('Dive', 'cover2') + avg('Toss', 'cover2')) / 2;
+    expect(Math.abs(c2 - man)).toBeLessThan(0.4);
   }, 60000);
 });

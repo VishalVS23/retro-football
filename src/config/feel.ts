@@ -204,6 +204,18 @@ export const feel = {
     curlFlatYards: 11,
     /** An underneath defender carries a receiver at most this far past his landmark, then lets the deep man have him. */
     underCarryYards: 5,
+    /** Cover 2 (Z-b): the outside corners line up this far off and this far OUTSIDE their receiver (the tell vs two-deep man)... */
+    cover2CushionYards: 3,
+    cover2ShadeYards: 2,
+    /** ...and squat in the flat: this deep, this far from the middle; their area reaches in to this far from the middle. */
+    c2FlatDepthYards: 5,
+    c2FlatYards: 15,
+    c2FlatInsideYards: 9,
+    /** The slot corner (top) and LB2 (bottom) take the curls this far from the middle; LB1 the hook this far (top side). */
+    c2CurlYards: 5,
+    c2HookYards: 0.5,
+    /** Each half safety follows the deepest receiver on his half only this share of the way across (he stays between the middle and the sideline: the hole shot). */
+    c2HalfFollow: 0.2,
     /** A receiver this far outside a lane still counts as in it (handoffs at the edges). */
     laneOverlapYards: 1.5,
     /** Underneath defenders shade toward a receiver in their area but stay within this of their landmark. */
@@ -218,7 +230,7 @@ export const feel = {
     /** ...underneath ones (eyes on the QB) quicker. */
     underBallReactionTime: 0.1,
     /** On a run, underneath zone defenders read pass first: they're this much later to come up after the handoff than in man. */
-    underRunReadTime: 0.25,
+    underRunReadTime: 0.35,
     /** ...deep ones give ground at this share of their speed (bailing), and outside thirds keep this much outside leverage. */
     deepSpeedRatio: 0.92,
     deepLeverageYards: 1,

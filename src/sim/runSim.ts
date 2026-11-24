@@ -6,7 +6,7 @@ import type { Feel } from '../config/feel';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage, stepZoneSafety } from './defense';
-import { isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
+import { ZONE_SHELL, isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
@@ -64,7 +64,7 @@ export function simulateRun(
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
   // Zone call (Z-a): before the handoff everyone drops toward his area (corners bail, LBs to their spots).
   const jobs = isZoneCall(call) ? zoneJobs(call, feel, losX) : null;
-  if (jobs) shell = 'robber';
+  if (isZoneCall(call)) shell = ZONE_SHELL[call];
   const zoneP = (i: number) => {
     const base = zoneParams(coveredByLinebacker(i) ? lbCover : cbCover);
     return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };

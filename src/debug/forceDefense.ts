@@ -13,6 +13,7 @@ const OPTIONS: { id: DefCallId | 'auto'; label: string }[] = [
   { id: 'off', label: 'Off man' },
   { id: 'blitz', label: 'LB blitz' },
   { id: 'cover3', label: 'Cover 3' },
+  { id: 'cover2', label: 'Cover 2' },
 ];
 
 let memory: string | null = null;

@@ -15,9 +15,12 @@ import type { Feel } from '../config/feel';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import type { Vec } from './throw';
 
-/** The zone calls. Z-a: Cover 3 (Z-b adds Cover 2). */
-export type ZoneCallId = 'cover3';
-export const ZONE_CALL_IDS: readonly ZoneCallId[] = ['cover3'];
+/** The zone calls: Cover 3 (Z-a) and Cover 2 (Z-b). */
+export type ZoneCallId = 'cover3' | 'cover2';
+export const ZONE_CALL_IDS: readonly ZoneCallId[] = ['cover3', 'cover2'];
+
+/** Which safety look each zone shows (Cover 3: one deep in the middle; Cover 2: two deep halves). */
+export const ZONE_SHELL: Record<ZoneCallId, 'robber' | 'twoDeep'> = { cover3: 'robber', cover2: 'twoDeep' };
 export function isZoneCall(call: string): call is ZoneCallId {
   return (ZONE_CALL_IDS as readonly string[]).includes(call);
 }
@@ -30,6 +33,10 @@ export interface ZoneJob {
   /** His lane across the field: receivers with y in [yMin, yMax] are his. */
   yMin: number;
   yMax: number;
+  /** Deep only: how far he follows the deepest receiver across (1 = right over him; 0.5 = halfway from his landmark). Default 1. */
+  follow?: number;
+  /** His own read of the throw (s), instead of the deep / underneath default (Cover 2 halves: more ground, a later read). */
+  read?: number;
 }
 
 /** Number of zone defenders: 3 corners, 2 LBs, 2 safeties. */
@@ -39,11 +46,28 @@ export const ZONE_DEFENDERS = 7;
  * Each defender's job in this zone, [CB1, CB3, CB2, LB1, LB2, S1, S2].
  * Cover 3: the outside corners and S1 split the deep field in thirds; the slot corner (top) and S2
  * (bottom, rotating down from the middle) take the curl / flat areas; the LBs the two hooks.
+ * Cover 2: S1 / S2 each take a deep half; the outside corners squat in the flats; the slot corner
+ * takes the top curl, LB1 the middle hook, LB2 the bottom curl / hook.
  */
-export function zoneJobs(_call: ZoneCallId, feel: Feel, losX: number): ZoneJob[] {
+export function zoneJobs(call: ZoneCallId, feel: Feel, losX: number): ZoneJob[] {
   const z = feel.zone;
   const mid = FIELD_WIDTH / 2;
   const deep = (yards: number) => Math.min(losX + yards, TOTAL_LENGTH - 1);
+  if (call === 'cover2') {
+    const half = deep(feel.defense.twoDeepDepthYards);
+    const hy = feel.defense.twoDeepHalfYards;
+    const flat = deep(z.c2FlatDepthYards);
+    const under = deep(z.underDepthYards);
+    return [
+      { kind: 'under', spot: { x: flat, y: mid - z.c2FlatYards }, yMin: 0, yMax: mid - z.c2FlatInsideYards },
+      { kind: 'under', spot: { x: under, y: mid - z.c2CurlYards }, yMin: mid - z.c2FlatYards, yMax: mid - z.hookYards },
+      { kind: 'under', spot: { x: flat, y: mid + z.c2FlatYards }, yMin: mid + z.c2FlatInsideYards, yMax: FIELD_WIDTH },
+      { kind: 'under', spot: { x: under, y: mid - z.c2HookYards }, yMin: mid - z.c2CurlYards, yMax: mid + z.c2CurlYards },
+      { kind: 'under', spot: { x: under, y: mid + z.c2CurlYards }, yMin: mid + z.hookYards, yMax: mid + z.c2FlatYards },
+      { kind: 'deep', spot: { x: half, y: mid - hy }, yMin: 0, yMax: mid, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime },
+      { kind: 'deep', spot: { x: half, y: mid + hy }, yMin: mid, yMax: FIELD_WIDTH, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime },
+    ];
+  }
   const edge = z.thirdEdgeYards; // the middle third is |y - mid| < edge
   const under = deep(z.underDepthYards);
   const deepThird = deep(z.deepThirdDepthYards);
@@ -71,7 +95,7 @@ export function zoneCoverScale(job: ZoneJob, feel: Feel): { ballReactionTime: nu
 
 /** How long after the throw a zone defender breaks on it (deep: bailing, slower; underneath: eyes on the QB). */
 export function zoneBallReaction(job: ZoneJob, feel: Feel): number {
-  return job.kind === 'deep' ? feel.zone.deepBallReactionTime : feel.zone.underBallReactionTime;
+  return job.read ?? (job.kind === 'deep' ? feel.zone.deepBallReactionTime : feel.zone.underBallReactionTime);
 }
 
 /**
@@ -91,7 +115,7 @@ export function zoneTarget(job: ZoneJob, receivers: Vec[], feel: Feel): Vec {
     const outside = job.yMax <= mid ? -1 : job.yMin >= mid ? 1 : 0;
     return {
       x: Math.min(TOTAL_LENGTH - 1, Math.max(job.spot.x, deepest.x + z.deepCushionYards)),
-      y: clamp(deepest.y + outside * z.deepLeverageYards, job.yMin, job.yMax),
+      y: clamp(job.spot.y + (deepest.y + outside * z.deepLeverageYards - job.spot.y) * (job.follow ?? 1), job.yMin, job.yMax),
     };
   }
   const mine = lane.filter((r) => r.y >= job.yMin && r.y <= job.yMax && r.x <= job.spot.x + z.underCarryYards);

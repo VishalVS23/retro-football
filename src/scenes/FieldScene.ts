@@ -129,7 +129,7 @@ import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
 import { forcedDefCall } from '../debug/forceDefense';
-import { breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
+import { ZONE_SHELL, breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
 import {
   TE_SIDE_RUSHER,
   blockerEdges,
@@ -2474,7 +2474,7 @@ export class FieldScene extends Phaser.Scene {
       this.defCall = this.rollDefCall(rng.next()); // once per snap (reopening PLAYS keeps it)
       this.lb2Roll = rng.next();
       this.shell = feel.defCalls.enabled ? pickShell(this.defSituation(), feel, rng.next()) : 'twoDeep';
-      if (isZoneCall(this.defCall)) this.shell = 'robber'; // Cover 3: one deep safety in the middle, S2 rotates down
+      if (isZoneCall(this.defCall)) this.shell = ZONE_SHELL[this.defCall]; // Cover 3: one deep (S2 rotates down); Cover 2: two deep halves
     }
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -2665,8 +2665,8 @@ export class FieldScene extends Phaser.Scene {
             tip: DEF_CALL_TIPS[this.defCall],
             shell: this.shell,
             // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
-            shellName: isZoneCall(this.defCall) ? 'ONE DEEP' : SHELL_NAMES[this.shell],
-            shellTip: isZoneCall(this.defCall) ? 'Three deep, four under' : SHELL_TIPS[this.shell],
+            shellName: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[this.shell],
+            shellTip: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[this.shell],
           }
         : null,
     });

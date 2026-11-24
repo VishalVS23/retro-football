@@ -24,6 +24,7 @@ export const DEF_CALL_NAMES: Record<DefCallId, string> = {
   off: 'OFF MAN',
   blitz: 'LB BLITZ',
   cover3: 'COVER 3',
+  cover2: 'COVER 2',
 };
 
 /** One-line tip for the play-call screen: how to beat it. */
@@ -33,6 +34,7 @@ export const DEF_CALL_TIPS: Record<DefCallId, string> = {
   off: 'Corners off: hitches and quick outs are open',
   blitz: 'Blitz coming: throw quick, the RB is open',
   cover3: 'Flats, curls and seams open',
+  cover2: 'Seams and the corner route open',
 };
 
 /** The corners' cushion for this call: how far off they line up and how long it takes to close. */
@@ -42,6 +44,7 @@ export function cornerCushion(call: DefCallId, feel: Feel): { yards: number; clo
   if (call === 'press') return { yards: c.pressCushionYards, closeTime: c.pressCloseTime };
   if (call === 'off') return { yards: c.offCushionYards, closeTime: c.offCloseTime };
   if (call === 'cover3') return { yards: feel.zone.cover3CushionYards, closeTime: d.cbCushionCloseTime };
+  if (call === 'cover2') return { yards: feel.zone.cover2CushionYards, closeTime: d.cbCushionCloseTime };
   return { yards: d.cbCushionYards, closeTime: d.cbCushionCloseTime };
 }
 
@@ -199,7 +202,9 @@ export function lb2BlitzChance(s: DefSituation, feel: Feel): number {
 
 /** Where a corner lines up against a receiver at `wr`. */
 export function cornerStart(call: DefCallId, feel: Feel, wr: Vec): Vec {
-  return { x: wr.x + cornerCushion(call, feel).yards, y: wr.y };
+  // Cover 2 corners shade OUTSIDE their man (they own the flat): the tell against two-deep man.
+  const shade = call === 'cover2' ? feel.zone.cover2ShadeYards * (Math.sign(wr.y - FIELD_WIDTH / 2) || 1) : 0;
+  return { x: wr.x + cornerCushion(call, feel).yards, y: wr.y + shade };
 }
 
 /**
