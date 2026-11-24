@@ -298,6 +298,8 @@ export class FieldScene extends Phaser.Scene {
   private nextStep: (() => void) | null = null;
   private form = formation(newGame().ballX);
   private scoreboard!: Phaser.GameObjects.Text;
+  /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
+  private readText!: Phaser.GameObjects.Text;
   private scoreText = '';
   // Game clock (rules live in sim/clock.ts).
   private clock: ClockState = newClock(feel.clock);
@@ -391,6 +393,19 @@ export class FieldScene extends Phaser.Scene {
       })
       .setScrollFactor(0)
       .setDepth(10);
+    this.readText = this.add
+      .text(0, 0, '', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        fontStyle: 'bold',
+        color: '#ffd166',
+        backgroundColor: '#0d1b2add',
+        padding: { x: 8, y: 3 },
+        align: 'center',
+      })
+      .setScrollFactor(0)
+      .setDepth(10)
+      .setVisible(false);
 
     this.resetPlay();
     this.fitCamera();
@@ -2658,18 +2673,34 @@ export class FieldScene extends Phaser.Scene {
           ? { options: this.simOptions(), onSim: (id) => this.runSim(id as SimStop) }
           : null,
       ...this.diagramPeople(),
-      defenseRead: this.callAtLine
-        ? {
-            call: this.defCall,
-            name: DEF_CALL_NAMES[this.defCall],
-            tip: DEF_CALL_TIPS[this.defCall],
-            shell: this.shell,
-            // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
-            shellName: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[this.shell],
-            shellTip: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[this.shell],
-          }
-        : null,
+      defenseRead: this.callAtLine ? this.defenseRead() : null,
     });
+  }
+
+  /** What the defense shows at the line this snap (always the real call: disguises come later). */
+  private defenseRead() {
+    return {
+      call: this.defCall,
+      name: DEF_CALL_NAMES[this.defCall],
+      tip: DEF_CALL_TIPS[this.defCall],
+      shell: this.shell,
+      // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
+      shellName: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : SHELL_NAMES[this.shell],
+      shellTip: isZoneCall(this.defCall) ? (this.defCall === 'cover2' ? 'Two deep halves, five under' : 'Three deep, four under') : SHELL_TIPS[this.shell],
+    };
+  }
+
+  /** The LOOKS LIKE line on the field: before the snap only (not on kicks or while calling plays). */
+  private updateReadText() {
+    const show = this.state === 'presnap';
+    this.readText.setVisible(show);
+    if (!show) return;
+    const r = this.defenseRead();
+    this.readText.setText(`LOOKS LIKE: ${r.name} · ${r.shellName}
+${r.tip.toUpperCase()}`);
+    const cam = this.cameras.main;
+    this.readText.setScale(1 / cam.zoom).setOrigin(0.5, 0);
+    this.placeOnScreen(this.readText, cam.width / 2, 8 + this.scoreboard.height + 4);
   }
 
   /** Blue line of scrimmage and yellow first-down line (none when it's "& Goal"). */
@@ -2760,6 +2791,7 @@ export class FieldScene extends Phaser.Scene {
   }
 
   private updateLabel() {
+    this.updateReadText();
     this.label.setVisible(this.state !== 'calling'); // the play calling screen covers the field
     if (this.state === 'calling') return;
     if (this.state === 'presnap') {
