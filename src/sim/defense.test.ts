@@ -315,6 +315,17 @@ describe('corner momentum, anticipation and help defense', () => {
     expect(stillReading.y - before.y).toBeLessThan(0.1); // not yet breaking toward y 40
     expect(s.y).toBeGreaterThan(stillReading.y + 2);
   });
+
+  it('a ball landing in front of him he reads sooner and drives on faster (he faces it)', () => {
+    const p = { baseX: 53, maxX: 119, cushionYards: 3, driftSpeed: 4, bailSpeed: 7, ballReactionTime: 0.7, ballSpeed: 4, frontBallReactionTime: 0.45, frontBallSpeed: 6 };
+    const s0 = { x: 53, y: 20 };
+    const run = (landing: { x: number; y: number }) => {
+      let s = { ...s0 };
+      for (let i = 0; i < 60; i++) s = stepSafety(s, [{ x: 45, y: 14 }], dt, p, { landing, sinceThrow: (i + 1) * dt });
+      return Math.hypot(s.x - s0.x, s.y - s0.y);
+    };
+    expect(run({ x: 45, y: 14 })).toBeGreaterThan(run({ x: 61, y: 14 }) + 1);
+  });
 });
 
 describe('pass rush', () => {

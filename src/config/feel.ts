@@ -99,6 +99,13 @@ export const feel = {
     twoDeepHalfYards: 8,
     twoDeepBallReactionTime: 0.7,
     twoDeepBallSpeedRatio: 0.5,
+    /**
+     * ...but a ball coming down IN FRONT of a two-deep safety (shorter than where he stands: he's facing
+     * it, nothing to turn around for) he reads after this long and drives on at this share of his speed.
+     * Else an early deep shot at ~13 yd landed in front of him before he moved (caught ~85%).
+     */
+    twoDeepFrontReactionTime: 0.65,
+    twoDeepFrontSpeedRatio: 0.6,
     /** How fast the safety drifts while reading the play (fraction of his speed). */
     safetyDriftRatio: 0.5,
     /** The safety stays at least this far deeper than the deepest receiver... */
@@ -225,6 +232,19 @@ export const feel = {
     /** ...underneath defenders take balls up to this far past their landmark, deep ones balls up to this far in front of theirs. */
     underBreakDepthYards: 6,
     deepBreakYards: 4,
+    /** Cover 2 halves break on balls in their half up to this far in front of their landmark (else 11-14 yd was nobody's: under 11 the corners, past 14 the halves). */
+    c2DeepBreakYards: 5,
+    /**
+     * Cover 2 flat corners SINK: they never come up for a receiver short of their landmark; one who runs
+     * past it they carry up to `c2SinkCarryYards` past it (at most `c2SinkReachYards` off it), aiming
+     * `c2SinkLeadYards` ahead of him (they react late, so this keeps them about level). They break on balls
+     * in their area up to `c2SinkBreakYards` past the landmark and contest them at full strength (they're
+     * playing the receiver). Else a ball thrown early to ~13 yd down the sideline was nobody's (caught ~87%).
+     */
+    c2SinkCarryYards: 9,
+    c2SinkReachYards: 7,
+    c2SinkLeadYards: 3,
+    c2SinkBreakYards: 9,
     /** Zone defenders read the throw and turn on it this long after it leaves the QB's hand (man help defenders: cbHelpBallReactionTime): deep ones (bailing)... */
     deepBallReactionTime: 0.45,
     /** ...underneath ones (eyes on the QB) quicker. */

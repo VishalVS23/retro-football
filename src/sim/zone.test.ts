@@ -4,7 +4,7 @@ import { FIELD_WIDTH } from './field';
 import { PLAYS } from './routes';
 import { simulatePass, type PassShot } from './passSim';
 import { simulateRun } from './runSim';
-import { breaksOn, isZoneCall, zoneJobs, zoneTarget } from './zone';
+import { breaksOn, contestsAsHelp, isZoneCall, zoneJobs, zoneTarget } from './zone';
 import { coverFor } from './coverRatings';
 import { cornerStart } from './defCalls';
 import { makeFiller } from '../league/league';
@@ -138,6 +138,19 @@ describe('balance: runs against Cover 3', () => {
 
 describe('zone jobs (Cover 2)', () => {
   const c2 = zoneJobs('cover2', feel, los);
+
+  it('a flat corner sinks: never comes up for a receiver short of his spot, drops ahead of one who runs past it', () => {
+    const cb = c2[0];
+    expect(cb.sink).toBe(true);
+    expect(zoneTarget(cb, [{ x: los, y: cb.spot.y }], feel).x).toBeCloseTo(cb.spot.x);
+    const deep = zoneTarget(cb, [{ x: cb.spot.x + 4, y: cb.spot.y }], feel);
+    expect(deep.x).toBeCloseTo(cb.spot.x + 4 + feel.zone.c2SinkLeadYards);
+    // Full-strength contest only on balls deeper than his flat area.
+    expect(contestsAsHelp(cb, { x: cb.spot.x + 2, y: cb.spot.y }, feel)).toBe(true);
+    expect(contestsAsHelp(cb, { x: cb.spot.x + 8, y: cb.spot.y }, feel)).toBe(false);
+    expect(contestsAsHelp(c2[3], { x: cb.spot.x + 8, y: cb.spot.y }, feel)).toBe(true);
+    expect(contestsAsHelp(c2[5], { x: cb.spot.x + 8, y: cb.spot.y }, feel)).toBe(false);
+  });
   it('two deep halves (S1 top, S2 bottom), five under (flat corners, slot curl, LB hook and curl)', () => {
     expect(c2.map((j) => j.kind)).toEqual(['under', 'under', 'under', 'under', 'under', 'deep', 'deep']);
     expect(c2[5].yMax).toBeCloseTo(mid);
@@ -160,10 +173,21 @@ describe('zone jobs (Cover 2)', () => {
 });
 
 describe('balance: Cover 2', () => {
-  it('open against Cover 2: the corner route (10% against Cover 3), the seam, the middle', () => {
-    expect(rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover2')).toBeGreaterThan(75);
-    expect(rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover3')).toBeLessThan(25);
+  it('open against Cover 2: the seam and the middle (dig, late slant); the corner route is fair (10% against Cover 3)', () => {
     expect(rate('TE Seam', { to: 4, throwAt: 1.2, lead: 1 }, 'cover2')).toBeGreaterThan(70);
+    expect(rate('Crossers', { to: 0, throwAt: 1.5, lead: 1 }, 'cover2')).toBeGreaterThan(75);
+    expect(rate('Slants', { to: 0, throwAt: 1.0, lead: 1 }, 'cover2')).toBeGreaterThan(75);
+    const corner = rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover2');
+    expect(corner).toBeGreaterThan(30);
+    expect(corner).toBeLessThan(70);
+    expect(rate('Post Corner', { to: 1, throwAt: 0.8, lead: 1 }, 'cover3')).toBeLessThan(25);
+  }, 120000);
+
+  it('an early deep shot (~13 yd down the sideline) is no longer free: the corners sink, the halves drive on it', () => {
+    // Before the sink: Go at 0.5 s 87%, Post at 0.7 s 83%.
+    expect(rate('Verticals', { to: 0, throwAt: 0.5, lead: 1 }, 'cover2')).toBeLessThan(80);
+    expect(rate('Post Corner', { to: 0, throwAt: 0.7, lead: 1 }, 'cover2')).toBeLessThan(65);
+    expect(rate('Post Corner', { to: 0, throwAt: 0.7, lead: 1 }, 'cover2')).toBeGreaterThan(30);
   }, 120000);
 
   it('tough against Cover 2: the flats (the corners sit on them) and the deep ball outside, never hopeless', () => {

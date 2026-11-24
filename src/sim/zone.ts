@@ -37,6 +37,10 @@ export interface ZoneJob {
   follow?: number;
   /** His own read of the throw (s), instead of the deep / underneath default (Cover 2 halves: more ground, a later read). */
   read?: number;
+  /** Deep only: he breaks on balls up to this far in front of his landmark (default `deepBreakYards`). */
+  breakFront?: number;
+  /** Underneath only: a Cover 2 flat corner who sinks under the outside receiver (see `feel.zone.c2Sink*`). */
+  sink?: boolean;
 }
 
 /** Number of zone defenders: 3 corners, 2 LBs, 2 safeties. */
@@ -59,13 +63,13 @@ export function zoneJobs(call: ZoneCallId, feel: Feel, losX: number): ZoneJob[] 
     const flat = deep(z.c2FlatDepthYards);
     const under = deep(z.underDepthYards);
     return [
-      { kind: 'under', spot: { x: flat, y: mid - z.c2FlatYards }, yMin: 0, yMax: mid - z.c2FlatInsideYards },
+      { kind: 'under', spot: { x: flat, y: mid - z.c2FlatYards }, yMin: 0, yMax: mid - z.c2FlatInsideYards, sink: true },
       { kind: 'under', spot: { x: under, y: mid - z.c2CurlYards }, yMin: mid - z.c2FlatYards, yMax: mid - z.hookYards },
-      { kind: 'under', spot: { x: flat, y: mid + z.c2FlatYards }, yMin: mid + z.c2FlatInsideYards, yMax: FIELD_WIDTH },
+      { kind: 'under', spot: { x: flat, y: mid + z.c2FlatYards }, yMin: mid + z.c2FlatInsideYards, yMax: FIELD_WIDTH, sink: true },
       { kind: 'under', spot: { x: under, y: mid - z.c2HookYards }, yMin: mid - z.c2CurlYards, yMax: mid + z.c2CurlYards },
       { kind: 'under', spot: { x: under, y: mid + z.c2CurlYards }, yMin: mid + z.hookYards, yMax: mid + z.c2FlatYards },
-      { kind: 'deep', spot: { x: half, y: mid - hy }, yMin: 0, yMax: mid, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime },
-      { kind: 'deep', spot: { x: half, y: mid + hy }, yMin: mid, yMax: FIELD_WIDTH, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime },
+      { kind: 'deep', spot: { x: half, y: mid - hy }, yMin: 0, yMax: mid, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime, breakFront: z.c2DeepBreakYards },
+      { kind: 'deep', spot: { x: half, y: mid + hy }, yMin: mid, yMax: FIELD_WIDTH, follow: z.c2HalfFollow, read: feel.defense.twoDeepBallReactionTime, breakFront: z.c2DeepBreakYards },
     ];
   }
   const edge = z.thirdEdgeYards; // the middle third is |y - mid| < edge
@@ -118,15 +122,18 @@ export function zoneTarget(job: ZoneJob, receivers: Vec[], feel: Feel): Vec {
       y: clamp(job.spot.y + (deepest.y + outside * z.deepLeverageYards - job.spot.y) * (job.follow ?? 1), job.yMin, job.yMax),
     };
   }
-  const mine = lane.filter((r) => r.y >= job.yMin && r.y <= job.yMax && r.x <= job.spot.x + z.underCarryYards);
+  const carry = job.sink ? z.c2SinkCarryYards : z.underCarryYards;
+  const reach = job.sink ? z.c2SinkReachYards : z.underReachYards;
+  const mine = lane.filter((r) => r.y >= job.yMin && r.y <= job.yMax && r.x <= job.spot.x + carry);
   if (!mine.length) return { ...job.spot };
   const near = mine.reduce((a, b) => (Math.hypot(b.x - job.spot.x, b.y - job.spot.y) < Math.hypot(a.x - job.spot.x, a.y - job.spot.y) ? b : a));
   // He shades toward that receiver but stays in his area: at most `underReachYards` off his landmark
   // (the soft spots between the zones are what beats a zone).
-  const dx = Math.min(near.x, job.spot.x + z.underCarryYards) - job.spot.x;
+  // A sinking corner (Cover 2) never comes up for a receiver short of his landmark; once one runs past it he drops just ahead of him.
+  const dx = job.sink ? clamp(near.x + z.c2SinkLeadYards - job.spot.x, 0, carry) : Math.min(near.x, job.spot.x + carry) - job.spot.x;
   const dy = near.y - job.spot.y;
   const d = Math.hypot(dx, dy);
-  const k = d > z.underReachYards ? z.underReachYards / d : 1;
+  const k = d > reach ? reach / d : 1;
   return { x: job.spot.x + dx * k, y: clamp(job.spot.y + dy * k, job.yMin, job.yMax) };
 }
 
@@ -139,6 +146,15 @@ export function breaksOn(job: ZoneJob, landing: Vec, feel: Feel): boolean {
   const z = feel.zone;
   const m = z.breakMarginYards;
   if (landing.y < job.yMin - m || landing.y > job.yMax + m) return false;
-  return job.kind === 'deep' ? landing.x >= job.spot.x - z.deepBreakYards : landing.x <= job.spot.x + z.underBreakDepthYards;
+  return job.kind === 'deep' ? landing.x >= job.spot.x - (job.breakFront ?? z.deepBreakYards) : landing.x <= job.spot.x + (job.sink ? z.c2SinkBreakYards : z.underBreakDepthYards);
+}
+
+/**
+ * Does this zone defender contest a pass landing here only at help strength? Underneath ones do (they
+ * rally to tackle), except a sinking Cover 2 corner on a ball deeper than his flat area (he's playing the receiver).
+ */
+export function contestsAsHelp(job: ZoneJob, landing: Vec, feel: Feel): boolean {
+  if (job.kind !== 'under') return false;
+  return !(job.sink && landing.x > job.spot.x + feel.zone.underBreakDepthYards);
 }
 

@@ -34,7 +34,7 @@ export const DEF_CALL_TIPS: Record<DefCallId, string> = {
   off: 'Corners off: hitches and quick outs are open',
   blitz: 'Blitz coming: throw quick, the RB is open',
   cover3: 'Flats, curls and seams open',
-  cover2: 'Seams and the corner route open',
+  cover2: 'Seams and the middle open',
 };
 
 /** The corners' cushion for this call: how far off they line up and how long it takes to close. */
@@ -124,7 +124,16 @@ export function safetyParamsFor(feel: Feel, losX: number, shell: ShellId, k: 0 |
   const db = feel.tackling.dbPursuitSpeed;
   const common = { maxX: TOTAL_LENGTH - 1, cushionYards: d.safetyCushionYards, driftSpeed: db * d.safetyDriftRatio, bailSpeed: db * d.safetyBailRatio, ballReactionTime: readTime };
   if (shell === 'twoDeep') {
-    return { ...common, baseX: Math.min(losX + d.twoDeepDepthYards, TOTAL_LENGTH - 1), ballSpeed: db * d.twoDeepBallSpeedRatio, half: k ? 1 : -1, halfYards: d.twoDeepHalfYards };
+    return {
+      ...common,
+      baseX: Math.min(losX + d.twoDeepDepthYards, TOTAL_LENGTH - 1),
+      ballSpeed: db * d.twoDeepBallSpeedRatio,
+      half: k ? 1 : -1,
+      halfYards: d.twoDeepHalfYards,
+      // A ball in front of him: quicker, by the same share his ratings give the normal read.
+      frontBallReactionTime: readTime * (d.twoDeepFrontReactionTime / d.twoDeepBallReactionTime),
+      frontBallSpeed: db * d.twoDeepFrontSpeedRatio,
+    };
   }
   if (k) {
     // The robber holds his depth (no bailing): he's there for what's thrown in front of the deep man.

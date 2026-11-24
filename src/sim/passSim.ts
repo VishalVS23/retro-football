@@ -7,7 +7,7 @@ import type { Feel } from '../config/feel';
 import { formation } from './formation';
 import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, stepZoneSafety, type PassResult, type Rusher } from './defense';
-import { ZONE_SHELL, breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
+import { ZONE_SHELL, breaksOn, contestsAsHelp, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
 import { canTackle, evadeSteer, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pursuerFor, shedTimeFor, tackleFor, teHelpFor } from './runRatings';
 import { flightTime, type Vec } from './throw';
@@ -209,7 +209,7 @@ export function simulatePass(
     helpContestRatio: d.helpContestRatio,
   }, qb, {
     zone: cover.map((_, i) => zone || (i === TE && job === 'drop')),
-    under: jobs?.map((j) => j.kind === 'under'),
+    under: jobs?.map((j) => contestsAsHelp(j, landing, feel)),
     ...(opts.offense && {
       receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),

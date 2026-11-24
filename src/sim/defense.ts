@@ -204,6 +204,15 @@ export interface SafetyParams {
    */
   half?: -1 | 1;
   halfYards?: number;
+  /** A ball landing in front of him (shorter than where he stands): read after this long and driven on at this speed. Leave out = same as any ball. */
+  frontBallReactionTime?: number;
+  frontBallSpeed?: number;
+}
+
+/** When and how fast he breaks on this ball: quicker on one landing in front of him (he's facing it). */
+function safetyBreak(pos: Vec, p: SafetyParams, landing: Vec): { reaction: number; speed: number } {
+  const front = p.frontBallSpeed !== undefined && landing.x < pos.x - 1;
+  return front ? { reaction: p.frontBallReactionTime ?? p.ballReactionTime, speed: p.frontBallSpeed! } : { reaction: p.ballReactionTime, speed: p.ballSpeed };
 }
 
 /** A receiver this far over the middle still counts as on a safety's half (seams and posts). */
@@ -217,9 +226,10 @@ const HALF_OVERLAP_YARDS = 2;
 export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
   let target: Vec;
   let speed: number;
-  if (ball && ball.sinceThrow >= p.ballReactionTime) {
+  const brk = ball && safetyBreak(pos, p, ball.landing);
+  if (ball && brk && ball.sinceThrow >= brk.reaction) {
     target = ball.landing;
-    speed = p.ballSpeed;
+    speed = brk.speed;
   } else if (p.half) {
     const half = p.half;
     const mine = receivers.filter((r) => (r.y - FIELD_MID) * half > -HALF_OVERLAP_YARDS);
@@ -241,7 +251,8 @@ export function stepSafety(pos: Vec, receivers: Vec[], dt: number, p: SafetyPara
  * the ball like `stepSafety`.
  */
 export function stepZoneSafety(pos: Vec, target: Vec, dt: number, p: SafetyParams, ball?: { landing: Vec; sinceThrow: number }): Vec {
-  if (ball && ball.sinceThrow >= p.ballReactionTime) return moveToward(pos, ball.landing, p.ballSpeed * dt);
+  const brk = ball && safetyBreak(pos, p, ball.landing);
+  if (ball && brk && ball.sinceThrow >= brk.reaction) return moveToward(pos, ball.landing, brk.speed * dt);
   return moveToward(pos, target, (target.x > pos.x + 0.25 ? p.bailSpeed : p.driftSpeed) * dt);
 }
 

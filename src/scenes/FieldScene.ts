@@ -129,7 +129,7 @@ import { rollFumble, rollRecovery } from '../sim/fumble';
 import type { DiagramDefense } from '../ui/playDiagram';
 import { DISPLAY_CHANGE_EVENT, displayPrefs } from '../debug/displayOptions';
 import { forcedDefCall } from '../debug/forceDefense';
-import { ZONE_SHELL, breaksOn, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
+import { ZONE_SHELL, breaksOn, contestsAsHelp, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget, type ZoneJob } from '../sim/zone';
 import {
   TE_SIDE_RUSHER,
   blockerEdges,
@@ -870,7 +870,7 @@ export class FieldScene extends Phaser.Scene {
    * The catch roll's per-player numbers (3d-c): each receiver's hands (and the QB's miss) and the
    * contested-catch trait; each defender's ball skills ([3 corners, linebacker, safety]).
    */
-  private contestPlayerMods() {
+  private contestPlayerMods(landing: Vec) {
     const R = feel.ratings;
     const base = this.bulletThrow ? feel.bullet.catchChance : feel.catching.receiverCatchChance;
     const radius = this.bulletThrow ? feel.bullet.catchRadiusYards : feel.catching.catchRadiusYards;
@@ -881,7 +881,7 @@ export class FieldScene extends Phaser.Scene {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
       zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop')),
       // Underneath zone defenders (Z-a) come from their spots to rally: help strength.
-      under: this.zoneJobs()?.map((j) => j.kind === 'under'),
+      under: this.zoneJobs()?.map((j) => contestsAsHelp(j, landing, feel)),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
       contested: off.map((p) => contestedCatchRatio(p, R)),
       breakup: m.map((x) => x.breakup),
@@ -923,7 +923,7 @@ export class FieldScene extends Phaser.Scene {
       defenderCatchChance: feel.defense.defenderCatchChance,
       shieldedContestRatio: feel.defense.shieldedContestRatio,
       helpContestRatio: feel.defense.helpContestRatio,
-    }, th.from, this.contestPlayerMods());
+    }, th.from, this.contestPlayerMods(th.to));
 
     let result = pass.result;
     const wrPos = wrSpots[pass.receiver];
