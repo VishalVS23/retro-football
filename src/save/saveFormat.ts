@@ -9,8 +9,9 @@ import { sanitizeSavedGame, type SavedGame } from './savedGame';
 import { sanitizeLeague, type League } from '../league/league';
 import { sanitizeSeason, type Season } from '../league/season';
 import { TEAM_DEFS } from '../league/teams';
+import { emptyStats, sanitizeStats, type StatsStore } from '../league/boxScore';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const MAX_BACKUPS = 3;
 
 export interface SaveData {
@@ -32,6 +33,11 @@ export interface SaveData {
   league: League | null;
   /** The season being played (version 4). null = none yet: the game starts one once a team is picked. */
   season: Season | null;
+  /**
+   * Player stats (version 5): this season's box scores and past seasons' totals. Stored under its own
+   * key (saveStore.ts), written once a week rather than with every autosave.
+   */
+  stats: StatsStore;
 }
 
 export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
@@ -46,6 +52,7 @@ export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
     game: null,
     league: null,
     season: null,
+    stats: emptyStats(),
   };
 }
 
@@ -61,6 +68,8 @@ const MIGRATIONS: Record<number, (s: AnySave) => AnySave> = {
   2: (s) => ({ ...s, version: 3, league: null }),
   // 3 -> 4: seasons. Older saves start week 1 of a new season with the team they already coach.
   3: (s) => ({ ...s, version: 4, season: null }),
+  // 4 -> 5: player stats. Older saves start with none (the season's games so far have no box scores).
+  4: (s) => ({ ...s, version: 5, stats: emptyStats() }),
 };
 
 export class SaveError extends Error {}
@@ -86,7 +95,7 @@ export function migrate(raw: unknown): SaveData {
   // A damaged game in progress is dropped (new game), never the whole save.
   // A damaged league is made again from the seed (the user picks a team again).
   // A damaged season is dropped too (a new one starts).
-  s = { ...s, game: sanitizeSavedGame(s.game), league: sanitizeLeague(s.league), season: sanitizeSeason(s.season, TEAM_DEFS.length) };
+  s = { ...s, game: sanitizeSavedGame(s.game), league: sanitizeLeague(s.league), season: sanitizeSeason(s.season, TEAM_DEFS.length), stats: sanitizeStats(s.stats) };
   return s as unknown as SaveData;
 }
 

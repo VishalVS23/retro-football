@@ -45,12 +45,12 @@ export type OurPlay =
   | { kind: 'run'; yards: number } // a designed run or a QB scramble past the line
   | { kind: 'sack'; yards: number }; // yards is negative (or 0)
 
-const side = (): SideStats => ({ plays: 0, passYards: 0, rushYards: 0, firstDowns: 0, turnovers: 0, sacked: 0 });
+export const newSideStats = (): SideStats => ({ plays: 0, passYards: 0, rushYards: 0, firstDowns: 0, turnovers: 0, sacked: 0 });
 
 export function newGameStats(): GameStats {
   return {
-    us: side(),
-    them: side(),
+    us: newSideStats(),
+    them: newSideStats(),
     qb: { completions: 0, attempts: 0, yards: 0, touchdowns: 0, interceptions: 0 },
     longest: 0,
     byQuarter: { us: [0, 0, 0, 0], them: [0, 0, 0, 0] },
@@ -100,7 +100,7 @@ export function recordEvent(g: GameStats, event: DriveEvent): GameStats {
 }
 
 /** A side's team stats plus one simulated drive. */
-function addDrive(t: SideStats, d: OppDrive): SideStats {
+export function addDrive(t: SideStats, d: OppDrive): SideStats {
   const turnover = d.result === 'interception' || d.result === 'fumble' ? 1 : 0;
   // Field goal tries and punts are plays in the drive sim, but not snaps from scrimmage here.
   const kicks = d.result === 'fieldGoal' || d.result === 'missedFieldGoal' || d.result === 'punt' ? 1 : 0;

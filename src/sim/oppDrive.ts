@@ -80,8 +80,24 @@ export type OppDriveNote = 'hurryUp' | 'runClock' | 'kneel' | 'risky' | null;
 /** 'quarterEnd' = stopped at 0:00 of the quarter mid-drive (SIM TO END OF QUARTER, only when `stopAfterSeconds` is given): the drive carries on next quarter. */
 export type OppDriveResult = 'touchdown' | 'fieldGoal' | 'missedFieldGoal' | 'punt' | 'interception' | 'fumble' | 'downs' | 'endOfHalf' | 'quarterEnd';
 
+/**
+ * One snap of a simulated drive, as the player stats need it (4b). `yards` count like the team stats
+ * (gains up to the goal line; a fumbled play's yards don't count). Recorded only: never changes the dice.
+ */
+export type Snap =
+  | { k: 'run' | 'pass'; yards: number; td?: boolean; fumble?: boolean }
+  | { k: 'sack'; yards: number }
+  | { k: 'inc' }
+  | { k: 'int' }
+  | { k: 'fg'; yards: number; good: boolean }
+  | { k: 'punt'; yards: number }
+  | { k: 'try'; kind: 'extraPoint' | 'twoPoint'; good: boolean }
+  | { k: 'kneel' };
+
 export interface OppDrive {
   result: OppDriveResult;
+  /** Every snap of the drive, in order (4b: who did what is decided later, with its own dice). */
+  snaps: Snap[];
   plays: number;
   /** Net yards gained (from where they started to where the drive ended). */
   yards: number;
@@ -204,8 +220,10 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   };
 
   let tryKind: OppDrive['tryKind'];
+  const snaps: Snap[] = [];
   const done = (result: OppDriveResult, endT: number, ourStartT: number, points = 0, extraPointGood: boolean | null = null): OppDrive => ({
     result,
+    snaps: [...snaps],
     plays,
     yards: Math.round(endT - startT),
     // A play that starts before 0:00 still finishes, but the quarter (or half) ends at 0:00.
@@ -228,7 +246,9 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
   const kickFieldGoal = () => {
     plays++;
     seconds += r.incompleteSeconds;
-    if (rng.chance(oppFieldGoalChance(fieldGoalDistance(t), r, mods))) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
+    const good = rng.chance(oppFieldGoalChance(fieldGoalDistance(t), r, mods));
+    snaps.push({ k: 'fg', yards: fieldGoalDistance(t), good });
+    if (good) return done('fieldGoal', t, kickoffToUs, FIELD_GOAL_POINTS);
     // Missed: our ball at the spot of the kick, or our 20 if that's further out.
     return done('missedFieldGoal', t, Math.min(t - 7, OPP_GOAL_X - 20));
   };
@@ -250,7 +270,9 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     const kneelOutHalf = clock.quarter === 2 && left <= r.halfKneelTime && OPP_GOAL_X - t > r.halfKneelYards;
     if (!ot && (kneelOutGame || kneelOutHalf)) {
       note = 'kneel';
-      plays += Math.max(1, Math.min(kneelsLeft, Math.ceil(left / Math.max(1, r.kneelSeconds))));
+      const kneels = Math.max(1, Math.min(kneelsLeft, Math.ceil(left / Math.max(1, r.kneelSeconds))));
+      plays += kneels;
+      for (let i = 0; i < kneels; i++) snaps.push({ k: 'kneel' });
       seconds = halfLeft;
       return done('endOfHalf', t, ourBallAt(t));
     }
@@ -266,7 +288,9 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       if (tip?.choice === 'punt') {
         plays++;
         seconds += r.incompleteSeconds;
-        return done('punt', t, ourBallAt(t + rng.range(r.puntNetMinYards, r.puntNetMaxYards) + mods.puntNetYards));
+        const net = rng.range(r.puntNetMinYards, r.puntNetMaxYards) + mods.puntNetYards;
+        snaps.push({ k: 'punt', yards: Math.round(Math.min(net, OPP_GOAL_X - t)) });
+        return done('punt', t, ourBallAt(t + net));
       }
     }
 
@@ -286,21 +310,25 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     let gain: number;
     let stops = false;
     let completed = false;
+    let sackPlay = false;
     if (run) {
       gain = rng.range(-r.runLossYards, r.runMaxYards) * strength * mods.runYards;
       if (rng.chance(oddsShift(r.bigRunChance, mods.bigRunSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance * mods.fumbleRatio)) {
         seconds += playSeconds;
+        snaps.push({ k: 'run', yards: 0, fumble: true });
         return done('fumble', t, ourBallAt(t + Math.max(0, gain)));
       }
     } else if (rng.chance(oddsShift(r.interceptionChance, pickSteps))) {
       stats.attempts++;
       seconds += r.incompleteSeconds;
+      snaps.push({ k: 'int' });
       // Picked off somewhere downfield.
       return done('interception', t, ourBallAt(t + rng.range(5, 20)));
     } else if (rng.chance(oddsShift(r.sackChance, mods.sackSteps))) {
       gain = -rng.range(r.sackMinYards, r.sackMaxYards);
       stats.sacks++;
+      sackPlay = true;
     } else if (rng.chance(oddsShift(r.incompleteChance, -mods.completionSteps))) {
       stats.attempts++;
       gain = 0;
@@ -313,6 +341,7 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
       if (rng.chance(oddsShift(r.bigPassChance, bigPassSteps))) gain += rng.range(r.bigPlayMinYards, r.bigPlayMaxYards) * strength;
       if (rng.chance(r.fumbleChance)) {
         seconds += playSeconds;
+        snaps.push({ k: 'pass', yards: 0, fumble: true });
         return done('fumble', t, ourBallAt(t + gain));
       }
     }
@@ -335,6 +364,10 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
     if (counted > stats.longest) stats.longest = counted;
     if (completed && t + gain >= OPP_GOAL_X) stats.passTouchdowns++;
     if (counted >= BIG_PLAY_YARDS && (!bigPlay || counted > bigPlay.yards)) bigPlay = { kind: run ? 'run' : 'pass', yards: counted };
+    const scored = t + gain >= OPP_GOAL_X;
+    if (run || completed) snaps.push({ k: run ? 'run' : 'pass', yards: counted, ...(scored && { td: true }) });
+    else if (sackPlay) snaps.push({ k: 'sack', yards: counted });
+    else snaps.push({ k: 'inc' });
 
     const next = t + gain;
     if (next >= OPP_GOAL_X) {
@@ -344,10 +377,12 @@ export function simulateOppDrive(startX: number, sit: OppDriveSituation, r: OppD
         if (after > 0) return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS, null);
         tryKind = after >= -EXTRA_POINT_POINTS ? 'extraPoint' : 'twoPoint';
         const good = rng.chance(tryKind === 'extraPoint' ? r.extraPointChance : r.twoPointChance);
+        snaps.push({ k: 'try', kind: tryKind, good });
         const extra = good ? (tryKind === 'extraPoint' ? EXTRA_POINT_POINTS : TWO_POINT_POINTS) : 0;
         return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS + extra, good);
       }
       const xp = rng.chance(r.extraPointChance);
+      snaps.push({ k: 'try', kind: 'extraPoint', good: xp });
       return done('touchdown', OPP_GOAL_X, kickoffToUs, TD_POINTS + (xp ? EXTRA_POINT_POINTS : 0), xp);
     }
     // A sack in their own end zone is a safety; rare enough that it's just spotted at their 1 here.

@@ -7,6 +7,7 @@ import { type SaveData } from './saveFormat';
 import { snapshotGame, type SavedGame } from './savedGame';
 import type { League } from '../league/league';
 import type { Season } from '../league/season';
+import type { StatsStore } from '../league/boxScore';
 import { openOrCreateSave, writeSave } from './saveStore';
 
 let current: SaveData | null = null;
@@ -15,6 +16,8 @@ let persisted = false;
 let imported = false;
 /** The league changed since it was last stored. */
 let leagueDirty = false;
+/** The stats changed since they were last stored. */
+let statsDirty = false;
 let resolveReady: (save: SaveData) => void = () => {};
 const ready = new Promise<SaveData>((resolve) => (resolveReady = resolve));
 
@@ -71,8 +74,10 @@ export async function commitSave(backup = true): Promise<void> {
   current.rngState = rng.getState();
   // Full saves (backup) always include the league; autosaves only when it changed.
   const league = backup || leagueDirty;
-  if (persisted) await writeSave(current, { backup, league });
+  const stats = backup || statsDirty;
+  if (persisted) await writeSave(current, { backup, league, stats });
   if (league) leagueDirty = false;
+  if (stats) statsDirty = false;
 }
 
 /** Replace the league (e.g. once it's made and the user picked a team) and store it. Never throws. */
@@ -87,10 +92,17 @@ export async function setLeague(league: League): Promise<void> {
   }
 }
 
-/** Replace the season (a week played, a new season) and store it, with a rolling backup. Never throws. */
-export async function setSeason(season: Season | null): Promise<void> {
+/**
+ * Replace the season (a week played, a new season) and store it, with a rolling backup. Never throws.
+ * `stats` = the stats store too (4b: the week's box scores), saved in the same write.
+ */
+export async function setSeason(season: Season | null, stats?: StatsStore): Promise<void> {
   if (!current || imported) return;
   current.season = season;
+  if (stats) {
+    current.stats = stats;
+    statsDirty = true;
+  }
   try {
     await commitSave(true);
   } catch (err) {

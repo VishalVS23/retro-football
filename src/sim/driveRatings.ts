@@ -65,6 +65,8 @@ export interface SimRatingParams extends KickRatingParams {
   simTeBlockShare: number;
   /** Every this many ball-security points above average halves the RB's fumbles. */
   securityHalvingPoints: number;
+  /** Home field (4b): rating points of edge for the home offense (minus for the away one). */
+  simHomeEdge: number;
 }
 
 /** What one offense vs one defense does to the drive dice. All zeros / ones = an average matchup. */
@@ -150,10 +152,15 @@ export function unitEdges(o: OffenseLineup, d: DefenseLineup, r: SimRatingParams
   };
 }
 
-/** What `o` (with its kicker / punter) vs defense `d` does to the drive dice. */
-export function driveMods(o: SimOffense, d: DefenseLineup, base: { kicking: KickRules; punting: PuntRules }, r: SimRatingParams): DriveMods {
+/**
+ * What `o` (with its kicker / punter) vs defense `d` does to the drive dice. `home` = +1 when `o` is
+ * the home team, -1 away, 0 on a neutral field (home field: `simHomeEdge` on passing, running and pass blocking).
+ */
+export function driveMods(o: SimOffense, d: DefenseLineup, base: { kicking: KickRules; punting: PuntRules }, r: SimRatingParams, home = 0): DriveMods {
   if (!r.enabled) return NEUTRAL_MODS;
-  const e = unitEdges(o.offense, d, r);
+  const u = unitEdges(o.offense, d, r);
+  const h = home * r.simHomeEdge;
+  const e = { ...u, pass: u.pass + h, run: u.run + h, passBlock: u.passBlock + h };
   return {
     completionSteps: e.pass * r.simCompletionOddsPerPoint,
     passYards: Math.max(0.3, 1 + e.pass * r.simPassYardsPerPoint),

@@ -25,8 +25,9 @@ interface ModFeel {
   punting: PuntRules;
 }
 
-/** [a on offense vs b's defense, b on offense vs a's defense]. */
-export function matchupMods(a: SimTeam, b: SimTeam, f: ModFeel): [DriveMods, DriveMods] {
+/** [a on offense vs b's defense, b on offense vs a's defense]. `home` = which of the two is at home (null = neutral field). */
+export function matchupMods(a: SimTeam, b: SimTeam, f: ModFeel, home: 0 | 1 | null = null): [DriveMods, DriveMods] {
   const base = { kicking: f.kicking, punting: f.punting };
-  return [driveMods(a, b.defense, base, f.ratings), driveMods(b, a.defense, base, f.ratings)];
+  const h = home === null ? 0 : home === 0 ? 1 : -1;
+  return [driveMods(a, b.defense, base, f.ratings, h), driveMods(b, a.defense, base, f.ratings, -h)];
 }

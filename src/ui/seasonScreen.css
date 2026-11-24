@@ -228,6 +228,19 @@
 .ss-score.mine {
   border-color: var(--ss-gold);
 }
+.ss-score.tap {
+  width: 100%;
+  text-align: left;
+  font-size: 8px;
+}
+.ss-box {
+  margin-left: auto;
+  font-size: 8px;
+  color: var(--ss-gold);
+}
+.ss-ot + .ss-box {
+  margin-left: 6px;
+}
 .ss-side {
   display: flex;
   align-items: center;

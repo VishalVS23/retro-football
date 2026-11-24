@@ -15,6 +15,7 @@ const STORE = 'saves';
 const CURRENT = 'current';
 const BACKUPS = 'backups';
 const LEAGUE = 'league';
+const STATS = 'stats';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -33,7 +34,8 @@ export async function loadSave(): Promise<SaveData | null> {
   const raw = await d.get(STORE, CURRENT);
   if (!raw) return null;
   const league = await d.get(STORE, LEAGUE);
-  return migrate(league === undefined ? raw : { ...raw, league });
+  const stats = await d.get(STORE, STATS);
+  return migrate({ ...raw, ...(league !== undefined && { league }), ...(stats !== undefined && { stats }) });
 }
 
 export interface WriteOptions {
@@ -41,25 +43,29 @@ export interface WriteOptions {
   backup?: boolean;
   /** Also write the league (default true). Autosaves skip it unless it changed. */
   league?: boolean;
+  /** Also write the stats (default true). Autosaves skip them unless they changed. */
+  stats?: boolean;
 }
 
 /** Writes a save, moving the previous one into the rolling backups. */
 export async function writeSave(save: SaveData, opts: WriteOptions = {}): Promise<void> {
-  const { backup = true, league = true } = opts;
+  const { backup = true, league = true, stats = true } = opts;
   const d = await db();
   const tx = d.transaction(STORE, 'readwrite');
   if (backup) {
     const prev = (await tx.store.get(CURRENT)) as SaveData | undefined;
     if (prev) {
       const prevLeague = await tx.store.get(LEAGUE);
-      const previous = prevLeague === undefined ? prev : { ...prev, league: prevLeague };
+      const prevStats = await tx.store.get(STATS);
+      const previous = { ...prev, ...(prevLeague !== undefined && { league: prevLeague }), ...(prevStats !== undefined && { stats: prevStats }) };
       const backups = ((await tx.store.get(BACKUPS)) as SaveData[] | undefined) ?? [];
       await tx.store.put(rotateBackups(backups, previous), BACKUPS);
     }
   }
   // The save without its league; the league goes under its own key.
-  await tx.store.put({ ...save, league: null, updatedAt: new Date().toISOString() }, CURRENT);
+  await tx.store.put({ ...save, league: null, stats: null, updatedAt: new Date().toISOString() }, CURRENT);
   if (league) await tx.store.put(save.league, LEAGUE);
+  if (stats) await tx.store.put(save.stats, STATS);
   await tx.done;
 }
 

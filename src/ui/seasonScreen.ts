@@ -45,6 +45,9 @@ export interface SeasonScreenOptions {
   onSimWeek: () => void;
   onNextSeason: () => void;
   onTeam: () => void;
+  /** 4b: does this game have a box score, and open it. */
+  hasBox?: (gameId: number) => boolean;
+  onBox?: (gameId: number) => void;
 }
 
 type View = 'season' | 'standings' | 'schedule';
@@ -84,7 +87,11 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     const [hs, as] = g.score ?? [0, 0];
     const side = (id: number, pts: number, won: boolean) =>
       `<span class="ss-side${won ? ' won' : ''}">${logo(id, 16)}<span class="ss-abbr">${esc(t(id).abbr)}</span><b>${g.score ? pts : ''}</b></span>`;
-    return `<div class="ss-score${mine ? ' mine' : ''}">${side(g.away, as, as > hs)}<span class="ss-at">@</span>${side(g.home, hs, hs > as)}${g.ot ? `<span class="ss-ot">${g.ot > 1 ? `${g.ot}OT` : 'OT'}</span>` : ''}</div>`;
+    const inner = `${side(g.away, as, as > hs)}<span class="ss-at">@</span>${side(g.home, hs, hs > as)}${g.ot ? `<span class="ss-ot">${g.ot > 1 ? `${g.ot}OT` : 'OT'}</span>` : ''}`;
+    // A played game with a box score: tap it for the box score (4b).
+    return g.score && o.hasBox?.(g.id)
+      ? `<button type="button" class="ss-score tap${mine ? ' mine' : ''}" data-game="${g.id}">${inner}<span class="ss-box">BOX &gt;</span></button>`
+      : `<div class="ss-score${mine ? ' mine' : ''}">${inner}</div>`;
   };
 
   const weekScores = (week: number, title: string) => {
@@ -248,6 +255,11 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
       render();
       return;
     }
+    const box = target.closest<HTMLElement>('[data-game]');
+    if (box) {
+      o.onBox?.(Number(box.dataset.game));
+      return;
+    }
     const wk = target.closest<HTMLElement>('[data-week]');
     if (wk) {
       weekDetail = Number(wk.dataset.week);
@@ -268,7 +280,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   // No key reaches the game underneath while this is open.
   const onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement | null)?.closest?.('input, select, textarea')) return; // ⚙ panel
-    if (document.getElementById('team-screen')) return; // the TEAM screen on top handles its own keys
+    if (document.getElementById('team-screen') || document.getElementById('box-score')) return; // a screen on top handles its own keys
     e.stopImmediatePropagation();
     if (e.type === 'keydown' && e.key === 'Enter' && view === 'season') {
       e.preventDefault();

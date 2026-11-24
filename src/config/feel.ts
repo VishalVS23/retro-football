@@ -866,6 +866,12 @@ export const feel = {
     simTeWeight: 0.5,
     /** ...and as this share of the run blocking (the line the rest). */
     simTeBlockShare: 0.15,
+    /**
+     * Home field (4b): the home team's passing, running and pass blocking get this many rating points
+     * of edge in the drive sim (sims, CPU drives in your games, SIM), the away team's lose as many.
+     * Tuned so the home team wins ~55% of games between two equal teams, like real football.
+     */
+    simHomeEdge: 0.22, // measured: 0 = 50%, 0.2 = 54-55%, 0.5 = 62%, 1 = 75% home wins
   },
   juice: {
     hitPauseTime: 0.06,

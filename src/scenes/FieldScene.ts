@@ -173,7 +173,9 @@ import {
 } from '../sim/clock';
 import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
 import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame, type Season } from '../league/season';
-import { applyResults, weekJobs } from '../league/seasonRun';
+import { addBoxes, applyResults, weekJobs } from '../league/seasonRun';
+import { closeSeasonStats, emptyStats, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
+import { closeBoxScore, openBoxScore } from '../ui/boxScoreScreen';
 import { runWeekSims } from '../league/weekSim';
 import { closeSeasonScreen, openSeasonScreen } from '../ui/seasonScreen';
 import type { SaveData } from '../save/saveFormat';
@@ -338,6 +340,8 @@ export class FieldScene extends Phaser.Scene {
   private saveSeed = 0;
   /** A week is being simmed (the season screen's buttons wait). */
   private weekBusy = false;
+  /** 4b: the season's box scores and past seasons' player totals. */
+  private leagueStats: StatsStore = emptyStats();
   private scoreboard!: Phaser.GameObjects.Text;
   /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
   private readText!: Phaser.GameObjects.Text;
@@ -2073,7 +2077,7 @@ export class FieldScene extends Phaser.Scene {
   private runSim(stop: SimStop, from: SimGameState = this.simStateNow()) {
     const l = this.league;
     if (!l || l.userTeamId === null || this.opponentId === null) return;
-    const result = simulateFrom(from, { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel), rules: feel.oppDrive, clock: feel.clock }, getRngOrFallback(), stop);
+    const result = simulateFrom(from, { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel, this.homeSide()), rules: feel.oppDrive, clock: feel.clock }, getRngOrFallback(), stop);
     let stats = this.stats;
     for (const e of result.log) {
       if (e.drive) stats = e.side === 0 ? recordOurSimDrive(stats, e.drive) : recordTheirDrive(stats, e.drive);
@@ -2155,7 +2159,7 @@ export class FieldScene extends Phaser.Scene {
   private cpuDriveMods() {
     const l = this.league;
     if (!l || l.userTeamId === null || this.opponentId === null) return NEUTRAL_MODS;
-    return matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel)[1];
+    return matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel, this.homeSide())[1];
   }
 
   /**
@@ -2342,6 +2346,7 @@ export class FieldScene extends Phaser.Scene {
     const league = save.league ?? generateLeague(save.seed);
     this.league = league;
     this.saveSeed = save.seed;
+    this.leagueStats = save.stats;
     const ready = () => {
       // 4a: the season (a new save, or one from before seasons existed, starts week 1 of season 1).
       this.season = save.season;
@@ -2621,6 +2626,7 @@ export class FieldScene extends Phaser.Scene {
     closeTeamScreen();
     closeResumeGame();
     closeChooseTeam();
+    closeBoxScore();
     this.kickMeter?.classList.remove('show');
     this.state = 'gameOver'; // nothing on the field reacts while the season screen is up
     this.seasonGameId = null;
@@ -2650,11 +2656,22 @@ export class FieldScene extends Phaser.Scene {
       onNextSeason: () => {
         const next = newSeason(l.teams, s.year + 1, seasonSeed(this.saveSeed, s.year + 1), finalPlaces(s, l.teams));
         this.season = next;
-        void setSeason(next);
+        // The finished season's box scores become each player's season totals (keeps the save small).
+        this.leagueStats = closeSeasonStats(this.leagueStats, s.year);
+        void setSeason(next, this.leagueStats);
         this.openSeason();
       },
       onTeam: () => this.openTeam(),
+      hasBox: (id) => !!this.leagueStats.boxes[id],
+      onBox: (id) => this.showBoxScore(id),
     });
+  }
+
+  /** 4b: who's at home in this game (0 = us, 1 = them), or null for an exhibition (neutral field). */
+  private homeSide(): 0 | 1 | null {
+    const g = this.seasonGameId !== null ? this.season?.games[this.seasonGameId] : undefined;
+    if (!g || this.league?.userTeamId === null || this.league?.userTeamId === undefined) return null;
+    return g.home === this.league.userTeamId ? 0 : 1;
   }
 
   /** 4a: our season game is over: its score goes in the season. Returns its week (null = an exhibition). */
@@ -2669,8 +2686,38 @@ export class FieldScene extends Phaser.Scene {
     const theirs = this.match.them;
     this.season = recordResult(s, id, g.home === me ? [ours, theirs] : [theirs, ours], this.clock.ot ?? 0);
     this.seasonGameId = null;
-    void setSeason(this.season);
+    // Our box score: the team stats and the score by quarter (player lines for games we play: 4b-2).
+    const opp = g.home === me ? g.away : g.home;
+    const us: TeamBox = { teamId: me, stats: { ...this.stats.us }, byPeriod: [...this.stats.byQuarter.us], lines: {} };
+    const them: TeamBox = { teamId: opp, stats: { ...this.stats.them }, byPeriod: [...this.stats.byQuarter.them], lines: {} };
+    const box: BoxScore = { gameId: id, teams: g.home === me ? [us, them] : [them, us] };
+    this.leagueStats = { ...this.leagueStats, boxes: { ...this.leagueStats.boxes, [id]: box } };
+    void setSeason(this.season, this.leagueStats);
     return g.week;
+  }
+
+  /** 4b: one game's box score, over the season screen. */
+  private showBoxScore(gameId: number) {
+    const l = this.league;
+    const s = this.season;
+    const box = this.leagueStats.boxes[gameId];
+    const g = s?.games[gameId];
+    if (!l || !box || !g) return;
+    const info = (id: number) => ({ abbr: l.teams[id].abbr, color: l.teams[id].colors[0] });
+    const me = l.userTeamId;
+    openBoxScore({
+      box,
+      week: g.week,
+      ot: g.ot ?? 0,
+      teams: [info(g.home), info(g.away)],
+      player: (id) => {
+        const p = l.players[id];
+        return p ? { name: `${p.firstName[0]}. ${p.lastName}`.toUpperCase(), pos: p.position } : { name: '?', pos: '' };
+      },
+      // Start on our players when it's our game, else the away team's.
+      side: g.home === me ? 0 : 1,
+      onClose: () => {},
+    });
   }
 
   /** 4a: sims every other game of this week in the background, moves on a week, and shows the scores. */
@@ -2684,7 +2731,8 @@ export class FieldScene extends Phaser.Scene {
       const results = await runWeekSims(weekJobs(l, s, week, feel), { rules: feel.oppDrive, clock: feel.clock });
       const next = advanceWeek(applyResults(this.season ?? s, results));
       this.season = next;
-      void setSeason(next);
+      this.leagueStats = { ...this.leagueStats, boxes: addBoxes(this.leagueStats.boxes, results) };
+      void setSeason(next, this.leagueStats);
       this.openSeason(week);
     } finally {
       this.weekBusy = false;

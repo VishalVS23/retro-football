@@ -45,6 +45,7 @@ describe('their drives', () => {
   it('adds their yards, first downs, sacks and turnovers; punts and kicks are not snaps', () => {
     const d = (result: OppDrive['result'], plays: number): OppDrive => ({
       result,
+      snaps: [],
       plays,
       yards: 0,
       seconds: 30,

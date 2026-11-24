@@ -4,20 +4,26 @@
  * running them right here if workers aren't available.
  *
  * Each game carries its own seed, so a game plays out the same wherever and whenever it's simmed.
- * The drive nudges (`mods`) are worked out on the main thread from the league (the worker never needs
- * the 1,000+ players), and the rules come from the live `feel` values (the ⚙ panel can change them).
+ * The drive nudges (`mods`) are worked out on the main thread from the league; the worker only gets each
+ * team's starters (for the box score, 4b), never the whole league. The rules come from the live `feel`
+ * values (the ⚙ panel can change them).
  */
 import { createRng } from '../sim/rng';
 import { simulateGame, type Side } from '../sim/simGame';
 import type { DriveMods } from '../sim/driveRatings';
 import type { OppDriveRules } from '../sim/oppDrive';
 import type { ClockRules } from '../sim/clock';
+import { boxFromSim, CREDIT_SALT, type BoxScore } from './boxScore';
+import type { StatUnit } from './playerStats';
 
 export interface WeekJob {
   gameId: number;
   /** [home on offense vs away's defense, away on offense vs home's defense]. */
   mods: [DriveMods, DriveMods];
   seed: number;
+  /** 4b: [home, away] team ids and starters, for the box score (left out = score only). */
+  teams?: [number, number];
+  units?: [StatUnit, StatUnit];
 }
 
 export interface WeekResult {
@@ -25,6 +31,8 @@ export interface WeekResult {
   /** [home, away]. */
   score: [number, number];
   ot: number;
+  /** 4b: the box score (when the job had the teams' players). */
+  box?: BoxScore;
 }
 
 export interface WeekRules {
@@ -38,7 +46,9 @@ export function simGames(jobs: readonly WeekJob[], r: WeekRules): WeekResult[] {
     const rng = createRng(j.seed);
     const receives: Side = rng.next() < 0.5 ? 0 : 1;
     const res = simulateGame({ mods: j.mods, rules: r.rules, clock: r.clock, receives }, rng);
-    return { gameId: j.gameId, score: [res.score[0], res.score[1]], ot: res.ot };
+    // Who did what: the credit dice are the game's own seed mixed with a salt (the score never depends on them).
+    const box = j.teams && j.units ? boxFromSim(j.gameId, res, j.teams, j.units, createRng((j.seed ^ CREDIT_SALT) >>> 0)) : undefined;
+    return { gameId: j.gameId, score: [res.score[0], res.score[1]], ot: res.ot, ...(box && { box }) };
   });
 }
 

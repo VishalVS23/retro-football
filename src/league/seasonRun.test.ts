@@ -4,6 +4,7 @@ import { generateLeague, teamRatings } from './league';
 import { advanceWeek, isOver, newSeason, standingRows, SEASON_WEEKS, GAMES_PER_TEAM } from './season';
 import { applyResults, weekJobs } from './seasonRun';
 import { simGames } from './weekSim';
+import { matchupMods, simTeam } from './simTeams';
 
 describe('a whole simmed season (4a)', () => {
   it('every game gets played once; records spread out; better teams win more, never all', () => {
@@ -29,6 +30,20 @@ describe('a whole simmed season (4a)', () => {
     // Simming again gives the same results (each game has its own dice).
     const again = applyResults(newSeason(league.teams, 1, 777), simGames(weekJobs(league, newSeason(league.teams, 1, 777), 1, feel), rules));
     expect(again.games.filter((g) => g.week === 1).map((g) => g.score)).toEqual(s.games.filter((g) => g.week === 1).map((g) => g.score));
+  }, 60000);
+
+  it('home field (4b): a team against itself wins ~55% at home', () => {
+    const league = generateLeague(4242);
+    let home = 0;
+    const n = 3000;
+    for (const id of [3, 17, 24]) {
+      const t = simTeam(league, id);
+      const mods = matchupMods(t, t, feel, 0);
+      for (const r of simGames(Array.from({ length: n / 3 }, (_, k) => ({ gameId: k, mods, seed: (k * 7919 + id * 104729) >>> 0 })), { rules: feel.oppDrive, clock: feel.clock }))
+        home += r.score[0] > r.score[1] ? 1 : r.score[0] === r.score[1] ? 0.5 : 0;
+    }
+    expect(home / n).toBeGreaterThan(0.52);
+    expect(home / n).toBeLessThan(0.58);
   }, 60000);
 
   it("the user's game is left out of the week's sims while it's his to play", () => {
