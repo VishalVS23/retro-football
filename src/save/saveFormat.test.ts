@@ -10,6 +10,8 @@ import {
   rotateBackups,
   serializeSave,
 } from './saveFormat';
+import { newSeason } from '../league/season';
+import { TEAM_DEFS } from '../league/teams';
 
 const fixedDate = new Date('2026-11-14T12:00:00Z');
 
@@ -21,6 +23,16 @@ describe('save format', () => {
     expect(s.rngState).toBe(42);
     expect(s.sessions).toBe(0);
     expect(s.createdAt).toBe('2026-11-14T12:00:00.000Z');
+  });
+
+  it('4a: a version 3 save upgrades with no season yet; a saved season loads back; a damaged one is dropped', () => {
+    const { season: _drop, ...v3 } = { ...createNewSave(9, fixedDate), version: 3 };
+    const up = migrate(v3);
+    expect(up.version).toBe(4);
+    expect(up.season).toBeNull();
+    const season = newSeason(TEAM_DEFS, 1, 123);
+    expect(migrate({ ...createNewSave(9, fixedDate), season }).season).toEqual(season);
+    expect(migrate({ ...createNewSave(9, fixedDate), season: { ...season, games: [] } }).season).toBeNull();
   });
 
   it('survives a round trip through a file', () => {

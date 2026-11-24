@@ -6,6 +6,7 @@ import { createRng, type Rng } from '../sim/rng';
 import { type SaveData } from './saveFormat';
 import { snapshotGame, type SavedGame } from './savedGame';
 import type { League } from '../league/league';
+import type { Season } from '../league/season';
 import { openOrCreateSave, writeSave } from './saveStore';
 
 let current: SaveData | null = null;
@@ -83,6 +84,17 @@ export async function setLeague(league: League): Promise<void> {
     await commitSave(false);
   } catch (err) {
     console.warn('Saving the league failed:', err);
+  }
+}
+
+/** Replace the season (a week played, a new season) and store it, with a rolling backup. Never throws. */
+export async function setSeason(season: Season | null): Promise<void> {
+  if (!current || imported) return;
+  current.season = season;
+  try {
+    await commitSave(true);
+  } catch (err) {
+    console.warn('Saving the season failed:', err);
   }
 }
 

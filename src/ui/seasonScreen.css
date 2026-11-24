@@ -1,0 +1,340 @@
+/*
+ * SEASON screen: same pixel UI-kit look as the TEAM screen (navy panels, thick outlines, gold
+ * highlights). 8px minimum text. Scrolls vertically only.
+ */
+#season-screen {
+  --ss-navy: #0d1b2a;
+  --ss-panel: #102a52;
+  --ss-card: #0f2346;
+  --ss-border: #2f6fd6;
+  --ss-gold: #ffd166;
+  --ss-text: #f4efe1;
+  --ss-dim: #9ec5ff;
+  position: fixed;
+  inset: 0;
+  z-index: 5; /* above the play calling screen; the TEAM screen opens on top of it */
+  display: flex;
+  padding: calc(env(safe-area-inset-top) + 6px) calc(env(safe-area-inset-right) + 10px) calc(env(safe-area-inset-bottom) + 6px)
+    calc(env(safe-area-inset-left) + 10px);
+  background: #0b1d3a;
+  font-family: 'Press Start 2P', monospace;
+  color: var(--ss-text);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#season-screen button {
+  font-family: inherit;
+  color: inherit;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.ss-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  background: var(--ss-panel);
+  border: 3px solid var(--ss-border);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--ss-navy), inset 0 0 0 2px var(--ss-navy);
+  padding: 6px;
+}
+
+/* ---------- Side rail ---------- */
+.ss-rail {
+  flex: none;
+  width: 104px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ss-me {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0 6px;
+  font-size: 9px;
+  color: var(--ss-gold);
+}
+.ss-nav {
+  padding: 9px 6px;
+  font-size: 8px;
+  text-align: left;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+}
+.ss-nav.on {
+  background: #1a3a6e;
+  border-color: var(--ss-gold);
+  color: var(--ss-gold);
+}
+
+/* ---------- Main area ---------- */
+.ss-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 4px 8px 2px;
+}
+.ss-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.ss-title {
+  font-size: 9px;
+  color: var(--ss-gold);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.ss-head .ss-title {
+  margin-bottom: 0;
+}
+.ss-h {
+  font-size: 8px;
+  color: var(--ss-dim);
+  margin: 10px 0 6px;
+}
+.ss-note {
+  font-size: 8px;
+  color: var(--ss-dim);
+  line-height: 1.6;
+  margin-top: 6px;
+}
+.ss-chips {
+  display: flex;
+  gap: 4px;
+}
+.ss-chip {
+  padding: 6px 8px;
+  font-size: 8px;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+}
+.ss-chip.on {
+  background: var(--ss-gold);
+  color: var(--ss-navy) !important;
+}
+.ss-link {
+  padding: 4px 0 8px;
+  font-size: 8px;
+  color: var(--ss-gold) !important;
+  background: none;
+  border: none;
+}
+
+/* ---------- This week's card ---------- */
+.ss-card {
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+  padding: 10px;
+  text-align: center;
+}
+.ss-card-title {
+  font-size: 9px;
+  color: var(--ss-gold);
+  margin-bottom: 8px;
+}
+.ss-match {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.ss-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 80px;
+}
+.ss-tname {
+  font-size: 12px;
+}
+.ss-trec,
+.ss-tstars {
+  font-size: 8px;
+  color: var(--ss-dim);
+}
+.ss-tstars {
+  color: var(--ss-gold);
+  letter-spacing: 1px;
+}
+.ss-vs {
+  font-size: 12px;
+  color: var(--ss-gold);
+}
+.ss-big {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.ss-btns {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ss-btn {
+  padding: 10px 14px;
+  font-size: 9px;
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+  box-shadow: 0 3px 0 var(--ss-navy);
+  color: var(--ss-navy) !important;
+}
+.ss-btn.go {
+  background: #3ddc84;
+}
+.ss-btn.sim {
+  background: #8f6be8;
+  color: var(--ss-text) !important;
+}
+.ss-btn:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+/* ---------- Score lines ---------- */
+.ss-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 10px;
+}
+.ss-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  font-size: 8px;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+}
+.ss-score.mine {
+  border-color: var(--ss-gold);
+}
+.ss-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ss-dim);
+}
+.ss-side.won {
+  color: var(--ss-text);
+}
+.ss-side b {
+  font-weight: normal;
+  min-width: 18px;
+  text-align: right;
+  font-size: 10px;
+}
+.ss-at {
+  color: var(--ss-dim);
+}
+.ss-ot {
+  margin-left: auto;
+  color: var(--ss-gold);
+}
+
+/* ---------- Standings ---------- */
+.ss-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8px;
+}
+.ss-table th {
+  font-weight: normal;
+  color: var(--ss-dim);
+  padding: 3px 4px;
+  text-align: right;
+}
+.ss-table td {
+  padding: 4px;
+  text-align: right;
+  background: var(--ss-card);
+  border-top: 2px solid var(--ss-panel);
+}
+.ss-table .l {
+  text-align: left;
+}
+.ss-table td.l {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ss-table tr.mine td {
+  color: var(--ss-gold);
+}
+
+/* ---------- Schedule ---------- */
+.ss-weeks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px 10px;
+}
+.ss-week {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  font-size: 8px;
+  text-align: left;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+}
+.ss-week.now {
+  border-color: var(--ss-gold);
+}
+.ss-wk {
+  color: var(--ss-dim);
+  min-width: 40px;
+}
+.ss-opp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ss-bye {
+  color: var(--ss-dim);
+}
+.ss-res {
+  margin-left: auto;
+}
+.r-W {
+  color: #3ddc84;
+}
+.r-L {
+  color: #ff5c5c;
+}
+.r-T {
+  color: var(--ss-dim);
+}
+
+@media (max-width: 700px) {
+  .ss-rail {
+    width: 92px;
+  }
+  .ss-scores {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ss-score {
+    gap: 4px;
+    padding: 4px;
+  }
+}

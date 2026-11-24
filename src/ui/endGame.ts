@@ -18,6 +18,10 @@ export interface EndGameOptions {
   ourColor?: string;
   theirColor?: string;
   onPlayAgain: () => void;
+  /** The button's text (default PLAY AGAIN; a season game says CONTINUE). */
+  buttonLabel?: string;
+  /** 4a: shown before FINAL, e.g. WEEK 3. */
+  header?: string;
 }
 
 let root: HTMLDivElement | null = null;
@@ -70,7 +74,7 @@ export function openEndGame(o: EndGameOptions) {
   el.innerHTML = `
     <div class="eg-panel" role="dialog" aria-label="Final score and stats">
       <div class="eg-left">
-        <div class="eg-head-line">FINAL${periods > 4 ? ` / ${periodName(periods - 1)}` : ''}</div>
+        <div class="eg-head-line">${o.header ? `${o.header} · ` : ''}FINAL${periods > 4 ? ` / ${periodName(periods - 1)}` : ''}</div>
         <div class="eg-result ${outcome.tone}">${outcome.text}</div>
         <div class="eg-score">${o.ourColor ? teamLogoHtml(us, o.ourColor, 26) : ''}<span>${us} ${o.us} - ${o.them} ${them}</span>${o.theirColor ? teamLogoHtml(them, o.theirColor, 26) : ''}</div>
         ${quarters}
@@ -79,7 +83,7 @@ export function openEndGame(o: EndGameOptions) {
       </div>
       <div class="eg-right">
         ${team}
-        <button class="eg-btn" type="button">PLAY AGAIN &gt;</button>
+        <button class="eg-btn" type="button">${o.buttonLabel ?? 'PLAY AGAIN'} &gt;</button>
       </div>
     </div>`;
   // Taps on the panel never reach the field underneath.

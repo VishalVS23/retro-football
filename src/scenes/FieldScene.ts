@@ -171,7 +171,11 @@ import {
   type ClockEvent,
   type ClockState,
 } from '../sim/clock';
-import { getRngOrFallback, saveGameInProgress, setLeague, whenSaveReady } from '../save/saveSession';
+import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
+import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame, type Season } from '../league/season';
+import { applyResults, weekJobs } from '../league/seasonRun';
+import { runWeekSims } from '../league/weekSim';
+import { closeSeasonScreen, openSeasonScreen } from '../ui/seasonScreen';
 import type { SaveData } from '../save/saveFormat';
 import { generateLeague, pickOpponent, teamRatings, type League } from '../league/league';
 import { hexToNumber, kitColors } from '../league/colors';
@@ -188,7 +192,7 @@ import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGam
 import { LEAN_HINTS, bracketCorner, bracketTarget, hotReceiver, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
-import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT } from '../debug/gameControls';
+import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT, SEASON_SCREEN_EVENT } from '../debug/gameControls';
 import { teamStars, type TeamStars } from '../league/teamStars';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -328,6 +332,12 @@ export class FieldScene extends Phaser.Scene {
   /** F-a: the formation we line up in (stays until changed on the play-call screen; saved with the game). */
   private formationId: FormationId = 'normal';
   private form = formation(newGame().ballX);
+  /** 4a: the season, the season game being played (its id; null = an exhibition), and the save's seed (next seasons). */
+  private season: Season | null = null;
+  private seasonGameId: number | null = null;
+  private saveSeed = 0;
+  /** A week is being simmed (the season screen's buttons wait). */
+  private weekBusy = false;
   private scoreboard!: Phaser.GameObjects.Text;
   /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
   private readText!: Phaser.GameObjects.Text;
@@ -457,6 +467,11 @@ export class FieldScene extends Phaser.Scene {
     const onNewGame = () => this.startNewGame();
     const onChangeTeam = () => this.changeTeam();
     const onChooseOpponent = () => this.chooseOpponent();
+    const onSeasonScreen = () => {
+      void saveGameInProgress(null);
+      this.openSeason();
+    };
+    window.addEventListener(SEASON_SCREEN_EVENT, onSeasonScreen);
     window.addEventListener(NEW_GAME_EVENT, onNewGame);
     window.addEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
     window.addEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
@@ -470,6 +485,7 @@ export class FieldScene extends Phaser.Scene {
       window.removeEventListener(NEW_GAME_EVENT, onNewGame);
       window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
       window.removeEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
+      window.removeEventListener(SEASON_SCREEN_EVENT, onSeasonScreen);
     });
 
     // ⚙ Display switches (matchup arrows, names): redraw the names and an open play-call screen.
@@ -2303,6 +2319,8 @@ export class FieldScene extends Phaser.Scene {
     this.finishBreak = null;
     this.updateScoreboard();
     this.updateLabel();
+    // 4a: a season game goes in the standings; CONTINUE sims the rest of the week. Exhibition: PLAY AGAIN.
+    const week = this.recordSeasonGame();
     openEndGame({
       us: this.match.us,
       them: this.match.them,
@@ -2310,7 +2328,7 @@ export class FieldScene extends Phaser.Scene {
       ourAbbr: this.ourAbbr(),
       theirAbbr: this.theirAbbr(),
       ...this.teamColors(),
-      onPlayAgain: () => this.startNewGame(),
+      ...(week !== null ? { header: `WEEK ${week}`, buttonLabel: 'CONTINUE', onPlayAgain: () => void this.finishWeek() } : { onPlayAgain: () => this.startNewGame() }),
     });
     // The game is over: nothing to continue next time.
     if (this.autosave) void saveGameInProgress(null);
@@ -2323,11 +2341,18 @@ export class FieldScene extends Phaser.Scene {
   private onSaveLoaded(save: SaveData) {
     const league = save.league ?? generateLeague(save.seed);
     this.league = league;
+    this.saveSeed = save.seed;
     const ready = () => {
+      // 4a: the season (a new save, or one from before seasons existed, starts week 1 of season 1).
+      this.season = save.season;
+      if (!this.season) {
+        this.season = newSeason(league.teams, 1, seasonSeed(save.seed, 1));
+        void setSeason(this.season);
+      }
       this.newOpponent();
       // The play calling screen opened before the league existed: redraw it so TEAM works.
       if (this.state === 'calling') this.openCall();
-      this.offerResume(save.game);
+      if (!this.offerResume(save.game)) this.openSeason();
     };
     if (league.userTeamId !== null) {
       ready();
@@ -2344,7 +2369,9 @@ export class FieldScene extends Phaser.Scene {
    * Throws away the game in progress (if any) and starts a fresh one against a new opponent:
    * PLAY AGAIN on the end screen, and NEW GAME / CHANGE TEAM in the ⚙ panel.
    */
-  private startNewGame(opponentId?: number) {
+  private startNewGame(opponentId?: number, seasonGameId: number | null = null) {
+    closeSeasonScreen();
+    this.seasonGameId = seasonGameId;
     closePlayCall();
     closeDriveSummary();
     closeSimRecap();
@@ -2380,7 +2407,8 @@ export class FieldScene extends Phaser.Scene {
     this.chooseTeam(league, (id) => {
       league.userTeamId = id;
       void setLeague(league);
-      this.startNewGame();
+      void saveGameInProgress(null);
+      this.openSeason();
     });
   }
 
@@ -2543,11 +2571,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** On launch: an unfinished game in the save = the CONTINUE / NEW GAME panel. */
-  private offerResume(raw: unknown) {
+  private offerResume(raw: unknown): boolean {
     const saved = sanitizeSavedGame(raw, PLAYS.length);
     if (!saved || isFreshGame(saved, feel.clock.quarterLength)) {
       this.autosave = true;
-      return;
+      return false;
     }
     const c = saved.clock;
     // Games saved before the league existed (or against a team that's now ours) get a random opponent.
@@ -2561,14 +2589,106 @@ export class FieldScene extends Phaser.Scene {
       onContinue: () => {
         this.autosave = true;
         this.opponentId = savedOpp;
+        // 4a: still this week's unplayed game of ours? Then it counts; anything else is an exhibition now.
+        const sg = saved.seasonGameId;
+        const g = sg !== undefined ? this.season?.games[sg] : undefined;
+        const me = this.league?.userTeamId;
+        this.seasonGameId = g && !g.score && g.week === this.season!.week && (g.home === me || g.away === me) && (g.home === savedOpp || g.away === savedOpp) ? g.id : null;
         this.applyTeams();
         this.loadGame(saved);
       },
       onNewGame: () => {
         this.autosave = true;
         void saveGameInProgress(null);
+        this.openSeason();
       },
     });
+    return true;
+  }
+
+  /**
+   * 4a: the season screen (the season's home): this week's game, standings, schedule. Closes
+   * whatever was open; the field underneath waits. `resultsWeek` = show that week's scores.
+   */
+  private openSeason(resultsWeek?: number) {
+    const l = this.league;
+    const s = this.season;
+    if (!l || l.userTeamId === null || !s) return;
+    closePlayCall();
+    closeDriveSummary();
+    closeSimRecap();
+    closeEndGame();
+    closeTeamScreen();
+    closeResumeGame();
+    closeChooseTeam();
+    this.kickMeter?.classList.remove('show');
+    this.state = 'gameOver'; // nothing on the field reacts while the season screen is up
+    this.seasonGameId = null;
+    this.updateLabel();
+    const me = l.userTeamId;
+    const stars = teamStars(l);
+    openSeasonScreen({
+      season: s,
+      teams: l.teams.map((t) => ({ abbr: t.abbr, city: t.city, nickname: t.nickname, color: t.colors[0], conference: t.conference, division: t.division, stars: stars[t.id].overall })),
+      conferences: CONFERENCES,
+      divisions: DIVISIONS,
+      userTeamId: me,
+      ...(resultsWeek !== undefined && { resultsWeek }),
+      onPlay: () => {
+        const g = teamGame(s, me);
+        if (g) this.startNewGame(g.home === me ? g.away : g.home, g.id);
+      },
+      // SIM GAME: the same sim as the SIM button, from the opening kickoff, then the end screen.
+      onSim: () => {
+        const g = teamGame(s, me);
+        if (!g) return;
+        this.startNewGame(g.home === me ? g.away : g.home, g.id);
+        closePlayCall();
+        this.runSim('game');
+      },
+      onSimWeek: () => void this.finishWeek(),
+      onNextSeason: () => {
+        const next = newSeason(l.teams, s.year + 1, seasonSeed(this.saveSeed, s.year + 1), finalPlaces(s, l.teams));
+        this.season = next;
+        void setSeason(next);
+        this.openSeason();
+      },
+      onTeam: () => this.openTeam(),
+    });
+  }
+
+  /** 4a: our season game is over: its score goes in the season. Returns its week (null = an exhibition). */
+  private recordSeasonGame(): number | null {
+    const s = this.season;
+    const id = this.seasonGameId;
+    const me = this.league?.userTeamId;
+    if (!s || id === null || me === null || me === undefined) return null;
+    const g = s.games[id];
+    if (!g || g.score) return null;
+    const ours = this.match.us;
+    const theirs = this.match.them;
+    this.season = recordResult(s, id, g.home === me ? [ours, theirs] : [theirs, ours], this.clock.ot ?? 0);
+    this.seasonGameId = null;
+    void setSeason(this.season);
+    return g.week;
+  }
+
+  /** 4a: sims every other game of this week in the background, moves on a week, and shows the scores. */
+  private async finishWeek() {
+    const l = this.league;
+    const s = this.season;
+    if (!l || !s || this.weekBusy) return;
+    this.weekBusy = true;
+    try {
+      const week = s.week;
+      const results = await runWeekSims(weekJobs(l, s, week, feel), { rules: feel.oppDrive, clock: feel.clock });
+      const next = advanceWeek(applyResults(this.season ?? s, results));
+      this.season = next;
+      void setSeason(next);
+      this.openSeason(week);
+    } finally {
+      this.weekBusy = false;
+    }
   }
 
   /** Picks a saved game up at the play calling screen (it was saved there, between plays). */
@@ -2600,6 +2720,7 @@ export class FieldScene extends Phaser.Scene {
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
     const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId };
     if (this.opponentId !== null) game.opponentId = this.opponentId;
+    if (this.seasonGameId !== null) game.seasonGameId = this.seasonGameId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
 

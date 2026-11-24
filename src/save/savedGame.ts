@@ -24,6 +24,8 @@ export interface SavedGame {
   scouting?: Scouting;
   /** F-a: the formation lined up. Missing in older saves = NORMAL. */
   formation?: FormationId;
+  /** 4a: the season game this is (its id in the season's schedule). Missing = an exhibition game. */
+  seasonGameId?: number;
 }
 
 /** Nothing has happened yet (no snaps, no points, full first quarter): not worth a CONTINUE. */
@@ -112,6 +114,7 @@ export function sanitizeSavedGame(raw: unknown, playCount = Infinity): SavedGame
   const playIndex = isInt(raw.playIndex, 0, Math.max(0, playCount - 1)) ? raw.playIndex : 0;
   const game: SavedGame = { match: raw.match, clock: raw.clock, stats: raw.stats, playIndex };
   if (isInt(raw.opponentId, 0)) game.opponentId = raw.opponentId;
+  if (isInt(raw.seasonGameId, 0)) game.seasonGameId = raw.seasonGameId;
   if (raw.scouting !== undefined) game.scouting = sanitizeScouting(raw.scouting);
   if (typeof raw.formation === 'string' && (FORMATION_IDS as readonly string[]).includes(raw.formation)) game.formation = raw.formation as FormationId;
   return snapshotGame(game);
