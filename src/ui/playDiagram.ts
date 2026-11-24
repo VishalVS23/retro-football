@@ -37,6 +37,8 @@ export interface DiagramView {
   shell?: ShellId;
   /** A-c: S2 bracketing a receiver stands here instead of where the look puts him. */
   safety2At?: { x: number; y: number };
+  /** F-b: defender i (corners) stands here instead of over his man (the Trips check's corner staying home). */
+  coverAt?: ({ x: number; y: number } | undefined)[];
   /** F-a: our formation (default NORMAL). */
   formation?: FormationId;
 }
@@ -226,7 +228,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     const dn = v.defense;
     const dl = (name: string | undefined, fallback: string) => (name ? esc(name.toUpperCase()) : fallback);
     const call = v.call ?? 'man';
-    f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
+    f.wrs.forEach((wr, i) => (s += player(v.coverAt?.[i] ?? cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
     s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
     s += player(linebacker2Start(feel, losX, f.sides), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
     // Safeties (3h-c) where this snap's look puts them (two deep in the huddle: the look shows at the line).

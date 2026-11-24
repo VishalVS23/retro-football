@@ -16,7 +16,7 @@ import { bracketCorner, bracketTarget, jumpTarget } from './scouting';
 import type { Player } from '../players/player';
 import { arm, missLanding, missRadius, offTargetCatchFactor } from './qbRatings';
 import { contestedCatchRatio, contestMods, coverFor, receiverCatchChance, receiverRunParams, safetyReadTime } from './coverRatings';
-import { coverParams, lb2ZoneSpot, lookAlignment, rotatedTarget, rotationReadDelay, safetyBaseReaction, safetyParamsFor, type Look, type ShellId, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
+import { coverParams, lb2ZoneSpot, lookAlignment, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, rotationReadDelay, safetyBaseReaction, safetyParamsFor, type Look, type ShellId, stepBlitzer, zoneParams, type DefCallId, type Lb2Job } from './defCalls';
 
 const dt = 1 / 60;
 /** Where a player who can't catch the ball (the TE in to block) is put for the catch check. */
@@ -114,9 +114,17 @@ export function simulatePass(
   const zoneSpot = lb2ZoneSpot(feel, losX, f.sides);
   // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber. Cover 3: one deep (S1 in the middle third), S2 rotates down.
   const bracket = !isZoneCall(call) && opts.bracket !== undefined ? opts.bracket : null;
+  // F-b, the Trips check: the empty-side corner stays home in a flat zone, S2 comes down on the inside slot, S1 single high.
+  const trips = tripsCheckOn(opts.formation ?? 'normal', call, bracket) && !opts.shown;
+  const tripsJob = trips ? tripsCornerJob(feel, losX, f.sides) : null;
+  if (trips) coverP[2] = { ...zoneParams(coverP[2]), ballReactionTime: feel.zone.underBallReactionTime };
   const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
   // Where they line up: the look they show (a disguise) or the one they play.
   const align = lookAlignment(opts.shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
+  if (tripsJob) {
+    align.cover[2] = { ...tripsJob.spot };
+    align.safeties[1] = tripsSafetyStart(f.skill[2].pos, losX, feel);
+  }
   // A disguise rotates: each defender plays his real job, a step late (`rotatedTarget`).
   const rotation = opts.shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
@@ -132,7 +140,8 @@ export function simulatePass(
   /** Who defender i is following before the throw: his man, or LB2's zone spot. */
   /** Receivers out on a route (a blocking TE is nobody's in a zone). */
   const live = () => runners.filter((_, i) => !(i === TE && teBlocks)).map((r) => r.pos);
-  const jobTarget = (i: number) => (jobs ? zoneTarget(jobs[i], live(), feel) : i === TE && job === 'drop' ? zoneSpot : runners[i].pos);
+  const jobTarget = (i: number) =>
+    tripsJob && i === 2 ? zoneTarget(tripsJob, live(), feel) : jobs ? zoneTarget(jobs[i], live(), feel) : i === TE && job === 'drop' ? zoneSpot : runners[i].pos;
   const coverTarget = (i: number) => (jumper && i === jumper.cover ? jumpTarget(jobTarget(i), jumper.spot, feel) : jobTarget(i));
   const KS = [0, 1] as const;
   let safeties: Vec[] = [...align.safeties];
@@ -156,6 +165,10 @@ export function simulatePass(
     const read = feel.defense.twoDeepBallReactionTime;
     safetyParams[1] = safetyParamsFor(feel, losX, 'twoDeep', 1, def ? safetyReadTime(safetyPlayers[1], read, R) : read);
   }
+  // Trips check: S2 down on the slot reads like the robber on throws to his man, like a help defender on the rest.
+  if (trips) safetyParams[1] = safetyParamsFor(feel, losX, 'robber', 1, def ? safetyReadTime(safetyPlayers[1], d.robberBallReactionTime, R) : d.robberBallReactionTime);
+  if (trips && shot.to !== 2) safetyParams[1] = { ...safetyParams[1], ballReactionTime: Math.max(safetyParams[1].ballReactionTime, d.cbHelpBallReactionTime) };
+  const s2Target = (): Vec | null => (bracket !== null ? bracketTarget(runners[bracket].pos, losX, feel) : trips ? tripsSafetyTarget(runners[2].pos, feel) : null);
 
 
   // A blitzing linebacker runs at the QB instead of covering the RB (nobody blocks him).
@@ -183,8 +196,8 @@ export function simulatePass(
     runners = runners.map((r, i) => stepRunner(r, paths[i], dt, run[i]));
     cover = cover.map((c, i) => (blitz && i === RB ? stepLb(c, t + dt) : i === TE && lb2Rush ? c : stepCoverage(c, rot(i, t, coverTarget(i)), dt, coverP[i])));
     safeties = safeties.map((s, k) =>
-      k === 1 && bracket !== null
-        ? stepZoneSafety(s, bracketTarget(runners[bracket].pos, losX, feel), dt, safetyParams[k])
+      k === 1 && s2Target()
+        ? stepZoneSafety(s, s2Target()!, dt, safetyParams[k])
         : jobs
           ? stepZoneSafety(s, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, safetyParams[k])
           : stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], undefined, (p) => rot(5 + k, t, p)),
@@ -224,11 +237,12 @@ export function simulatePass(
     cover = cover.map((c, i) =>
       i === TE && lb2Rush
         ? c
-        : stepCoverage(c, rot(i, t + e, coverTarget(i)), dt, coverP[i], jobs && i !== jumper?.cover && !breaksOn(jobs[i], landing, feel) ? undefined : { landing, sinceThrow: e + dt, help: !zone && i !== shot.to }),
+        : stepCoverage(c, rot(i, t + e, coverTarget(i)), dt, coverP[i], (jobs && i !== jumper?.cover && !breaksOn(jobs[i], landing, feel)) || (tripsJob && i === 2 && !breaksOn(tripsJob, landing, feel)) ? undefined : { landing, sinceThrow: e + dt, help: !zone && i !== shot.to }),
     );
     safeties = safeties.map((s, k) => {
       const ball = !jobs || breaksOn(jobs[5 + k], landing, feel) ? { landing, sinceThrow: e + dt } : undefined;
-      if (k === 1 && bracket !== null) return stepZoneSafety(s, bracketTarget(runners[bracket].pos, losX, feel), dt, safetyParams[k], ball);
+      const own = k === 1 ? s2Target() : null;
+      if (own) return stepZoneSafety(s, own, dt, safetyParams[k], { landing, sinceThrow: e + dt });
       return jobs
         ? stepZoneSafety(s, rot(5 + k, t + e, zoneTarget(jobs[5 + k], live(), feel)), dt, safetyParams[k], ball)
         : stepSafety(s, runners.map((r) => r.pos), dt, safetyParams[k], ball, (p) => rot(5 + k, t + e, p));
@@ -251,8 +265,9 @@ export function simulatePass(
     shieldedContestRatio: d.shieldedContestRatio,
     helpContestRatio: d.helpContestRatio,
   }, qb, {
-    zone: cover.map((_, i) => zone || (i === TE && job === 'drop') || i === jumper?.cover),
-    under: jobs?.map((j, i) => contestsAsHelp(j, landing, feel) && i !== jumper?.cover),
+    zone: cover.map((_, i) => zone || (i === TE && job === 'drop') || i === jumper?.cover || (trips && i === 2)),
+    under: jobs ? jobs.map((j, i) => contestsAsHelp(j, landing, feel) && i !== jumper?.cover) : trips ? cover.map((_, i) => i === 2) : undefined,
+    ...(trips && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, 2] }),
     ...(opts.offense && {
       receiverCatch: opts.offense.map((p) => receiverCatchChance(p, ca.receiverCatchChance, R) * offTargetCatchFactor(miss, ca.catchRadiusYards, R)),
       contested: opts.offense.map((p) => contestedCatchRatio(p, R)),

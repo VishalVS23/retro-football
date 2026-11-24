@@ -112,6 +112,10 @@ import {
   safetyRunRead,
   lookAlignment,
   disguiseLooks,
+  tripsCheckOn,
+  tripsCornerJob,
+  tripsSafetyStart,
+  tripsSafetyTarget,
   pickDisguise,
   rotatedTarget,
   rotationReadDelay,
@@ -257,6 +261,8 @@ export class FieldScene extends Phaser.Scene {
   private jump: { cover: number; spot: Vec; play: string } | null = null;
   /** A-c: the hot receiver (skill spot) S2 brackets this snap, or null. */
   private bracket: number | null = null;
+  /** F-b: the Trips check this snap (the empty-side corner's flat zone), or null. */
+  private tripsJob: ZoneJob | null = null;
   // After the catch / handoff / scramble: the ball carrier and everyone chasing him.
   private chase: ChaseState = startChase({ x: 0, y: 0 }, []);
   private pursuerDots: Phaser.GameObjects.Arc[] = [];
@@ -951,9 +957,10 @@ export class FieldScene extends Phaser.Scene {
     const m = def.map((p) => contestMods(p, R));
     return {
       // LB2 in his hook zone covers no one: he contests at full strength, like the safety.
-      zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop') || this.jump?.cover === i),
+      zone: def.map((_, i) => !!this.zoneJobs() || (i === TE && this.lb2Job === 'drop') || this.jump?.cover === i || (!!this.tripsJob && i === 2)),
+      ...(this.tripsJob && { covers: [undefined, undefined, undefined, undefined, undefined, undefined, 2] }),
       // Underneath zone defenders (Z-a) come from their spots to rally: help strength.
-      under: this.zoneJobs()?.map((j, i) => contestsAsHelp(j, landing, feel) && this.jump?.cover !== i),
+      under: this.zoneJobs()?.map((j, i) => contestsAsHelp(j, landing, feel) && this.jump?.cover !== i) ?? (this.tripsJob ? def.map((_, i) => i === 2) : undefined),
       receiverCatch: off.map((p) => receiverCatchChance(p, base, R) * offTargetCatchFactor(this.throwMiss, radius, R)),
       contested: off.map((p) => contestedCatchRatio(p, R)),
       breakup: m.map((x) => x.breakup),
@@ -1557,7 +1564,12 @@ export class FieldScene extends Phaser.Scene {
         const jumping = this.jump?.cover === i;
         const sit = (t: Vec) => (jumping ? jumpTarget(t, this.jump!.spot, feel) : t);
         const quick = jumping ? feel.adjust.jumpReactionRatio : 1;
-        if (jobs) {
+        if (this.tripsJob && i === 2) {
+          // Trips check: the empty-side corner plays his flat zone.
+          const zp = { ...zoneParams(base), ballReactionTime: feel.zone.underBallReactionTime };
+          const zb = ball && breaksOn(this.tripsJob, ball.landing, feel) ? { ...ball, help: false } : undefined;
+          r.coverage = stepCoverage(r.coverage, zoneTarget(this.tripsJob, live, feel), dt, zp, zb);
+        } else if (jobs) {
           const zs = zoneCoverScale(jobs[i], feel);
           const zp = { ...zoneParams(base), ballReactionTime: (zs.ballReactionTime + late(i)) * quick, topSpeed: base.topSpeed * zs.speedRatio };
           const zb = ball && (jumping || breaksOn(jobs[i], ball.landing, feel)) ? { ...ball, help: false } : undefined;
@@ -1582,9 +1594,14 @@ export class FieldScene extends Phaser.Scene {
       const read = jobs ? zoneBallReaction(jobs[5 + k], feel) : safetyBaseReaction(feel, this.shell, k);
       // A-c: the bracketing S2 plays deep: he reads and breaks like a two-deep half safety.
       const bracketing = k === 1 && this.bracket !== null;
+      // Trips check: S2 on the slot reads like the robber on throws to his man, like a help defender on the rest.
+      const onSlot = k === 1 && this.tripsJob !== null;
+      const slotRead = Math.max(feel.defense.robberBallReactionTime, this.targetIndex === 2 ? 0 : feel.defense.cbHelpBallReactionTime);
       const p = bracketing
         ? safetyParamsFor(feel, this.match.ballX, 'twoDeep', 1, safetyReadTime(who, feel.defense.twoDeepBallReactionTime, feel.ratings))
-        : safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
+        : onSlot
+          ? safetyParamsFor(feel, this.match.ballX, 'robber', 1, safetyReadTime(who, slotRead, feel.ratings))
+          : safetyParamsFor(feel, this.match.ballX, this.shell, k, safetyReadTime(who, read, feel.ratings));
       const d = late(5 + k);
       return { ...p, ballReactionTime: p.ballReactionTime + d, ...(p.frontBallReactionTime !== undefined && { frontBallReactionTime: p.frontBallReactionTime + d }) };
     };
@@ -1597,7 +1614,9 @@ export class FieldScene extends Phaser.Scene {
       this.safety2Pos =
         this.bracket !== null
           ? stepZoneSafety(this.safety2Pos, bracketTarget(this.receivers[this.bracket].runner.pos, this.match.ballX, feel), dt, sp(1), ball)
-          : stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
+          : this.tripsJob
+            ? stepZoneSafety(this.safety2Pos, tripsSafetyTarget(this.receivers[2].runner.pos, feel), dt, sp(1), ball)
+            : stepSafety(this.safety2Pos, wrs, dt, sp(1), ball, (t) => rot(6, t));
     }
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y);
@@ -2605,7 +2624,14 @@ export class FieldScene extends Phaser.Scene {
       }
     }
     const wrStarts = this.form.skill.map((s) => s.pos);
+    // F-b: against Trips in man coverage the empty-side corner stays home and S2 comes down on the inside slot
+    // (worked out when we line up: the formation can change on the play-call screen after their call).
+    this.tripsJob = tripsCheckOn(this.formationId, this.defCall, this.bracket) && !this.shown ? tripsCornerJob(feel, this.match.ballX, this.form.sides) : null;
     const align = lookAlignment(this.shownLook(), feel, this.match.ballX, wrStarts, this.form.sides);
+    if (this.tripsJob) {
+      align.cover[2] = { ...this.tripsJob.spot };
+      align.safeties[1] = tripsSafetyStart(wrStarts[2], this.match.ballX, feel);
+    }
     this.rotation = this.shown ? { shown: align, real: lookAlignment({ call: this.defCall, shell: this.shell }, feel, this.match.ballX, wrStarts, this.form.sides) } : null;
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
@@ -2637,7 +2663,7 @@ export class FieldScene extends Phaser.Scene {
     this.aimG.clear();
     this.tweens.killTweensOf([this.qb, ...this.wrDots, ...this.cbDots, this.safety, this.safety2, this.ball, this.shadow]);
     this.safetyPos = { ...align.safeties[0] };
-    this.safety2Pos = this.bracket !== null ? bracketTarget(wrStarts[this.bracket], this.match.ballX, feel) : { ...align.safeties[1] };
+    this.safety2Pos = this.bracket !== null ? bracketTarget(wrStarts[this.bracket], this.match.ballX, feel) : { ...align.safeties[1] }; // (the Trips check is in align)
     this.safety.setPosition(this.safetyPos.x, this.safetyPos.y).setAlpha(1).setScale(1);
     this.safety2.setPosition(this.safety2Pos.x, this.safety2Pos.y).setAlpha(1).setScale(1);
     [...this.cbDots, ...this.rusherDots, ...this.wrDots, this.qb, ...this.blockerDots].forEach((d) => d.setAlpha(1));
@@ -2834,18 +2860,32 @@ export class FieldScene extends Phaser.Scene {
       read,
       ...((keyHint || lean) && { hint: keyHint ?? LEAN_HINTS[lean!] }),
       ...(this.bracket !== null && { safety2At: bracketTarget(this.form.skill[this.bracket].pos, this.match.ballX, feel) }),
+      ...(this.tripsJob && {
+        safety2At: tripsSafetyStart(this.form.skill[2].pos, this.match.ballX, feel),
+        coverAt: [undefined, undefined, { ...this.tripsJob.spot }],
+      }),
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
       // A-c: a bracketing S2 is plain to see (he stands over our receiver), so the safety line says so.
-      shellName: isZoneCall(call) ? (call === 'cover2' ? 'TWO DEEP' : 'ONE DEEP') : this.bracket !== null ? 'ONE DEEP + ONE OVER THE TOP' : SHELL_NAMES[shell],
+      shellName: isZoneCall(call)
+        ? call === 'cover2'
+          ? 'TWO DEEP'
+          : 'ONE DEEP'
+        : this.bracket !== null
+          ? 'ONE DEEP + ONE OVER THE TOP'
+          : this.tripsJob
+            ? 'ONE DEEP + SAFETY DOWN ON THE SLOT'
+            : SHELL_NAMES[shell],
       shellTip: isZoneCall(call)
         ? call === 'cover2'
           ? 'Two deep halves, five under'
           : 'Three deep, four under'
         : this.bracket !== null
           ? 'Throw away from the double'
-          : SHELL_TIPS[shell],
+          : this.tripsJob
+            ? 'Their corner stays home on the TE side'
+            : SHELL_TIPS[shell],
     };
   }
 

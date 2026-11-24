@@ -346,6 +346,21 @@ export const feel = {
     bracketTurnScale: 1.4,
     bracketCushionMax: 2,
   },
+  /**
+   * Formations (F-b): the TRIPS check. Against Trips in man coverage the corner on the empty side
+   * stays home in a flat zone (this deep, this far from the middle; his area reaches in to
+   * `tripsCornerInsideYards`), and S2 comes down on the inside slot (lines up this deep, covers him
+   * from this far over the top, a man defender: full strength only on throws to him); S1 keeps the
+   * snap's look (two deep: over the Trips half, so the TE side opens deep). Without it the backside corner
+   * followed the inside slot across and the Toss to the empty side went +38%.
+   */
+  formations: {
+    tripsCornerDepthYards: 4,
+    tripsCornerFlatYards: 12,
+    tripsCornerInsideYards: 3,
+    tripsSafetyDepthYards: 7,
+    tripsSafetyCushionYards: 2,
+  },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
     /** Running back's speed with the ball (later: his speed rating). */

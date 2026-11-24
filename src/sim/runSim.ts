@@ -11,7 +11,7 @@ import { ZONE_SHELL, isZoneCall, zoneCoverScale, zoneJobs, zoneTarget } from './
 import { canTackle, startChase, stepChase, tryJuke, type Pursuer } from './carry';
 import { laneSteer, pathYAt, reachedHandoff, stepRunRusher } from './run';
 import { createRng } from './rng';
-import { coverParams, lookAlignment, rotatedTarget, safetyParamsFor, safetyRunRead, zoneParams, type Look, type ShellId, stepBlitzer, type DefCallId } from './defCalls';
+import { coverParams, lookAlignment, tripsCheckOn, tripsCornerJob, tripsSafetyStart, tripsSafetyTarget, rotatedTarget, safetyParamsFor, safetyRunRead, zoneParams, type Look, type ShellId, stepBlitzer, type DefCallId } from './defCalls';
 import { TE_SIDE_RUSHER, carryFor, lineShedTimes, pointOfAttack, pursuerFor, tackleFor, teHelpFor } from './runRatings';
 import type { Player } from '../players/player';
 
@@ -70,6 +70,8 @@ export function simulateRun(
   // Zone call (Z-a): before the handoff everyone drops toward his area (corners bail, LBs to their spots).
   const jobs = isZoneCall(call) ? zoneJobs(call, feel, losX, f.sides.strongSide) : null;
   if (isZoneCall(call)) shell = ZONE_SHELL[call];
+  // F-b, the Trips check: the empty-side corner stays home in a flat zone, S2 comes down on the inside slot, S1 single high.
+  const tripsJob = tripsCheckOn(formationId, call, null) && !shown ? tripsCornerJob(feel, losX, f.sides) : null;
   const zoneP = (i: number) => {
     const base = zoneParams(coveredByLinebacker(i) ? lbCover : cbCover);
     return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };
@@ -78,6 +80,10 @@ export function simulateRun(
   const align = lookAlignment(shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
   const rotation = shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
+  if (tripsJob) {
+    align.cover[2] = { ...tripsJob.spot };
+    align.safeties[1] = tripsSafetyStart(f.skill[2].pos, losX, feel);
+  }
   let safeties = [...align.safeties];
   const sp = ([0, 1] as const).map((k) => safetyParamsFor(feel, losX, shell, k, 0));
   let cover = f.skill.map((s, i) => startCoverage(align.cover[i], s.pos));
@@ -94,13 +100,17 @@ export function simulateRun(
     cover = cover.map((c, i) =>
       blitz && i === RB
         ? { ...c, pos: stepBlitzer(c.pos, f.qb, t, dt, feel) }
-        : jobs
+        : tripsJob && i === 2
+          ? stepCoverage(c, zoneTarget(tripsJob, live(), feel), dt, zoneParams(cbCover))
+          : jobs
           ? stepCoverage(c, rot(i, t, zoneTarget(jobs[i], live(), feel)), dt, zoneP(i))
           : stepCoverage(c, rot(i, t, runners[i].pos), dt, coveredByLinebacker(i) ? lbCover : cbCover),
     );
     // Safeties: zone ones head for their spots; man ones wait (pass first). A disguise's safeties rotate to the real look's spots.
     safeties = safeties.map((v, k) =>
-      jobs ? stepZoneSafety(v, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, sp[k]) : rotation ? stepZoneSafety(v, rot(5 + k, t, rotation.real.safeties[k]), dt, sp[k]) : v,
+      tripsJob && k === 1
+        ? stepZoneSafety(v, tripsSafetyTarget(runners[2].pos, feel), dt, sp[k])
+        : jobs ? stepZoneSafety(v, rot(5 + k, t, zoneTarget(jobs[5 + k], live(), feel)), dt, sp[k]) : rotation ? stepZoneSafety(v, rot(5 + k, t, rotation.real.safeties[k]), dt, sp[k]) : v,
     );
     rushers = rushers.map((r) => stepRunRusher(r, runners[RB].pos, t, dt, { driveSpeed: rg.driveSpeed, freeSpeed: feel.pocket.rushFreeSpeed }, holeY));
   }

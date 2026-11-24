@@ -56,7 +56,7 @@ export interface PlayCallOptions {
    * What the defense shows at the line. `call` / `shell` = where they stand (the diagram); name / tip
    * = what the strip says (on a disguise: the shown look, or the real one when our QB `read` it).
    */
-  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string; read?: boolean; hint?: string; safety2At?: { x: number; y: number } } | null;
+  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string; read?: boolean; hint?: string; safety2At?: { x: number; y: number }; coverAt?: ({ x: number; y: number } | undefined)[] } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
   /** SIM (3g): its menu's choices; picking one closes the screen and calls `onSim`. null = no SIM button. */
@@ -181,7 +181,7 @@ export function openPlayCall(o: PlayCallOptions) {
       detailed,
       ...(detailed && o.names ? { names: o.names } : {}),
       ...(detailed && o.matchups ? { defense: o.matchups } : {}),
-      ...(detailed && o.defenseRead ? { call: o.defenseRead.call, shell: o.defenseRead.shell, ...(o.defenseRead.safety2At && { safety2At: o.defenseRead.safety2At }) } : {}),
+      ...(detailed && o.defenseRead ? { call: o.defenseRead.call, shell: o.defenseRead.shell, ...(o.defenseRead.safety2At && { safety2At: o.defenseRead.safety2At }), ...(o.defenseRead.coverAt && { coverAt: o.defenseRead.coverAt }) } : {}),
       formation: form,
       ...extra,
     });

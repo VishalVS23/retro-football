@@ -364,6 +364,8 @@ export interface PlayerContestMods {
   zone?: boolean[];
   /** Defender i plays an UNDERNEATH zone (Z-a): he comes from his spot to rally, so he always contests at help strength. */
   under?: boolean[];
+  /** F-b: defender i covers this receiver man-to-man (e.g. a safety down on the inside slot): help strength on anyone else. */
+  covers?: (number | undefined)[];
   receiverCatch?: number[];
   contested?: number[];
   breakup?: number[];
@@ -382,7 +384,8 @@ export function resolveTargetedPass(
 ): { result: PassResult; receiver: number; defender: number } {
   const receiver = closestIndex(receivers, landing);
   // Defender i < receivers.length covers receiver i man-to-man; anyone beyond that is the deep safety.
-  const isHelp = (d: number) => !!mods.under?.[d] || (d < receivers.length && d !== receiver && !mods.zone?.[d]);
+  const isHelp = (d: number) =>
+    !!mods.under?.[d] || (mods.covers?.[d] !== undefined ? mods.covers[d] !== receiver : d < receivers.length && d !== receiver && !mods.zone?.[d]);
   let defender = closestIndex(defenders, landing);
   // When the receiver can get to it, the defender who contests HARDEST makes the play: his own man
   // right on him beats a help defender (half strength) who happens to stand a step closer (3h-b).

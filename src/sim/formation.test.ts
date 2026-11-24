@@ -6,7 +6,7 @@ import { PLAYS, routePath } from './routes';
 import { simulatePass } from './passSim';
 import { simulateRun } from './runSim';
 import { zoneJobs } from './zone';
-import { linebacker2Start, lb2ZoneSpot } from './defCalls';
+import { linebacker2Start, lb2ZoneSpot, tripsCheckOn, tripsCornerJob } from './defCalls';
 import type { DefCallId, ShellId } from './defCalls';
 
 const mid = FIELD_WIDTH / 2;
@@ -66,4 +66,51 @@ describe('formations (F-a)', () => {
     };
     expect(Math.abs(runs('normal') - runs('flip'))).toBeLessThan(0.2);
   }, 120000);
+});
+
+describe('TRIPS (F-b)', () => {
+  it('three receivers on top, the TE alone on the bottom; the third runs his routes from inside', () => {
+    const f = formation(40, 'trips');
+    expect(f.wrs.every((w) => w.pos.y < mid)).toBe(true);
+    expect(f.wrs[0].pos.y).toBeLessThan(f.wrs[1].pos.y);
+    expect(f.wrs[1].pos.y).toBeLessThan(f.wrs[2].pos.y);
+    expect(f.te.pos.y).toBeGreaterThan(mid);
+    expect(f.wrs[2].towardMiddle).toBe(1);
+  });
+
+  it('the Trips check: man calls only, not with a bracket; the corner stays home on the TE side', () => {
+    expect(tripsCheckOn('trips', 'man', null)).toBe(true);
+    expect(tripsCheckOn('trips', 'cover3', null)).toBe(false);
+    expect(tripsCheckOn('trips', 'man', 0)).toBe(false);
+    expect(tripsCheckOn('normal', 'man', null)).toBe(false);
+    const job = tripsCornerJob(feel, 40, formation(40, 'trips').sides);
+    expect(job.spot.y).toBeGreaterThan(mid);
+  });
+
+  it('balance: TRIPS passes about like NORMAL overall (better vs zone, worse vs man), runs about the same', () => {
+    const looks: [DefCallId, ShellId][] = [['man', 'twoDeep'], ['man', 'robber'], ['cover3', 'robber'], ['cover2', 'twoDeep']];
+    // Every pass play, every target, at the time that route is usually thrown.
+    const T: Record<string, number> = { Slant: 0.5, Out: 1.0, Go: 1.1, Post: 0.8, Corner: 0.8, Dig: 1.5, Drag: 1.0, Hitch: 1.1, Curl: 1.5, Flat: 1.0, Check: 1.3, Wheel: 1.4, Seam: 1.2 };
+    const shots: [string, number, number][] = [];
+    for (const p of PLAYS) if (!p.run) p.routes.forEach((r, i) => !r.block && T[r.name] !== undefined && shots.push([p.name, i, T[r.name]]));
+    const yards = (f: 'normal' | 'trips') => {
+      let g = 0, n = 0;
+      for (const [call, shell] of looks)
+        for (const [name, to, t] of shots)
+          for (let s = 1; s <= 25; s++) {
+            const r = simulatePass(play(name), { to, throwAt: t, lead: 1 }, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call, shell, formation: f });
+            g += r.sacked ? -6 : r.result === 'catch' ? r.gain ?? 0 : 0;
+            n++;
+          }
+      return g / n;
+    };
+    const a = yards('normal'), b = yards('trips');
+    expect(Math.abs(b - a) / a).toBeLessThan(0.1);
+    const runs = (f: 'normal' | 'trips') => {
+      let y = 0;
+      for (const [call, shell] of looks) for (const n of ['Dive', 'Toss']) for (let s = 1; s <= 60; s++) y += simulateRun(play(n), s * 7919, feel, 2.5, 45, undefined, call, {}, shell, undefined, f).yards;
+      return y / (looks.length * 120);
+    };
+    expect(Math.abs(runs('trips') - runs('normal'))).toBeLessThan(0.35);
+  }, 240000);
 });

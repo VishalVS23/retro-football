@@ -39,9 +39,27 @@ const RUSH_Y = [-5.5, -2, 2, 5.5];
  * FLIP: the same mirrored top <-> bottom (and their rushers with it, so every matchup by index stays
  * the same: blocker i still takes rusher i, the TE still helps the edge rusher on his side).
  */
-export type FormationId = 'normal' | 'flip';
-export const FORMATION_IDS: readonly FormationId[] = ['normal', 'flip'];
-export const FORMATION_NAMES: Record<FormationId, string> = { normal: 'NORMAL', flip: 'FLIP' };
+export type FormationId = 'normal' | 'flip' | 'trips';
+export const FORMATION_IDS: readonly FormationId[] = ['normal', 'flip', 'trips'];
+export const FORMATION_NAMES: Record<FormationId, string> = { normal: 'NORMAL', flip: 'FLIP', trips: 'TRIPS' };
+
+/**
+ * Receiver spots per formation, as y offsets from the middle (negative = top) and how far off the
+ * line: [wide top, slot, third receiver]. TRIPS (F-b): all three on top (wide, slot, inside slot);
+ * the third receiver runs the routes he'd run from wide bottom, now from inside (his "inside" = down).
+ */
+const WR_SPOTS: Record<'normal' | 'trips', { y: number; back: number; toward: 1 | -1 }[]> = {
+  normal: [
+    { y: -13, back: 0.5, toward: 1 },
+    { y: -7.5, back: 1, toward: 1 },
+    { y: 13, back: 0.5, toward: -1 },
+  ],
+  trips: [
+    { y: -14, back: 0.5, toward: 1 },
+    { y: -10, back: 1, toward: 1 },
+    { y: -6, back: 1, toward: 1 },
+  ],
+};
 
 /** The next formation in the FORMATION button's cycle. */
 export function nextFormation(id: FormationId): FormationId {
@@ -71,11 +89,11 @@ export function formation(losX: number, id: FormationId = 'normal') {
   const m = (y: number) => (flip ? mid - y : mid + y); // y offset from the middle -> field y
   const t = (d: 1 | -1): 1 | -1 => (flip ? (-d as 1 | -1) : d);
   const rush: Vec[] = RUSH_Y.map((y) => ({ x: losX + 1, y: m(y) }));
-  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = [
-    { pos: { x: losX - 0.5, y: m(-13) }, towardMiddle: t(1) }, // wide, top
-    { pos: { x: losX - 1, y: m(-7.5) }, towardMiddle: t(1) }, // slot, top (a yard wider since 3h-b: off the tackle)
-    { pos: { x: losX - 0.5, y: m(13) }, towardMiddle: t(-1) }, // wide, bottom
-  ];
+  // Wide top, slot top (a yard wider since 3h-b: off the tackle), wide bottom; or the formation's own spots.
+  const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = WR_SPOTS[id === 'trips' ? 'trips' : 'normal'].map((w) => ({
+    pos: { x: losX - w.back, y: m(w.y) },
+    towardMiddle: t(w.toward),
+  }));
   // The RB counts as "below the middle", so negative route y (toward his sideline) = the bottom side.
   const rb: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX + RB_OFFSET.x, y: m(RB_OFFSET.y) }, towardMiddle: t(-1) };
   // Tight end on the bottom side, on the line: his routes' negative y = toward the bottom sideline, like the RB's.

@@ -9,9 +9,9 @@ import type { CoverParams, SafetyParams } from './defense';
 import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
-import { ZONE_SHELL, isZoneCall, type ZoneCallId } from './zone';
+import { ZONE_SHELL, isZoneCall, type ZoneCallId, type ZoneJob } from './zone';
 import type { Leans } from './scouting';
-import { NORMAL_SIDES, type FormationSides } from './formation';
+import { NORMAL_SIDES, type FormationId, type FormationSides } from './formation';
 
 /** The man calls (3d2). */
 export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
@@ -458,4 +458,35 @@ export function teamAggression(teamId: number | null | undefined): number {
   let h = (teamId + 1) * 2654435761;
   h = (h ^ (h >>> 15)) >>> 0;
   return (h % 1000) / 999;
+}
+
+// ---------- Formations: the Trips check (F-b) ----------
+
+/** Do they use the Trips check this snap? Trips, a man call, and S2 not already doubling someone (A-c). */
+export function tripsCheckOn(formationId: FormationId, call: DefCallId, bracket: number | null): boolean {
+  return formationId === 'trips' && !isZoneCall(call) && bracket === null;
+}
+
+/** The empty-side corner's flat zone in the Trips check (`zoneTarget` / `breaksOn` play it). */
+export function tripsCornerJob(feel: Feel, losX: number, sides: FormationSides): ZoneJob {
+  const f = feel.formations;
+  const mid = FIELD_WIDTH / 2;
+  const s = sides.teSide; // the empty side: where the TE is
+  const inner = mid + s * f.tripsCornerInsideYards;
+  return {
+    kind: 'under',
+    spot: { x: losX + f.tripsCornerDepthYards, y: mid + s * f.tripsCornerFlatYards },
+    yMin: s > 0 ? inner : 0,
+    yMax: s > 0 ? FIELD_WIDTH : inner,
+  };
+}
+
+/** Where S2 lines up in the Trips check: down over the inside slot (skill spot 2). */
+export function tripsSafetyStart(slot: Vec, losX: number, feel: Feel): Vec {
+  return { x: losX + feel.formations.tripsSafetyDepthYards, y: slot.y };
+}
+
+/** Where S2 aims in the Trips check: on the inside slot, a little over the top. */
+export function tripsSafetyTarget(slot: Vec, feel: Feel): Vec {
+  return { x: slot.x + feel.formations.tripsSafetyCushionYards, y: slot.y };
 }
