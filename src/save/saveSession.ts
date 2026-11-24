@@ -9,6 +9,7 @@ import type { League } from '../league/league';
 import type { Season } from '../league/season';
 import type { StatsStore } from '../league/boxScore';
 import { openOrCreateSave, writeSave } from './saveStore';
+import type { DifficultyId } from '../sim/difficulty';
 
 let current: SaveData | null = null;
 let rng: Rng | null = null;
@@ -107,6 +108,22 @@ export async function setSeason(season: Season | null, stats?: StatsStore): Prom
     await commitSave(true);
   } catch (err) {
     console.warn('Saving the season failed:', err);
+  }
+}
+
+/** The difficulty of the games you play ('normal' before the save has loaded). */
+export function currentDifficulty(): DifficultyId {
+  return current?.difficulty ?? 'normal';
+}
+
+/** Change the difficulty and store it (no backup). Never throws. */
+export async function setDifficulty(id: DifficultyId): Promise<void> {
+  if (!current || imported) return;
+  current.difficulty = id;
+  try {
+    await commitSave(false);
+  } catch (err) {
+    console.warn('Saving the difficulty failed:', err);
   }
 }
 

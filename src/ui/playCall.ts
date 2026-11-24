@@ -99,11 +99,11 @@ export function openPlayCall(o: PlayCallOptions) {
     ...(o.defenseRead
       ? [
           o.defenseRead.read
-            ? `<span class="pc-read">QB READ: DISGUISED - REALLY <b>${o.defenseRead.name}</b></span> - ${o.defenseRead.tip.toUpperCase()}`
-            : `LOOKS LIKE: <b>${o.defenseRead.name}</b> - ${o.defenseRead.tip.toUpperCase()}`,
+            ? `<span class="pc-read">QB READ: DISGUISED - REALLY <b>${o.defenseRead.name}</b></span>${o.defenseRead.tip ? ` - ${o.defenseRead.tip.toUpperCase()}` : ''}`
+            : `LOOKS LIKE: <b>${o.defenseRead.name}</b>${o.defenseRead.tip ? ` - ${o.defenseRead.tip.toUpperCase()}` : ''}`,
         ]
       : []),
-    ...(o.defenseRead ? [`SAFETIES: <b>${o.defenseRead.shellName}</b> - ${o.defenseRead.shellTip.toUpperCase()}`] : []),
+    ...(o.defenseRead ? [`SAFETIES: <b>${o.defenseRead.shellName}</b>${o.defenseRead.shellTip ? ` - ${o.defenseRead.shellTip.toUpperCase()}` : ''}`] : []),
     ...(o.defenseRead?.hint ? [`<span class="pc-read">QB READ: <b>${o.defenseRead.hint.toUpperCase()}</b></span>`] : []),
   ];
   const rec = (c: FourthChoice) => (o.tip?.choice === c ? ' pc-rec' : '');

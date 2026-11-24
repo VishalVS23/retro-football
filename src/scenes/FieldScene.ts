@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { feel } from '../config/feel';
+import { feel as baseFeel, type Feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, isInBounds, yardLineNumber } from '../sim/field';
 import {
   AIM_SLINGSHOT,
@@ -171,7 +171,8 @@ import {
   type ClockEvent,
   type ClockState,
 } from '../sim/clock';
-import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
+import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
+import { adjustSpeedFor, levers, sanitizeDifficulty, withDifficulty, type DifficultyId } from '../sim/difficulty';
 import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
 import { afterWeek, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
 import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
@@ -201,10 +202,22 @@ import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGam
 import { LEAN_HINTS, bracketCorner, bracketTarget, hotReceiver, jumpTarget, leans, mainLean, newScouting, playKey, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
-import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT, SEASON_SCREEN_EVENT } from '../debug/gameControls';
+import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, DIFFICULTY_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT, SEASON_SCREEN_EVENT } from '../debug/gameControls';
 import { teamStars, type TeamStars } from '../league/teamStars';
 
 // Placeholder colours only. The real art comes in stage 13.
+/**
+ * The values the game plays with: the feel values with the difficulty's changes (Normal = the very same
+ * object). League sims and the SIM button use `baseFeel` so they stay neutral. Rebuilt when the
+ * difficulty or a ⚙ slider changes.
+ */
+let difficulty: DifficultyId = 'normal';
+let feel: Feel = baseFeel;
+function applyDifficulty(id: DifficultyId) {
+  difficulty = id;
+  feel = withDifficulty(baseFeel, id);
+}
+
 const COLORS = {
   turf: 0x2f6b4f,
   turfAlt: 0x2a6247,
@@ -468,6 +481,7 @@ export class FieldScene extends Phaser.Scene {
 
     // React live when a value changes in the feel panel.
     const onFeelChange = () => {
+      applyDifficulty(difficulty); // a slider moved: rebuild the difficulty's copy from the new values
       this.fitCamera();
       this.updateLabel();
       this.sizeBall();
@@ -493,7 +507,16 @@ export class FieldScene extends Phaser.Scene {
       if (this.state === 'calling') this.openCall();
     };
     window.addEventListener(RESET_SCOUTING_EVENT, onResetScouting);
+    const onDifficulty = (e: Event) => {
+      const id = sanitizeDifficulty((e as CustomEvent).detail);
+      applyDifficulty(id);
+      void setDifficulty(id);
+      this.updateLabel();
+      if (this.state === 'calling') this.openCall();
+    };
+    window.addEventListener(DIFFICULTY_EVENT, onDifficulty);
     this.events.once('shutdown', () => {
+      window.removeEventListener(DIFFICULTY_EVENT, onDifficulty);
       window.removeEventListener(RESET_SCOUTING_EVENT, onResetScouting);
       window.removeEventListener(NEW_GAME_EVENT, onNewGame);
       window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
@@ -2120,7 +2143,8 @@ export class FieldScene extends Phaser.Scene {
   private runSim(stop: SimStop, from: SimGameState = this.simStateNow()) {
     const l = this.league;
     if (!l || l.userTeamId === null || this.opponentId === null) return;
-    const result = simulateFrom(from, { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), feel, this.homeSide()), rules: feel.oppDrive, clock: feel.clock }, getRngOrFallback(), stop);
+    // SIM is neutral: plain values, not the difficulty's.
+    const result = simulateFrom(from, { mods: matchupMods(simTeam(l, l.userTeamId), simTeam(l, this.opponentId), baseFeel, this.homeSide()), rules: baseFeel.oppDrive, clock: baseFeel.clock }, getRngOrFallback(), stop);
     let stats = this.stats;
     for (const e of result.log) {
       if (e.drive) stats = e.side === 0 ? recordOurSimDrive(stats, e.drive) : recordTheirDrive(stats, e.drive);
@@ -2393,6 +2417,7 @@ export class FieldScene extends Phaser.Scene {
    * a team if he hasn't yet, then offer to continue an unfinished game.
    */
   private onSaveLoaded(save: SaveData) {
+    applyDifficulty(save.difficulty);
     const league = save.league ?? generateLeague(save.seed);
     this.league = league;
     this.saveSeed = save.seed;
@@ -2940,7 +2965,7 @@ export class FieldScene extends Phaser.Scene {
     this.weekBusy = true;
     try {
       const week = s.week;
-      const results = await runWeekSims(weekJobs(l, s, week, feel), { rules: feel.oppDrive, clock: feel.clock });
+      const results = await runWeekSims(weekJobs(l, s, week, baseFeel), { rules: baseFeel.oppDrive, clock: baseFeel.clock }); // league sims: no difficulty
       // On to the next week; in the playoffs this adds the next round's games (4e).
       const next = afterWeek(applyResults(this.season ?? s, results), l.teams);
       this.season = next;
@@ -3015,10 +3040,10 @@ export class FieldScene extends Phaser.Scene {
       this.readOk = readRoll < qbReadChance(this.ourLineup?.qb, feel.ratings);
       this.qbRead = !!dz && this.readOk;
       // A-b: sitting on a play we keep calling (no dice: it's in his scouting memory).
-      const key = feel.defCalls.enabled && !forcedDefCall() && !forcedDz ? playKey(this.scouting, teamAdjustSpeed(this.opponentId), feel) : null;
+      const key = feel.defCalls.enabled && !forcedDefCall() && !forcedDz ? playKey(this.scouting, this.adjustSpeed(), feel) : null;
       this.jump = key && !(this.defCall === 'blitz' && key.to === RB) ? { cover: key.to, spot: { x: this.match.ballX + key.dx, y: key.y }, play: key.play } : null;
       // A-c: bracket our hot receiver on man calls (not on a disguise: one trick at a time).
-      const hot = feel.defCalls.enabled && !forcedDefCall() && !dz && !isZoneCall(this.defCall) ? hotReceiver(this.scouting, teamAdjustSpeed(this.opponentId), feel) : null;
+      const hot = feel.defCalls.enabled && !forcedDefCall() && !dz && !isZoneCall(this.defCall) ? hotReceiver(this.scouting, this.adjustSpeed(), feel) : null;
       this.bracket = hot;
       if (dz) {
         const looks = disguiseLooks(dz, this.shell);
@@ -3167,8 +3192,13 @@ export class FieldScene extends Phaser.Scene {
       lead: g.them - g.us,
       aggression: teamAggression(this.opponentId),
       leans: leans(this.scouting, feel),
-      adjustSpeed: teamAdjustSpeed(this.opponentId),
+      adjustSpeed: this.adjustSpeed(),
     };
+  }
+
+  /** How fast their coach adjusts to our habits (his own speed, shifted by the difficulty). */
+  private adjustSpeed() {
+    return adjustSpeedFor(teamAdjustSpeed(this.opponentId), difficulty, baseFeel);
   }
 
   /** Everyone rushing the QB: the rushers, plus the linebacker on a blitz (never blocked). */
@@ -3264,7 +3294,9 @@ export class FieldScene extends Phaser.Scene {
           ? `They're doubling ${hotName ?? 'your hot receiver'} over the top`
           : null;
     const { call, shell } = read ? { call: this.defCall, shell: this.shell } : stand;
-    return {
+    // Hard: only the look, no advice on how to beat it (read it yourself).
+    const tips = levers(difficulty, baseFeel).tips;
+    const out = {
       call: stand.call,
       shell: stand.shell,
       read,
@@ -3302,6 +3334,7 @@ export class FieldScene extends Phaser.Scene {
               ? 'Their LB sits in the middle or blitzes'
               : SHELL_TIPS[shell],
     };
+    return tips ? out : { ...out, tip: '', shellTip: '' };
   }
 
   /** The LOOKS LIKE line on the field: before the snap only (not on kicks or while calling plays). */
@@ -3311,7 +3344,7 @@ export class FieldScene extends Phaser.Scene {
     if (!show) return;
     const r = this.defenseRead();
     const head = r.read ? `QB READ: DISGUISED · REALLY ${r.name} · ${r.shellName}` : `LOOKS LIKE: ${r.name} · ${r.shellName}`;
-    this.readText.setText([head, r.tip.toUpperCase(), ...(r.hint ? [`QB READ: ${r.hint.toUpperCase()}`] : [])]);
+    this.readText.setText([head, ...(r.tip ? [r.tip.toUpperCase()] : []), ...(r.hint ? [`QB READ: ${r.hint.toUpperCase()}`] : [])]);
     this.readText.setColor(r.read ? '#7fe7ff' : '#ffd166');
     const cam = this.cameras.main;
     this.readText.setScale(1 / cam.zoom).setOrigin(0.5, 0);

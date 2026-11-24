@@ -38,6 +38,14 @@ describe('save format', () => {
     expect(migrate({ ...createNewSave(9, fixedDate), season: { ...season, games: [] } }).season).toBeNull();
   });
 
+  it('version 6: difficulty; older saves play on Normal, junk = Normal, Hard loads back', () => {
+    const { difficulty: _d, ...v5 } = { ...createNewSave(9, fixedDate), version: 5 };
+    expect(migrate(v5).difficulty).toBe('normal');
+    expect(createNewSave(9, fixedDate).difficulty).toBe('normal');
+    expect(migrate({ ...createNewSave(9, fixedDate), difficulty: 'impossible' }).difficulty).toBe('normal');
+    expect(migrate({ ...createNewSave(9, fixedDate), difficulty: 'hard' }).difficulty).toBe('hard');
+  });
+
   it('survives a round trip through a file', () => {
     const s = createNewSave(7, fixedDate);
     expect(parseSave(serializeSave(s))).toEqual(s);

@@ -10,8 +10,9 @@ import { sanitizeLeague, type League } from '../league/league';
 import { sanitizeSeason, type Season } from '../league/season';
 import { TEAM_DEFS } from '../league/teams';
 import { emptyStats, sanitizeStats, type StatsStore } from '../league/boxScore';
+import { sanitizeDifficulty, type DifficultyId } from '../sim/difficulty';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 export const MAX_BACKUPS = 3;
 
 export interface SaveData {
@@ -38,6 +39,8 @@ export interface SaveData {
    * key (saveStore.ts), written once a week rather than with every autosave.
    */
   stats: StatsStore;
+  /** Difficulty of the games you play (version 6): 'normal' / 'hard' (/ 'rookie'). Can change any time. */
+  difficulty: DifficultyId;
 }
 
 export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
@@ -53,6 +56,7 @@ export function createNewSave(seed = randomSeed(), now = new Date()): SaveData {
     league: null,
     season: null,
     stats: emptyStats(),
+    difficulty: 'normal',
   };
 }
 
@@ -70,6 +74,8 @@ const MIGRATIONS: Record<number, (s: AnySave) => AnySave> = {
   3: (s) => ({ ...s, version: 4, season: null }),
   // 4 -> 5: player stats. Older saves start with none (the season's games so far have no box scores).
   4: (s) => ({ ...s, version: 5, stats: emptyStats() }),
+  // 5 -> 6: difficulty modes. Older saves play on Normal (the game as it was).
+  5: (s) => ({ ...s, version: 6, difficulty: 'normal' }),
 };
 
 export class SaveError extends Error {}
@@ -95,7 +101,7 @@ export function migrate(raw: unknown): SaveData {
   // A damaged game in progress is dropped (new game), never the whole save.
   // A damaged league is made again from the seed (the user picks a team again).
   // A damaged season is dropped too (a new one starts).
-  s = { ...s, game: sanitizeSavedGame(s.game), league: sanitizeLeague(s.league), season: sanitizeSeason(s.season, TEAM_DEFS.length), stats: sanitizeStats(s.stats) };
+  s = { ...s, game: sanitizeSavedGame(s.game), league: sanitizeLeague(s.league), season: sanitizeSeason(s.season, TEAM_DEFS.length), stats: sanitizeStats(s.stats), difficulty: sanitizeDifficulty(s.difficulty) };
   return s as unknown as SaveData;
 }
 
