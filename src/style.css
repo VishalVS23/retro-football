@@ -12,6 +12,10 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  /* iPhone Safari enlarges long wrapping text in landscape (the play call's LOOKS LIKE strip came out
+     twice its size): text stays the size the screens were designed at. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 #game {

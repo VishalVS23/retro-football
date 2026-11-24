@@ -15,6 +15,11 @@ export const feel = {
     leadYards: 4,
     /** 0..1, how quickly the camera catches up each frame (higher = snappier). */
     followLerp: 0.12,
+    /**
+     * 0..1: while aiming a pass, how far the camera slides up/down toward the aim point (so the far
+     * sideline comes into view when you aim at a receiver near it). 0 = stays put.
+     */
+    aimFollowY: 0.8,
   },
   pocket: {
     /**

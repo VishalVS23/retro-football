@@ -657,9 +657,12 @@ export class FieldScene extends Phaser.Scene {
       this.cameraFocus = { x: b.x + feel.camera.leadYards, y: b.y };
       if (b.done) this.resolveThrow();
     } else if (playing) {
-      // Frame the QB and the receivers' average depth.
+      // Frame the QB and the receivers' average depth. While aiming, slide up / down toward the aim
+      // point, so a receiver near the bottom sideline (and the sideline) comes into view.
       const avgX = this.receivers.reduce((s, r) => s + r.runner.pos.x, 0) / this.receivers.length;
-      this.cameraFocus = { x: (this.qbPos.x + avgX) / 2 + feel.camera.leadYards, y: FORMATION_VIEW_Y };
+      const aimY = this.aimDrag && this.target ? this.target.y : null;
+      const y = aimY === null ? FORMATION_VIEW_Y : FORMATION_VIEW_Y + (aimY - FORMATION_VIEW_Y) * feel.camera.aimFollowY;
+      this.cameraFocus = { x: (this.qbPos.x + avgX) / 2 + feel.camera.leadYards, y };
     }
 
     // Camera eases toward its focus point (frame-rate independent).
