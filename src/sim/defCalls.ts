@@ -462,9 +462,12 @@ export function teamAggression(teamId: number | null | undefined): number {
 
 // ---------- Formations: the Trips check (F-b) ----------
 
-/** Do they use the Trips check this snap? Trips, a man call, and S2 not already doubling someone (A-c). */
+/**
+ * Do they use the Trips check this snap? Three receivers to one side (TRIPS, or BUNCH: F-c1, same
+ * check, S2 on the bunch's inside man), a man call, and S2 not already doubling someone (A-c).
+ */
 export function tripsCheckOn(formationId: FormationId, call: DefCallId, bracket: number | null): boolean {
-  return formationId === 'trips' && !isZoneCall(call) && bracket === null;
+  return (formationId === 'trips' || formationId === 'bunch') && !isZoneCall(call) && bracket === null;
 }
 
 /** The empty-side corner's flat zone in the Trips check (`zoneTarget` / `breaksOn` play it). */

@@ -83,11 +83,11 @@ const FONT = `'Press Start 2P', monospace`;
 const n = (v: number) => Math.round(v * 100) / 100;
 
 /** Route line + arrowhead, and (detailed) its name label separately so labels can go on top. */
-function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.route, stop = false): { line: string; label: string } {
+function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.route, stop = false): { line: string; label?: RouteLabel } {
   // Stop routes (Hitch, Curl, Check): drawn up to the turn, ending in a flat "stop" bar
   // (the short step back toward the QB is too small to draw).
   const path = stop && fullPath.length >= 3 ? fullPath.slice(0, -1) : fullPath;
-  if (path.length < 2) return { line: '', label: '' };
+  if (path.length < 2) return { line: '' };
   const end = path[path.length - 1];
   const prev = path[path.length - 2];
   const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
@@ -122,19 +122,38 @@ function routeSvg(fullPath: Vec[], name: string, detailed: boolean, color = C.ro
     s += line(color, 0.45 * w);
     s += `<polygon points="${tri(head, 0.95 * (w > 1 ? 1.2 : 1), head * 0.6)}" fill="${color}"/>`;
   }
-  let label = '';
+  let label: RouteLabel | undefined;
+  const text = name.toUpperCase();
   if (detailed && stop) {
     // Stop route: name just downfield of the turn, clear of the receiver and his cornerback.
     const turn = path[path.length - 1];
-    label = `<text x="${n(turn.x + 1.2)}" y="${n(turn.y + 0.55)}" font-size="1.5" text-anchor="start" fill="${color}" stroke="${C.outline}" stroke-width="0.45" paint-order="stroke" font-family="${FONT}">${name.toUpperCase()}</text>`;
+    label = { x: turn.x + 1.2, y: turn.y + 0.55, anchor: 'start', text, color };
   } else if (detailed) {
     // Route name just past the arrow tip, nudged away from the line's direction.
     const lx = end.x + Math.cos(ang) * 1.5;
     const ly = end.y + Math.sin(ang) * 1.5 + (Math.abs(Math.sin(ang)) > 0.7 ? 0 : -1.4);
-    label = `<text x="${n(lx)}" y="${n(ly)}" font-size="1.5" text-anchor="middle" fill="${color}" stroke="${C.outline}" stroke-width="0.45" paint-order="stroke" font-family="${FONT}">${name.toUpperCase()}</text>`;
+    label = { x: lx, y: ly, anchor: 'middle', text, color };
   }
   return { line: s, label };
 }
+
+/** A route's name (big diagram): where it would like to sit. */
+interface RouteLabel {
+  x: number;
+  y: number;
+  anchor: 'start' | 'middle';
+  text: string;
+  color: string;
+}
+
+const ROUTE_SIZE = 1.5;
+const routeBox = (l: RouteLabel, dy: number): Box => {
+  const w = l.text.length * ROUTE_SIZE;
+  const x0 = l.anchor === 'start' ? l.x : l.x - w / 2;
+  return { x0, y0: l.y + dy - ROUTE_SIZE, x1: x0 + w, y1: l.y + dy };
+};
+const routeText = (l: RouteLabel, dy: number) =>
+  `<text x="${n(l.x)}" y="${n(l.y + dy)}" font-size="${ROUTE_SIZE}" text-anchor="${l.anchor}" fill="${l.color}" stroke="${C.outline}" stroke-width="0.45" paint-order="stroke" font-family="${FONT}">${l.text}</text>`;
 
 /** A small matchup marker left of a player: up arrow (green) = our edge, down (red) = theirs, grey dash = even. */
 function edgeArrow(p: Vec, edge: number): string {
@@ -155,23 +174,103 @@ function lineRing(p: Vec, edge: number): string {
 }
 
 /**
- * Where a player's label goes: under him, over him, or to his left (the slot and QB: the line is
- * right below them). 'leftFar' = left of his matchup marker too (the slot: markers sit at x - 2.1).
+ * Where a player's label can go: under him, over him, to his left ('leftFar' = left of his matchup
+ * marker too: markers sit at x - 2.1), to his right (downfield), or under / over him shifted back
+ * ('belowBack' / 'aboveBack': for the backfield, where the line is right in front).
  */
-type LabelSpot = 'below' | 'above' | 'left' | 'leftFar';
+type LabelSpot = 'below' | 'above' | 'left' | 'leftFar' | 'right' | 'belowBack' | 'aboveBack';
+
+export interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 const LINEMAN_R = 0.8;
+const LABEL_SIZE = 1.05;
+const DEFAULT_R = 0.95;
 
-function player(p: Vec, color: string, label: string | null, spot: LabelSpot = 'below', r = 0.95): string {
-  let s = `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="${r}" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
-  if (label) {
-    const left = spot === 'left' || spot === 'leftFar';
-    const x = spot === 'leftFar' ? p.x - 3.3 : left ? p.x - r - 0.4 : p.x;
-    const y = left ? p.y + 0.4 : spot === 'above' ? p.y - 1.5 : p.y + 2.5;
-    s += `<text x="${n(x)}" y="${n(y)}" font-size="1.05" text-anchor="${left ? 'end' : 'middle'}" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${label}</text>`;
-  }
-  return s;
+function player(p: Vec, color: string, r = DEFAULT_R): string {
+  return `<circle cx="${n(p.x)}" cy="${n(p.y)}" r="${r}" fill="${color}" stroke="${C.line}" stroke-width="0.22"/>`;
 }
+
+/** A name to place: the spots it may use, best first; `short` = a fallback when none of them is free (defenders: CB / LB / S). */
+export interface LabelReq {
+  p: Vec;
+  text: string;
+  short?: string;
+  spots: LabelSpot[];
+  r?: number;
+  /** Left off when neither the name nor the short tag fits anywhere (defenders). */
+  optional?: boolean;
+}
+
+/** Where `text` sits for `spot` (Press Start 2P glyphs are 1 em wide): its anchor point and its box. */
+function labelAt(req: LabelReq, spot: LabelSpot, text: string): { x: number; y: number; anchor: string; box: Box } {
+  const r = req.r ?? DEFAULT_R;
+  const w = text.length * LABEL_SIZE;
+  const { p } = req;
+  if (spot === 'left' || spot === 'leftFar') {
+    const x = spot === 'leftFar' ? p.x - 3.3 : p.x - r - 0.4;
+    const y = p.y + 0.4;
+    return { x, y, anchor: 'end', box: { x0: x - w, y0: y - LABEL_SIZE, x1: x, y1: y } };
+  }
+  if (spot === 'right') {
+    const x = p.x + r + 0.4;
+    const y = p.y + 0.4;
+    return { x, y, anchor: 'start', box: { x0: x, y0: y - LABEL_SIZE, x1: x + w, y1: y } };
+  }
+  const y = spot === 'above' || spot === 'aboveBack' ? p.y - 1.5 : p.y + 2.5;
+  if (spot === 'belowBack' || spot === 'aboveBack') {
+    // Under / over him but ending just past him, toward our end zone (clear of the line in front of him).
+    const x = p.x + r;
+    return { x, y, anchor: 'end', box: { x0: x - w, y0: y - LABEL_SIZE, x1: x, y1: y } };
+  }
+  return { x: p.x, y, anchor: 'middle', box: { x0: p.x - w / 2, y0: y - LABEL_SIZE, x1: p.x + w / 2, y1: y } };
+}
+
+// Names side by side need a clear gap (a letter's width) or they read as one word.
+const PAD_X = 0.9;
+const PAD_Y = 0.15;
+const overlaps = (a: Box, b: Box, padX = PAD_X) => a.x0 < b.x1 + padX && b.x0 < a.x1 + padX && a.y0 < b.y1 + PAD_Y && b.y0 < a.y1 + PAD_Y;
+/** Dots and markers only need a hair of room (the big gap is for text next to text). */
+const touches = (a: Box, b: Box) => overlaps(a, b, PAD_Y);
+/** The coach / LOOKS LIKE strip covers the top of the big diagram: names stay below it. */
+const TOP_STRIP_YARDS = 6.5;
+
+/**
+ * F-c1: places the names so none runs into another name, a player, a marker or a route name.
+ * Each name takes the first of its spots that is free and inside the view, else its short tag
+ * (WR / CB ...) in the first free spot; if nothing fits, a defender goes unlabelled and one of ours
+ * gets his tag in his first spot anyway.
+ */
+export function placeLabels(
+  reqs: LabelReq[],
+  obstacles: Box[],
+  texts: Box[],
+  view: Box,
+): { x: number; y: number; anchor: string; text: string; box: Box }[] {
+  const taken = [...texts];
+  const inside = (b: Box) => b.x0 >= view.x0 && b.x1 <= view.x1 && b.y0 >= view.y0 && b.y1 <= view.y1;
+  return reqs.map((req) => {
+    for (const text of req.short ? [req.text, req.short] : [req.text])
+      for (const spot of req.spots) {
+        const at = labelAt(req, spot, text);
+        if (inside(at.box) && !taken.some((b) => overlaps(b, at.box)) && !obstacles.some((b) => touches(b, at.box))) {
+          taken.push(at.box);
+          return { ...at, text };
+        }
+      }
+    if (req.optional) return null; // a defender with no free spot: better unlabelled than on top of someone
+    const text = req.short ?? req.text;
+    const at = labelAt(req, req.spots[0], text);
+    taken.push(at.box);
+    return { ...at, text };
+  }).filter((l) => l !== null);
+}
+
+const circleBox = (p: Vec, r: number): Box => ({ x0: p.x - r, y0: p.y - r, x1: p.x + r, y1: p.y + r });
 
 export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, v: DiagramView): string {
   const f = formation(losX, v.formation);
@@ -212,13 +311,20 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
 
   // Routes under the players; route names on top of everything.
   let labels = '';
+  const routeLabels: RouteLabel[] = [];
+  const obstacles: Box[] = [];
+  const reqs: LabelReq[] = [];
+  const dot = (p: Vec, color: string, r = DEFAULT_R) => {
+    obstacles.push(circleBox(p, r));
+    return player(p, color, r);
+  };
   f.skill.forEach((wr, i) => {
     const route = play.routes[i];
     if (!route) return;
     const color = v.hot?.[i] ? C.hot : C.route;
     const r = routeSvg(routePath(wr.pos, route, wr.towardMiddle), route.name, v.detailed, color, route.stop);
     s += r.line;
-    labels += r.label;
+    if (r.label) routeLabels.push(r.label);
   });
 
   if (v.detailed) {
@@ -227,27 +333,61 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     // them); the linebacker's and safety's stay below (above them sit the line and route labels).
     const dn = v.defense;
     const dl = (name: string | undefined, fallback: string) => (name ? esc(name.toUpperCase()) : fallback);
+    const def = (p: Vec, name: string | undefined, tag: string, spots: LabelSpot[]) => {
+      s += dot(p, C.defense);
+      reqs.push({ p, text: dl(name, tag), short: tag, spots, optional: true });
+    };
     const call = v.call ?? 'man';
-    f.wrs.forEach((wr, i) => (s += player(v.coverAt?.[i] ?? cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
-    s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
-    s += player(linebacker2Start(feel, losX, f.sides), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
+    // With names, the corners' go ABOVE them if there's room (our receivers' names are below ours).
+    f.wrs.forEach((wr, i) => def(v.coverAt?.[i] ?? cornerStart(call, feel, wr.pos), dn?.cover[i], 'CB', dn ? ['above', 'below', 'right'] : ['below', 'above', 'right']));
+    def(linebackerStart(call, feel, losX), dn?.cover[RB], 'LB', ['below', 'above', 'right']);
+    def(linebacker2Start(feel, losX, f.sides), dn?.cover[TE], 'LB', ['below', 'above', 'right']); // LB2 over the TE (3h-b)
     // Safeties (3h-c) where this snap's look puts them (two deep in the huddle: the look shows at the line).
     const shell = v.shell ?? 'twoDeep';
-    s += player(safetyStart(feel, losX, shell, 0), C.defense, dl(dn?.safety, 'S'));
-    // The robber sits right behind the linebackers: his name goes above him so the names don't run together.
-    s += player(v.safety2At ?? safetyStart(feel, losX, shell, 1), C.defense, dl(dn?.safety2, 'S'), shell === 'robber' && !v.safety2At ? 'above' : 'below');
-    f.rush.forEach((r) => (s += player(r, C.defense, null, 'below', LINEMAN_R))); // linemen unlabelled: too tightly packed
+    def(safetyStart(feel, losX, shell, 0), dn?.safety, 'S', ['below', 'above', 'right']);
+    // The robber sits right behind the linebackers: his name prefers above him.
+    def(v.safety2At ?? safetyStart(feel, losX, shell, 1), dn?.safety2, 'S', shell === 'robber' && !v.safety2At ? ['above', 'below', 'right'] : ['below', 'above', 'right']);
+    f.rush.forEach((r) => (s += dot(r, C.defense, LINEMAN_R))); // linemen unlabelled: too tightly packed
   }
-  f.block.forEach((b) => (s += player(b, C.offense, null, 'below', LINEMAN_R)));
+  f.block.forEach((b) => (s += dot(b, C.offense, LINEMAN_R)));
   const nm = v.names;
-  f.wrs.forEach((wr, i) => (s += player(wr.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[i].toUpperCase()) : 'WR') : null, i === SLOT ? 'leftFar' : 'below')));
-  s += player(f.rb.pos, C.offense, v.detailed ? (nm ? esc(nm.skill[RB].toUpperCase()) : 'RB') : null);
-  s += player(f.te.pos, C.offense, v.detailed ? (nm?.skill[TE] ? esc(nm.skill[TE].toUpperCase()) : 'TE') : null);
-  s += player(f.qb, C.offense, v.detailed ? 'QB' : null, 'left'); // the backfield is too crowded for his name
   const arrows = v.detailed && v.defense && v.defense.arrows !== false;
-  if (arrows) f.skill.forEach((sk, i) => (s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0)));
+  // Our players' names are placed first (they matter most), then the defenders'.
+  const ours: LabelReq[] = [];
+  const own = (p: Vec, name: string | undefined, tag: string, spots: LabelSpot[]) => {
+    s += dot(p, C.offense);
+    if (v.detailed) ours.push({ p, text: name ? esc(name.toUpperCase()) : tag, short: tag, spots });
+  };
+  // Left of a skill player = left of his matchup marker when markers are on.
+  const side: LabelSpot = arrows ? 'leftFar' : 'left';
+  const back: LabelSpot[] = ['belowBack', 'aboveBack'];
+  own(f.qb, undefined, 'QB', ['left', 'below', 'above', ...back]); // the backfield is too crowded for his name (first: a tag fits anywhere)
+  f.wrs.forEach((wr, i) => own(wr.pos, nm?.skill[i], 'WR', i === SLOT ? [side, 'below', 'above', ...back] : ['below', 'above', side, ...back]));
+  own(f.rb.pos, nm?.skill[RB], 'RB', ['below', 'above', ...back, side]);
+  own(f.te.pos, nm?.skill[TE], 'TE', ['below', 'above', side, ...back]);
+  if (arrows)
+    f.skill.forEach((sk, i) => {
+      s += edgeArrow(sk.pos, v.defense!.edge[i] ?? 0);
+      obstacles.push({ x0: sk.pos.x - 2.9, y0: sk.pos.y - 0.8, x1: sk.pos.x - 1.3, y1: sk.pos.y + 0.8 });
+    });
   const lineEdges = v.defense?.line?.[play.run ? 'run' : 'pass'];
   if (arrows && lineEdges) f.block.forEach((b, i) => (s += lineRing(b, lineEdges[i] ?? 0)));
+  // Route names first (they ARE the play): each slides up or down if it would run into another one or a player.
+  const routeTaken: Box[] = [];
+  const view = { x0: v.x0, y0: v.y0 + TOP_STRIP_YARDS, x1, y1: v.y0 + v.h };
+  for (const l of routeLabels) {
+    const free = (d: number) => {
+      const b = routeBox(l, d);
+      return b.y0 >= view.y0 && !routeTaken.some((t) => overlaps(t, b)) && !obstacles.some((o) => touches(o, b));
+    };
+    const dy = [0, -1.8, 1.8, -3.6, 3.6].find(free) ?? 0;
+    routeTaken.push(routeBox(l, dy));
+    labels += routeText(l, dy);
+  }
+  if (v.detailed) {
+    for (const l of placeLabels([...ours, ...reqs], obstacles, routeTaken, view))
+      s += `<text x="${n(l.x)}" y="${n(l.y)}" font-size="${LABEL_SIZE}" text-anchor="${l.anchor}" fill="${C.line}" stroke="${C.outline}" stroke-width="0.35" paint-order="stroke" font-family="${FONT}">${l.text}</text>`;
+  }
   s += labels;
   if (v.tappable) {
     // Audible mode: a pulsing ring on each receiver, plus a big invisible tap target on top

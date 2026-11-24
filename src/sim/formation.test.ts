@@ -114,3 +114,46 @@ describe('TRIPS (F-b)', () => {
     expect(Math.abs(runs('trips') - runs('normal'))).toBeLessThan(0.35);
   }, 240000);
 });
+
+describe('BUNCH (F-c1)', () => {
+  it('a tight triangle on top: the slot on the line, the other two a step behind; the TE alone on the bottom', () => {
+    const f = formation(40, 'bunch');
+    expect(f.wrs.every((w) => w.pos.y < mid)).toBe(true);
+    const ys = f.wrs.map((w) => w.pos.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
+    expect(f.wrs[1].pos.x).toBeGreaterThan(f.wrs[0].pos.x);
+    expect(f.wrs[1].pos.x).toBeGreaterThan(f.wrs[2].pos.x);
+    expect(f.te.pos.y).toBeGreaterThan(mid);
+  });
+
+  it('the defense uses the Trips check against it too (three receivers to one side)', () => {
+    expect(tripsCheckOn('bunch', 'man', null)).toBe(true);
+    expect(tripsCheckOn('bunch', 'cover2', null)).toBe(false);
+  });
+
+  it('balance: BUNCH passes within ~10% of NORMAL (short game, weak deep outside), runs about the same', () => {
+    const looks: [DefCallId, ShellId][] = [['man', 'twoDeep'], ['man', 'robber'], ['cover3', 'robber'], ['cover2', 'twoDeep']];
+    const T: Record<string, number> = { Slant: 0.5, Out: 1.0, Go: 1.1, Post: 0.8, Corner: 0.8, Dig: 1.5, Drag: 1.0, Hitch: 1.1, Curl: 1.5, Flat: 1.0, Check: 1.3, Wheel: 1.4, Seam: 1.2 };
+    const shots: [string, number, number][] = [];
+    for (const p of PLAYS) if (!p.run) p.routes.forEach((r, i) => !r.block && T[r.name] !== undefined && shots.push([p.name, i, T[r.name]]));
+    const yards = (f: 'normal' | 'bunch') => {
+      let g = 0, n = 0;
+      for (const [call, shell] of looks)
+        for (const [name, to, t] of shots)
+          for (let s = 1; s <= 20; s++) {
+            const r = simulatePass(play(name), { to, throwAt: t, lead: 1 }, s * 7919, feel, 35, { qb: null, afterCatch: { jukeYards: 2.5 }, call, shell, formation: f });
+            g += r.sacked ? -6 : r.result === 'catch' ? r.gain ?? 0 : 0;
+            n++;
+          }
+      return g / n;
+    };
+    const a = yards('normal'), b = yards('bunch');
+    expect(Math.abs(b - a) / a).toBeLessThan(0.12);
+    const runs = (f: 'normal' | 'bunch') => {
+      let y = 0;
+      for (const [call, shell] of looks) for (const n of ['Dive', 'Toss']) for (let s = 1; s <= 60; s++) y += simulateRun(play(n), s * 7919, feel, 2.5, 45, undefined, call, {}, shell, undefined, f).yards;
+      return y / (looks.length * 120);
+    };
+    expect(Math.abs(runs('bunch') - runs('normal'))).toBeLessThan(0.35);
+  }, 240000);
+});
