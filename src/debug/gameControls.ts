@@ -6,6 +6,8 @@
 export const NEW_GAME_EVENT = 'rf-new-game';
 export const CHANGE_TEAM_EVENT = 'rf-change-team';
 export const CHOOSE_OPPONENT_EVENT = 'rf-choose-opponent';
+/** Testing (A-a): their coach forgets what he's scouted this game. */
+export const RESET_SCOUTING_EVENT = 'rf-reset-scouting';
 
 export function addGameControls(panel: HTMLElement) {
   const section = document.createElement('div');
@@ -16,10 +18,15 @@ export function addGameControls(panel: HTMLElement) {
       <button type="button" data-game="new">New game</button>
       <button type="button" data-game="team">Change team</button>
       <button type="button" data-game="opponent">Choose opponent</button>
+      <button type="button" data-game="forget">Reset scouting</button>
     </div>`;
   section.addEventListener('click', (e) => {
     const act = (e.target as HTMLElement).closest<HTMLElement>('[data-game]')?.dataset.game;
     if (!act) return;
+    if (act === 'forget') {
+      window.dispatchEvent(new Event(RESET_SCOUTING_EVENT));
+      return;
+    }
     if (act === 'opponent') {
       // The list has its own CANCEL; the game is only replaced once a team is picked.
       panel.classList.remove('open');

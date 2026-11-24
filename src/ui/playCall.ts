@@ -53,7 +53,7 @@ export interface PlayCallOptions {
    * What the defense shows at the line. `call` / `shell` = where they stand (the diagram); name / tip
    * = what the strip says (on a disguise: the shown look, or the real one when our QB `read` it).
    */
-  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string; read?: boolean } | null;
+  defenseRead: { call: DefCallId; name: string; tip: string; shell: ShellId; shellName: string; shellTip: string; read?: boolean; hint?: string } | null;
   /** TEAM: opens the roster (null = not available yet, e.g. before a team is picked). */
   onTeam: (() => void) | null;
   /** SIM (3g): its menu's choices; picking one closes the screen and calls `onSim`. null = no SIM button. */
@@ -101,6 +101,7 @@ export function openPlayCall(o: PlayCallOptions) {
         ]
       : []),
     ...(o.defenseRead ? [`SAFETIES: <b>${o.defenseRead.shellName}</b> - ${o.defenseRead.shellTip.toUpperCase()}`] : []),
+    ...(o.defenseRead?.hint ? [`<span class="pc-read">QB READ: <b>${o.defenseRead.hint.toUpperCase()}</b></span>`] : []),
   ];
   const rec = (c: FourthChoice) => (o.tip?.choice === c ? ' pc-rec' : '');
 

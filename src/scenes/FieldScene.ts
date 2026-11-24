@@ -180,9 +180,10 @@ import type { Player } from '../players/player';
 import { contestedCatchRatio, contestMods, coverFor, matchupEdge, receiverCatchChance, receiverRunParams, safetyReadTime } from '../sim/coverRatings';
 import { arm, missLanding, missRadius, offTargetCatchFactor, qbReadChance } from '../sim/qbRatings';
 import { isFreshGame, sanitizeSavedGame, type SavedGame } from '../save/savedGame';
+import { LEAN_HINTS, leans, mainLean, newScouting, recordSnap, sanitizeScouting, teamAdjustSpeed, type Scouting } from '../sim/scouting';
 import { closeResumeGame, openResumeGame } from '../ui/resumeGame';
 import { FEEL_CHANGE_EVENT } from '../debug/feelPanel';
-import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT } from '../debug/gameControls';
+import { CHANGE_TEAM_EVENT, CHOOSE_OPPONENT_EVENT, NEW_GAME_EVENT, RESET_SCOUTING_EVENT } from '../debug/gameControls';
 import { teamStars, type TeamStars } from '../league/teamStars';
 
 // Placeholder colours only. The real art comes in stage 13.
@@ -287,6 +288,10 @@ export class FieldScene extends Phaser.Scene {
   private match: GameState = newGame();
   /** Box score for the end-of-game screen. */
   private stats = newGameStats();
+  /** Their coach's scouting memory of this game (A-a: in-game adjustments). */
+  private scouting: Scouting = newScouting();
+  /** Our QB's read this snap (vision + decisions): sees through a disguise, spots an adjustment. */
+  private readOk = false;
   /** Overtime: our possession this period is over (the CPU's comes next). */
   private otOursDone = false;
   /** Autosave between plays. Off until the save has loaded and any CONTINUE choice is made. */
@@ -440,7 +445,13 @@ export class FieldScene extends Phaser.Scene {
     window.addEventListener(NEW_GAME_EVENT, onNewGame);
     window.addEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
     window.addEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
+    const onResetScouting = () => {
+      this.scouting = newScouting();
+      if (this.state === 'calling') this.openCall();
+    };
+    window.addEventListener(RESET_SCOUTING_EVENT, onResetScouting);
     this.events.once('shutdown', () => {
+      window.removeEventListener(RESET_SCOUTING_EVENT, onResetScouting);
       window.removeEventListener(NEW_GAME_EVENT, onNewGame);
       window.removeEventListener(CHANGE_TEAM_EVENT, onChangeTeam);
       window.removeEventListener(CHOOSE_OPPONENT_EVENT, onChooseOpponent);
@@ -1847,7 +1858,20 @@ export class FieldScene extends Phaser.Scene {
 
   /** One of our snaps for the box score (2-point tries don't count). Call before the rules update the game. */
   private statPlay(p: OurPlay) {
-    if (!this.match.tryPending) this.stats = recordOurPlay(this.stats, p);
+    if (this.match.tryPending) return;
+    this.stats = recordOurPlay(this.stats, p);
+    // Their coach notes it (A-a): the play, run or pass, how far it was thrown and to whom.
+    const thrown = !!this.currentThrow && !this.qbRun && !this.calledPlay.run;
+    const caught = p.kind === 'pass' && p.result === 'complete';
+    this.scouting = recordSnap(
+      this.scouting,
+      {
+        play: this.calledPlay.name,
+        run: !!this.calledPlay.run,
+        ...(thrown && { air: this.currentThrow!.to.x - this.match.ballX, to: this.targetIndex, caught, yards: caught ? p.yards : 0 }),
+      },
+      feel,
+    );
   }
 
   /** Where our 11 / their 11 stand right now (for who falls on a loose ball). */
@@ -2274,6 +2298,7 @@ export class FieldScene extends Phaser.Scene {
     this.match = newGame();
     this.clock = newClock(feel.clock);
     this.stats = newGameStats();
+    this.scouting = newScouting();
     this.otOursDone = false;
     this.nextStep = null;
     this.pendingBreak = null;
@@ -2497,6 +2522,7 @@ export class FieldScene extends Phaser.Scene {
     this.match = g.match;
     this.clock = g.clock;
     this.stats = g.stats;
+    this.scouting = sanitizeScouting(g.scouting);
     this.playIndex = g.playIndex;
     this.otOursDone = false;
     this.nextStep = null;
@@ -2513,7 +2539,7 @@ export class FieldScene extends Phaser.Scene {
   private autosaveGame() {
     if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
-    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex };
+    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting };
     if (this.opponentId !== null) game.opponentId = this.opponentId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
@@ -2543,7 +2569,8 @@ export class FieldScene extends Phaser.Scene {
       const forcedDz = forcedDisguise();
       const dz = forcedDz ?? (feel.defCalls.enabled && !forcedDefCall() ? pickDisguise({ call: this.defCall, shell: this.shell }, this.defSituation(), feel, dzRoll) : null);
       this.shown = null;
-      this.qbRead = dz ? readRoll < qbReadChance(this.ourLineup?.qb, feel.ratings) : false;
+      this.readOk = readRoll < qbReadChance(this.ourLineup?.qb, feel.ratings);
+      this.qbRead = !!dz && this.readOk;
       if (dz) {
         const looks = disguiseLooks(dz, this.shell);
         this.defCall = looks.real.call;
@@ -2677,6 +2704,8 @@ export class FieldScene extends Phaser.Scene {
       timeLeft: this.clock.timeLeft,
       lead: g.them - g.us,
       aggression: teamAggression(this.opponentId),
+      leans: leans(this.scouting, feel),
+      adjustSpeed: teamAdjustSpeed(this.opponentId),
     };
   }
 
@@ -2757,11 +2786,14 @@ export class FieldScene extends Phaser.Scene {
   private defenseRead() {
     const stand = this.shownLook();
     const read = !!this.shown && this.qbRead;
+    // A-a: what he's adjusting to, if our QB spots it.
+    const lean = feel.defCalls.enabled && this.readOk && !forcedDefCall() ? mainLean(leans(this.scouting, feel), feel) : null;
     const { call, shell } = read ? { call: this.defCall, shell: this.shell } : stand;
     return {
       call: stand.call,
       shell: stand.shell,
       read,
+      ...(lean && { hint: LEAN_HINTS[lean] }),
       name: DEF_CALL_NAMES[call],
       tip: DEF_CALL_TIPS[call],
       // Cover 3 plays one deep: the robber spot is just where S2 starts before he rotates down.
@@ -2777,7 +2809,7 @@ export class FieldScene extends Phaser.Scene {
     if (!show) return;
     const r = this.defenseRead();
     const head = r.read ? `QB READ: DISGUISED · REALLY ${r.name} · ${r.shellName}` : `LOOKS LIKE: ${r.name} · ${r.shellName}`;
-    this.readText.setText([head, r.tip.toUpperCase()]);
+    this.readText.setText([head, r.tip.toUpperCase(), ...(r.hint ? [`QB READ: ${r.hint.toUpperCase()}`] : [])]);
     this.readText.setColor(r.read ? '#7fe7ff' : '#ffd166');
     const cam = this.cameras.main;
     this.readText.setScale(1 / cam.zoom).setOrigin(0.5, 0);

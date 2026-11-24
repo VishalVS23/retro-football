@@ -10,6 +10,7 @@ import { FIELD_WIDTH, TOTAL_LENGTH } from './field';
 import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
 import { ZONE_SHELL, isZoneCall, type ZoneCallId } from './zone';
+import type { Leans } from './scouting';
 
 /** The man calls (3d2). */
 export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
@@ -277,6 +278,12 @@ export function shellWeights(s: DefSituation, feel: Feel): Record<ShellId, numbe
   else if (s.toGo <= c.shortYards) w.robber += c.shortRobberBonus;
   if (OPP_GOAL_X - s.ballX <= 20) w.robber += c.redZoneRobberBonus;
   if (s.lead > 0 && s.quarter >= 4 && s.timeLeft <= 120) w.twoDeep += c.preventTwoDeepBonus;
+  // A-a: the robber against a run-heavy offense, two deep against deep shots.
+  if (s.leans) {
+    const k = adjustStrength(s);
+    w.robber += k * feel.adjust.runRobberBonus * s.leans.run;
+    w.twoDeep += k * feel.adjust.deepTwoDeepBonus * s.leans.deep;
+  }
   return w;
 }
 
@@ -359,6 +366,14 @@ export interface DefSituation {
   lead: number;
   /** Their coordinator's aggression, 0 (soft) .. 1 (blitz-happy). */
   aggression: number;
+  /** A-a: the habits his scouting memory has seen this game (missing = none), and how fast he adjusts (0..1). */
+  leans?: Leans;
+  adjustSpeed?: number;
+}
+
+/** How hard he leans into an adjustment: 0.5 (slow coach) .. 1.5 (fast). */
+function adjustStrength(s: DefSituation): number {
+  return 0.5 + Math.max(0, Math.min(1, s.adjustSpeed ?? 0.5));
 }
 
 /** How likely each call is in this situation (not normalised). */
@@ -399,6 +414,15 @@ export function callWeights(s: DefSituation, feel: Feel): Record<DefCallId, numb
     w.cover2 += c.preventCover2Bonus;
     w.cover3 += c.preventCover3Bonus;
     w.blitz *= 0.5;
+  }
+  // In-game adjustments (A-a): lean into whatever we keep doing.
+  if (s.leans) {
+    const j = feel.adjust;
+    const k = adjustStrength(s);
+    w.blitz += k * j.runBlitzBonus * s.leans.run;
+    w.press += k * (j.runPressBonus * s.leans.run + j.shortPressBonus * s.leans.short);
+    w.off += k * j.deepOffBonus * s.leans.deep;
+    w.cover2 += k * (j.deepCover2Bonus * s.leans.deep + j.shortCover2Bonus * s.leans.short);
   }
   // Team personality: aggressive coordinators press and blitz more, soft ones sit back (off man, zones).
   const a = Math.max(0, Math.min(1, s.aggression));

@@ -282,6 +282,38 @@ export const feel = {
     deepSpeedRatio: 0.92,
     deepLeverageYards: 1,
   },
+  /**
+   * In-game adjustments (A-a): their coach's scouting memory of this game (src/sim/scouting.ts) and
+   * how it shifts his calls.
+   */
+  adjust: {
+    /** Before each new snap is noted, the old counts fade to this share (recent snaps count most). */
+    memoryFade: 0.8,
+    /** A pass thrown less than this past the line is short; this far or more is deep. */
+    shortAirYards: 8,
+    deepAirYards: 15,
+    /** He's fully sure of a habit after this many (faded) snaps. */
+    sureSnaps: 4,
+    /** Habits start past these shares (runs of all snaps; short / deep of the passes). An ordinary mix leans on nothing. */
+    runShareFrom: 0.5,
+    shortShareFrom: 0.6,
+    deepShareFrom: 0.3,
+    /** A lean this strong (0..1) is worth a hint on the strip (if our QB reads it). */
+    hintFrom: 0.5,
+    /**
+     * Extra call weight at a full lean, x (0.5 + the coach's adjust speed): runs -> blitz, press and the
+     * robber look; quick short passes -> press and Cover 2 (corners sitting in the flats; a blitz leaves the
+     * RB open, measured); deep shots -> off man, Cover 2 and two deep.
+     */
+    runBlitzBonus: 5,
+    runPressBonus: 2,
+    runRobberBonus: 4,
+    shortPressBonus: 2,
+    shortCover2Bonus: 4,
+    deepOffBonus: 3,
+    deepCover2Bonus: 3,
+    deepTwoDeepBonus: 2,
+  },
   /** Run plays (Dive, Toss): the handoff, run blocking and the running back. */
   runGame: {
     /** Running back's speed with the ball (later: his speed rating). */
