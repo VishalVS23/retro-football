@@ -442,3 +442,30 @@
     width: 88px;
   }
 }
+
+/* ---------- STATS tab (4c) ---------- */
+.ts-stable {
+  width: 100%;
+  max-width: 640px;
+  border-collapse: collapse;
+  font-size: 8px;
+}
+.ts-stable th {
+  font-weight: normal;
+  color: var(--ts-dim);
+  padding: 3px 4px;
+  text-align: right;
+}
+.ts-stable td {
+  padding: 4px;
+  text-align: right;
+  background: var(--ts-card);
+  border-top: 2px solid var(--ts-panel);
+  white-space: nowrap;
+}
+.ts-stable .l {
+  text-align: left;
+}
+.ts-stable tr.dim td {
+  color: var(--ts-dim);
+}

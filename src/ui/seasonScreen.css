@@ -294,6 +294,72 @@
   color: var(--ss-gold);
 }
 
+/* ---------- Stats (4c) ---------- */
+.ss-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.ss-leaders {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 560px;
+}
+.ss-leader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  font-size: 8px;
+  text-align: left;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+}
+.ss-leader.mine {
+  border-color: var(--ss-gold);
+}
+.ss-rank {
+  min-width: 18px;
+  color: var(--ss-dim);
+}
+.ss-labbr {
+  min-width: 30px;
+}
+.ss-lpos {
+  min-width: 20px;
+  color: var(--ss-gold);
+}
+.ss-lname {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ss-leader b {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ss-gold);
+}
+.ss-teamstats {
+  max-width: 640px;
+}
+.ss-sort {
+  padding: 2px 0;
+  font-size: 8px;
+  color: var(--ss-dim) !important;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+}
+.ss-sort.on {
+  color: var(--ss-gold) !important;
+  border-bottom-color: var(--ss-gold);
+}
+
 /* ---------- Schedule ---------- */
 .ss-weeks {
   display: grid;

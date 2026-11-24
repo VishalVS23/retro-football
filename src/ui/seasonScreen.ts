@@ -1,7 +1,8 @@
 /**
- * SEASON screen (Stage 4a): the season's home. A side rail (SEASON / STANDINGS / SCHEDULE / TEAM)
+ * SEASON screen (Stage 4a): the season's home. A side rail (SEASON / STANDINGS / SCHEDULE / STATS / TEAM)
  * and, on the right: this week's game (PLAY GAME / SIM GAME, or SIM WEEK on a bye) with last week's
- * scores; the division tables; or the user's 18 weeks (tap one for every score that week).
+ * scores; the division tables; the user's 18 weeks (tap one for every score that week); or (4c) the
+ * league leaders and every team's stats.
  * Look only: the game scene does the work through the callbacks.
  */
 import '@fontsource/press-start-2p/latin-400.css';
@@ -19,6 +20,7 @@ import {
   type StandingRow,
 } from '../league/season';
 import { teamLogoHtml } from './teamLogo';
+import type { TeamTotals } from '../league/leaders';
 
 export interface SeasonTeamInfo {
   abbr: string;
@@ -48,9 +50,30 @@ export interface SeasonScreenOptions {
   /** 4b: does this game have a box score, and open it. */
   hasBox?: (gameId: number) => boolean;
   onBox?: (gameId: number) => void;
+  /** 4c: the STATS view's numbers (worked out when it opens), and tapping a leader opens his profile. */
+  stats?: () => SeasonStatsData;
+  onPlayer?: (playerId: number) => void;
 }
 
-type View = 'season' | 'standings' | 'schedule';
+export interface SeasonStatsData {
+  leaders: { label: string; rows: { id: number; name: string; pos: string; teamId: number; value: number }[] }[];
+  teams: TeamTotals[];
+}
+
+type View = 'season' | 'standings' | 'schedule' | 'stats';
+type TeamSort = 'pf' | 'pa' | 'yds' | 'alw' | 'to' | 'sck';
+function per(total: number, games: number) {
+  return games ? total / games : 0;
+}
+/** Team table columns: the label, the value, and whether a LOWER number is better (sorted first). */
+const TEAM_COLS: { key: TeamSort; label: string; value: (t: TeamTotals) => number; low?: boolean; text?: (v: number) => string }[] = [
+  { key: 'pf', label: 'PTS/G', value: (t) => per(t.pointsFor, t.games) },
+  { key: 'pa', label: 'OPP/G', value: (t) => per(t.pointsAgainst, t.games), low: true },
+  { key: 'yds', label: 'YDS/G', value: (t) => per(t.yards, t.games) },
+  { key: 'alw', label: 'ALW/G', value: (t) => per(t.yardsAllowed, t.games), low: true },
+  { key: 'to', label: 'TO +/-', value: (t) => t.takeaways - t.giveaways, text: (v) => (v > 0 ? `+${v}` : `${v}`) },
+  { key: 'sck', label: 'SACKS', value: (t) => t.sacks, text: (v) => `${v}` },
+];
 
 let close: (() => void) | null = null;
 let setBusy: ((busy: boolean) => void) | null = null;
@@ -74,6 +97,12 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   let conf = o.teams[o.userTeamId].conference;
   let weekDetail: number | null = null;
   let busy = false;
+  // STATS view (4c).
+  let statsMode: 'players' | 'teams' = 'players';
+  let cat = 0;
+  let teamSort: TeamSort = 'pf';
+  let sortFlip = false;
+  let statsData: SeasonStatsData | null = null;
   const s = o.season;
   const rows = standingRows(s, o.teams);
   const me = o.userTeamId;
@@ -212,6 +241,46 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     return `<div class="ss-title">${esc(t(me).abbr)} SCHEDULE · ${rec(me)}</div><div class="ss-weeks">${lines}</div>`;
   };
 
+  const statsView = () => {
+    statsData ??= o.stats?.() ?? { leaders: [], teams: [] };
+    const d = statsData;
+    const chip = (attr: string, value: string | number, label: string, on: boolean) => `<button type="button" class="ss-chip${on ? ' on' : ''}" ${attr}="${value}">${label}</button>`;
+    const head = `
+      <div class="ss-head">
+        <div class="ss-title">STATS · SEASON ${s.year}</div>
+        <div class="ss-chips">${chip('data-mode', 'players', 'PLAYERS', statsMode === 'players')}${chip('data-mode', 'teams', 'TEAMS', statsMode === 'teams')}</div>
+      </div>`;
+    if (statsMode === 'players') {
+      const c = d.leaders[cat];
+      const list = c?.rows.length
+        ? c.rows
+            .map(
+              (r, i) => `<button type="button" class="ss-leader${r.teamId === me ? ' mine' : ''}" data-player="${r.id}">
+                <span class="ss-rank">${i + 1}</span>${logo(r.teamId, 16)}<span class="ss-labbr">${esc(t(r.teamId).abbr)}</span>
+                <span class="ss-lpos">${esc(r.pos)}</span><span class="ss-lname">${esc(r.name)}</span><b>${r.value}</b></button>`,
+            )
+            .join('')
+        : '<div class="ss-note">NO GAMES PLAYED YET.</div>';
+      return `${head}
+        <div class="ss-cats">${d.leaders.map((x, i) => chip('data-cat', i, x.label, i === cat)).join('')}</div>
+        <div class="ss-leaders">${list}</div>`;
+    }
+    const sortCol = TEAM_COLS.find((x) => x.key === teamSort)!;
+    const dir = (sortCol.low ? 1 : -1) * (sortFlip ? -1 : 1);
+    const teams = [...d.teams].sort((a, b) => dir * (sortCol.value(a) - sortCol.value(b)) || a.teamId - b.teamId);
+    const fmt = (c: (typeof TEAM_COLS)[number], v: number) => (c.text ? c.text(v) : v.toFixed(1));
+    return `${head}
+      <table class="ss-table ss-teamstats">
+        <tr><th class="l">TEAM</th>${TEAM_COLS.map((c) => `<th><button type="button" class="ss-sort${c.key === teamSort ? ' on' : ''}" data-sort="${c.key}">${c.label}</button></th>`).join('')}</tr>
+        ${teams
+          .map(
+            (x) => `<tr class="${x.teamId === me ? 'mine' : ''}"><td class="l">${logo(x.teamId, 16)}<span>${esc(t(x.teamId).abbr)}</span></td>${TEAM_COLS.map((c) => `<td>${fmt(c, c.value(x))}</td>`).join('')}</tr>`,
+          )
+          .join('')}
+      </table>
+      <div class="ss-note">TAP A COLUMN TO SORT (AGAIN TO FLIP). ALW = YARDS ALLOWED. TO = TAKEAWAYS MINUS GIVEAWAYS.</div>`;
+  };
+
   const el = document.createElement('div');
   el.id = 'season-screen';
   el.innerHTML = `
@@ -221,6 +290,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
         <button type="button" class="ss-nav" data-view="season">SEASON</button>
         <button type="button" class="ss-nav" data-view="standings">STANDINGS</button>
         <button type="button" class="ss-nav" data-view="schedule">SCHEDULE</button>
+        ${o.stats ? '<button type="button" class="ss-nav" data-view="stats">STATS</button>' : ''}
         <button type="button" class="ss-nav" data-act="team">TEAM</button>
       </nav>
       <main class="ss-main"></main>
@@ -228,7 +298,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   const main = el.querySelector<HTMLElement>('.ss-main')!;
   const render = () => {
     el.querySelectorAll<HTMLButtonElement>('.ss-nav[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
-    main.innerHTML = view === 'season' ? seasonView() : view === 'standings' ? standingsView() : scheduleView();
+    main.innerHTML = view === 'season' ? seasonView() : view === 'standings' ? standingsView() : view === 'stats' ? statsView() : scheduleView();
     main.querySelectorAll<HTMLButtonElement>('.ss-btn').forEach((b) => (b.disabled = busy));
   };
   const act = (a: string | undefined) => {
@@ -247,6 +317,31 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
       weekDetail = null;
       render();
       main.scrollTop = 0;
+      return;
+    }
+    const mode = target.closest<HTMLElement>('[data-mode]');
+    if (mode) {
+      statsMode = mode.dataset.mode as 'players' | 'teams';
+      render();
+      return;
+    }
+    const catBtn = target.closest<HTMLElement>('[data-cat]');
+    if (catBtn) {
+      cat = Number(catBtn.dataset.cat);
+      render();
+      return;
+    }
+    const sortBtn = target.closest<HTMLElement>('[data-sort]');
+    if (sortBtn) {
+      const k = sortBtn.dataset.sort as TeamSort;
+      sortFlip = k === teamSort ? !sortFlip : false;
+      teamSort = k;
+      render();
+      return;
+    }
+    const who = target.closest<HTMLElement>('[data-player]');
+    if (who) {
+      o.onPlayer?.(Number(who.dataset.player));
       return;
     }
     const c = target.closest<HTMLElement>('[data-conf]');

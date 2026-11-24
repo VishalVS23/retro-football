@@ -1,7 +1,8 @@
 /**
  * TEAM screen (Stage 3c): a side rail (ROSTER / PRACTICE / BACK) and, on the right, the roster as
- * cards in depth-chart order, or one player's profile (tabs OVERVIEW / RATINGS). Look only.
- * Opened from the play calling screen; BACK (or Esc) returns to it.
+ * cards in depth-chart order, or one player's profile (tabs OVERVIEW / RATINGS / STATS). Look only.
+ * Opened from the play calling or season screen; BACK (or Esc) returns to it. 4c: can open straight on
+ * one player (any team's, from the league leaders); BACK then closes it.
  */
 import '@fontsource/press-start-2p/latin-400.css';
 import './teamScreen.css';
@@ -13,17 +14,34 @@ import { POSITION_NAMES } from '../players/positions';
 import { TRAITS } from '../players/traits';
 import type { RosterRow } from '../league/rosterView';
 import { teamLogoHtml } from './teamLogo';
+import { PROFILE_COLUMNS } from '../league/leaders';
+import type { PlayerLine } from '../league/playerStats';
 
 export interface TeamScreenOptions {
   team: { abbr: string; city: string; nickname: string; color: string };
   roster: RosterRow[];
   practice: RosterRow[];
   onClose: () => void;
+  /** 4c: a player's stats for the STATS tab (missing = no tab). */
+  statsFor?: (playerId: number) => PlayerStatsInfo;
+  /** 4c: open on this player's profile (BACK then closes the screen). */
+  startPlayerId?: number;
+  /** Start on this tab of that profile. */
+  startTab?: 'overview' | 'ratings' | 'stats';
+}
+
+export interface PlayerStatsInfo {
+  year: number;
+  /** This season's totals (null = no stats yet) and the games he has a line in. */
+  season: PlayerLine | null;
+  games: number;
+  log: { week: number; opponent: string; home: boolean; line: PlayerLine | null }[];
+  past: { year: number; line: PlayerLine }[];
 }
 
 type View = 'roster' | 'practice';
 type Filter = 'all' | 'offense' | 'defense' | 'special';
-type Tab = 'overview' | 'ratings';
+type Tab = 'overview' | 'ratings' | 'stats';
 
 let close: (() => void) | null = null;
 
@@ -71,7 +89,32 @@ function attrRow(p: Player, k: AttributeKey, big: boolean): string {
   return `<div class="ts-arow${big ? ' big' : ''}"><span class="ts-aname">${ATTRIBUTE_NAMES[k]}</span>${big ? barHtml(v, 20) : ''}<span class="ts-aval v-${band(v)}">${v}</span></div>`;
 }
 
-function profileHtml(r: RosterRow, tab: Tab, backLabel: string): string {
+/** The STATS tab (4c): this season, the game log and past seasons, in the columns that fit his position. */
+function statsHtml(p: Player, info: PlayerStatsInfo): string {
+  const cols = PROFILE_COLUMNS[p.position];
+  if (!cols.length) return '<div class="ts-section"><div class="ts-text">NO STATS FOR LINEMEN YET: THEY GET GAME RATINGS LATER.</div></div>';
+  const head = (first: string) => `<tr><th class="l">${first}</th>${cols.map((c) => `<th>${c.label}</th>`).join('')}</tr>`;
+  const cells = (l: PlayerLine | null) => cols.map((c) => `<td>${l ? c.value(l) : '-'}</td>`).join('');
+  const season = info.season
+    ? `<table class="ts-stable">${head('GP')}<tr><td class="l">${info.games}</td>${cells(info.season)}</tr></table>`
+    : '<div class="ts-text">NO STATS THIS SEASON YET.</div>';
+  const log = info.log.length
+    ? `<table class="ts-stable">${head('WEEK')}${info.log
+        .map((g) => `<tr class="${g.line ? '' : 'dim'}"><td class="l">${g.week} ${g.home ? 'VS' : '@'} ${esc(g.opponent)}</td>${cells(g.line)}</tr>`)
+        .join('')}</table>`
+    : '<div class="ts-text">NO GAMES PLAYED YET.</div>';
+  const past = info.past.length
+    ? `<div class="ts-section"><div class="ts-h">PAST SEASONS</div><table class="ts-stable">${head('SEASON')}${info.past
+        .map((h) => `<tr><td class="l">${h.year}</td>${cells(h.line)}</tr>`)
+        .join('')}</table></div>`
+    : '';
+  return `
+    <div class="ts-section"><div class="ts-h">SEASON ${info.year}</div>${season}</div>
+    <div class="ts-section"><div class="ts-h">GAME LOG</div>${log}</div>
+    ${past}`;
+}
+
+function profileHtml(r: RosterRow, tab: Tab, backLabel: string, stats?: PlayerStatsInfo): string {
   const p = r.player;
   const ca = currentAbility(p);
   const persona = playerPersonality(p);
@@ -125,8 +168,9 @@ function profileHtml(r: RosterRow, tab: Tab, backLabel: string): string {
       <div class="ts-tabs" role="tablist">
         <button type="button" role="tab" data-tab="overview" class="${tab === 'overview' ? 'on' : ''}">OVERVIEW</button>
         <button type="button" role="tab" data-tab="ratings" class="${tab === 'ratings' ? 'on' : ''}">RATINGS</button>
+        ${stats ? `<button type="button" role="tab" data-tab="stats" class="${tab === 'stats' ? 'on' : ''}">STATS</button>` : ''}
       </div>
-      <div class="ts-tabbody">${tab === 'overview' ? overview : ratings}</div>
+      <div class="ts-tabbody">${tab === 'stats' && stats ? statsHtml(p, stats) : tab === 'ratings' ? ratings : overview}</div>
     </div>`;
 }
 
@@ -134,8 +178,15 @@ export function openTeamScreen(o: TeamScreenOptions) {
   closeTeamScreen();
   let view: View = 'roster';
   let filter: Filter = 'all';
-  let tab: Tab = 'overview';
+  let tab: Tab = o.startTab ?? 'overview';
   let player: RosterRow | null = null;
+  if (o.startPlayerId !== undefined) {
+    player = o.roster.find((r) => r.player.id === o.startPlayerId) ?? null;
+    if (!player) {
+      player = o.practice.find((r) => r.player.id === o.startPlayerId) ?? null;
+      if (player) view = 'practice';
+    }
+  }
 
   const el = document.createElement('div');
   el.id = 'team-screen';
@@ -155,7 +206,8 @@ export function openTeamScreen(o: TeamScreenOptions) {
   const render = () => {
     el.querySelectorAll<HTMLButtonElement>('.ts-nav').forEach((b) => b.classList.toggle('on', b.dataset.view === view && !player));
     if (player) {
-      main.innerHTML = profileHtml(player, tab, view === 'roster' ? 'ROSTER' : 'PRACTICE SQUAD');
+      const backLabel = o.startPlayerId !== undefined ? 'BACK' : view === 'roster' ? 'ROSTER' : 'PRACTICE SQUAD';
+      main.innerHTML = profileHtml(player, tab, backLabel, o.statsFor?.(player.player.id));
       main.scrollTop = 0;
       return;
     }
@@ -173,7 +225,7 @@ export function openTeamScreen(o: TeamScreenOptions) {
       <div class="ts-cards">${list.map(cardHtml).join('')}</div>`;
   };
   const back = () => {
-    if (player) {
+    if (player && o.startPlayerId === undefined) {
       player = null;
       render();
     } else {

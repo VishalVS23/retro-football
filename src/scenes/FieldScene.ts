@@ -174,7 +174,7 @@ import {
 import { getRngOrFallback, saveGameInProgress, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
 import { advanceWeek, finalPlaces, newSeason, recordResult, seasonSeed, teamGame, type Season } from '../league/season';
 import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
-import { creditLive, creditSnaps, type LivePlay, type Lines, type StatUnit } from '../league/playerStats';
+import { addLine, creditLive, creditSnaps, type LivePlay, type Lines, type PlayerLine, type StatUnit } from '../league/playerStats';
 import { createRng } from '../sim/rng';
 import { CREDIT_SALT, closeSeasonStats, creditLog, emptyStats, regroupBoxes, type BoxScore, type StatsStore, type TeamBox } from '../league/boxScore';
 import { closeBoxScore, openBoxScore } from '../ui/boxScoreScreen';
@@ -187,6 +187,9 @@ import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
+import { LEADER_CATS, gameLog, leaders, pastSeasons, playerTotals, teamTotals } from '../league/leaders';
+import type { PlayerStatsInfo } from '../ui/teamScreen';
+import type { SeasonStatsData } from '../ui/seasonScreen';
 import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type KickingUnit, type OffenseLineup } from '../league/lineup';
 import { isPressureKick, kickerRules, pressureSweep, punterRules } from '../sim/kickRatings';
 import type { Player } from '../players/player';
@@ -2599,13 +2602,58 @@ export class FieldScene extends Phaser.Scene {
   private openTeam() {
     const l = this.league;
     if (!l || l.userTeamId === null) return;
-    const t = l.teams[l.userTeamId];
+    this.openTeamOf(l.userTeamId);
+  }
+
+  /** A team's TEAM screen; with `playerId`, straight on his STATS tab (4c: tapped in the league leaders). */
+  private openTeamOf(teamId: number, playerId?: number) {
+    const l = this.league;
+    if (!l) return;
+    const t = l.teams[teamId];
     openTeamScreen({
       team: { abbr: t.abbr, city: t.city, nickname: t.nickname, color: t.colors[0] },
       roster: rosterRows(l, t.id),
       practice: practiceRows(l, t.id),
       onClose: () => {},
+      statsFor: (id) => this.playerStats(id, t.id),
+      ...(playerId !== undefined && { startPlayerId: playerId, startTab: 'stats' as const }),
     });
+  }
+
+  /** 4c: one player's season, game log and past seasons (for the profile's STATS tab). */
+  private playerStats(playerId: number, teamId: number): PlayerStatsInfo {
+    const l = this.league!;
+    const s = this.season;
+    const boxes = this.leagueStats.boxes;
+    const log = s ? gameLog(s, boxes, playerId, teamId) : [];
+    const played = log.filter((g) => g.line);
+    return {
+      year: s?.year ?? 1,
+      season: played.length ? played.reduce<PlayerLine>((a, g) => addLine(a, g.line!), {}) : null,
+      games: played.length,
+      log: log.map((g) => ({ week: g.week, opponent: l.teams[g.opponent].abbr, home: g.home, line: g.line })),
+      past: pastSeasons(this.leagueStats, playerId),
+    };
+  }
+
+  /** 4c: the season screen's STATS view: league leaders and every team's totals. */
+  private seasonStats(): SeasonStatsData {
+    const l = this.league!;
+    const totals = playerTotals(this.leagueStats.boxes);
+    const teamOf = new Map<number, number>();
+    for (const t of l.teams) for (const id of [...t.roster, ...t.practice]) teamOf.set(id, t.id);
+    return {
+      leaders: LEADER_CATS.map((c) => ({
+        label: c.label,
+        rows: leaders(totals, c.key)
+          .filter((r) => l.players[r.id] && teamOf.has(r.id))
+          .map((r) => {
+            const p = l.players[r.id];
+            return { id: r.id, name: `${p.firstName[0]}. ${p.lastName}`.toUpperCase(), pos: p.position, teamId: teamOf.get(r.id)!, value: r.value };
+          }),
+      })),
+      teams: teamTotals(this.leagueStats.boxes, l.teams.length),
+    };
   }
 
   /** Both teams' main colours (for logos / colour dots on the HTML screens). */
@@ -2711,6 +2759,11 @@ export class FieldScene extends Phaser.Scene {
         this.openSeason();
       },
       onTeam: () => this.openTeam(),
+      stats: () => this.seasonStats(),
+      onPlayer: (id) => {
+        const team = l.teams.find((t) => t.roster.includes(id) || t.practice.includes(id));
+        if (team) this.openTeamOf(team.id, id);
+      },
       hasBox: (id) => !!this.leagueStats.boxes[id],
       onBox: (id) => this.showBoxScore(id),
     });
