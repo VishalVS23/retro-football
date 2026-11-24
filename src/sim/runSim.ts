@@ -3,7 +3,7 @@
  * Used by the balance tests now, and a starting point for the league sim (stage 4).
  */
 import type { Feel } from '../config/feel';
-import { formation } from './formation';
+import { formation, type FormationId } from './formation';
 import { RB, TE, coveredByLinebacker, routePath, startRunner, stepRunner, type PlayDef } from './routes';
 import { startCoverage, stepCoverage, stepZoneSafety } from './defense';
 import type { Vec } from './throw';
@@ -57,24 +57,26 @@ export function simulateRun(
   shell: ShellId = 'twoDeep',
   /** Disguise (D-a): they line up in this look and play `call` / `shell` from there. */
   shown?: Look,
+  /** F-a: our formation (default NORMAL). */
+  formationId: FormationId = 'normal',
 ): { yards: number; by: number; broken: number } {
   const rng = createRng(seed);
-  const f = formation(losX);
+  const f = formation(losX, formationId);
   const paths = f.skill.map((s, i) => routePath(s.pos, p.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, p.routes[i].stop));
   const d = feel.defense;
   const blitz = call === 'blitz';
   const { cb: cbCover, lb: lbCover } = coverParams(call, feel, losX, true);
   // Zone call (Z-a): before the handoff everyone drops toward his area (corners bail, LBs to their spots).
-  const jobs = isZoneCall(call) ? zoneJobs(call, feel, losX) : null;
+  const jobs = isZoneCall(call) ? zoneJobs(call, feel, losX, f.sides.strongSide) : null;
   if (isZoneCall(call)) shell = ZONE_SHELL[call];
   const zoneP = (i: number) => {
     const base = zoneParams(coveredByLinebacker(i) ? lbCover : cbCover);
     return { ...base, topSpeed: base.topSpeed * zoneCoverScale(jobs![i], feel).speedRatio };
   };
   const live = () => runners.filter((_, i) => !p.routes[i].block).map((r) => r.pos);
-  const align = lookAlignment(shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos));
-  const rotation = shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos)) } : null;
+  const align = lookAlignment(shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
+  const rotation = shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
   let safeties = [...align.safeties];
   const sp = ([0, 1] as const).map((k) => safetyParamsFor(feel, losX, shell, k, 0));

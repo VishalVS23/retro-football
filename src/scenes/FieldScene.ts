@@ -45,7 +45,7 @@ import {
   type Pursuer,
   type Trailer,
 } from '../sim/carry';
-import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, RETURN_SKILL, SLOT } from '../sim/formation';
+import { BLOCKER_OF, CENTRE, formation, RETURN_LINE, RETURN_RUSH, RETURN_SKILL, SLOT, FORMATION_NAMES, type FormationId } from '../sim/formation';
 import { closePlayCall, openPlayCall } from '../ui/playCall';
 import { closeDriveSummary, openDriveSummary } from '../ui/driveSummary';
 import { simulateOppDrive } from '../sim/oppDrive';
@@ -316,6 +316,8 @@ export class FieldScene extends Phaser.Scene {
   private nameLabels: Phaser.GameObjects.Text[] = [];
   /** Runs instead of the usual next step when the current banner ends (or SKIP). */
   private nextStep: (() => void) | null = null;
+  /** F-a: the formation we line up in (stays until changed on the play-call screen; saved with the game). */
+  private formationId: FormationId = 'normal';
   private form = formation(newGame().ballX);
   private scoreboard!: Phaser.GameObjects.Text;
   /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
@@ -1564,7 +1566,7 @@ export class FieldScene extends Phaser.Scene {
           // LB2 dropping into his hook zone heads for the spot instead of a man.
           const zone = (i === TE && this.lb2Job === 'drop') || jumping;
           const params = zone ? zoneParams(base) : this.bracket === i ? bracketCorner(base, feel) : base;
-          const target = i === TE && this.lb2Job === 'drop' ? lb2ZoneSpot(feel, this.match.ballX) : r.runner.pos;
+          const target = i === TE && this.lb2Job === 'drop' ? lb2ZoneSpot(feel, this.match.ballX, this.form.sides) : r.runner.pos;
           r.coverage = stepCoverage(r.coverage, rot(i, sit(target)), dt, { ...params, ballReactionTime: (params.ballReactionTime + late(i)) * quick }, myBall);
         }
       }
@@ -1882,7 +1884,7 @@ export class FieldScene extends Phaser.Scene {
     this.scouting = recordSnap(
       this.scouting,
       {
-        play: this.calledPlay.name,
+        play: this.formationId === 'normal' ? this.calledPlay.name : `${this.calledPlay.name} (${FORMATION_NAMES[this.formationId]})`,
         run: !!this.calledPlay.run,
         ...(thrown && { air: this.currentThrow!.to.x - this.match.ballX, y: this.currentThrow!.to.y, to: this.targetIndex, caught, yards: caught ? p.yards : 0 }),
       },
@@ -2321,6 +2323,7 @@ export class FieldScene extends Phaser.Scene {
     this.finishBreak = null;
     this.nextClock = null;
     this.playIndex = 0;
+    this.formationId = 'normal';
     this.autosave = true;
     if (opponentId !== undefined) {
       this.opponentId = opponentId;
@@ -2540,6 +2543,7 @@ export class FieldScene extends Phaser.Scene {
     this.stats = g.stats;
     this.scouting = sanitizeScouting(g.scouting);
     this.playIndex = g.playIndex;
+    this.formationId = g.formation ?? 'normal';
     this.otOursDone = false;
     this.nextStep = null;
     this.pendingBreak = null;
@@ -2555,7 +2559,7 @@ export class FieldScene extends Phaser.Scene {
   private autosaveGame() {
     if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
-    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting };
+    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId };
     if (this.opponentId !== null) game.opponentId = this.opponentId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);
   }
@@ -2568,7 +2572,7 @@ export class FieldScene extends Phaser.Scene {
   private resetPlay(call = true) {
     this.resetTimer?.remove();
     this.resetTimer = null;
-    this.form = formation(this.match.ballX); // line up wherever the last play left the ball
+    this.form = formation(this.match.ballX, this.formationId); // line up wherever the last play left the ball
     const qbStart = this.form.qb;
     if (call) this.calledPlay = PLAYS[this.playIndex]; // hot routes only last one snap
     const play = this.calledPlay;
@@ -2601,8 +2605,8 @@ export class FieldScene extends Phaser.Scene {
       }
     }
     const wrStarts = this.form.skill.map((s) => s.pos);
-    const align = lookAlignment(this.shownLook(), feel, this.match.ballX, wrStarts);
-    this.rotation = this.shown ? { shown: align, real: lookAlignment({ call: this.defCall, shell: this.shell }, feel, this.match.ballX, wrStarts) } : null;
+    const align = lookAlignment(this.shownLook(), feel, this.match.ballX, wrStarts, this.form.sides);
+    this.rotation = this.shown ? { shown: align, real: lookAlignment({ call: this.defCall, shell: this.shell }, feel, this.match.ballX, wrStarts, this.form.sides) } : null;
     this.receivers = this.form.skill.map((wr, i) => {
       const path = routePath(wr.pos, play.routes[i], wr.towardMiddle);
       // Cornerbacks line up off their receiver; the linebacker in the middle, a few yards deep.
@@ -2706,7 +2710,7 @@ export class FieldScene extends Phaser.Scene {
 
   /** This snap's zone jobs ([3 corners, 2 LBs, 2 safeties]), or null in man coverage. */
   private zoneJobs(): ZoneJob[] | null {
-    return isZoneCall(this.defCall) ? zoneJobs(this.defCall, feel, this.match.ballX) : null;
+    return isZoneCall(this.defCall) ? zoneJobs(this.defCall, feel, this.match.ballX, this.form.sides.strongSide) : null;
   }
 
   /** Extra run read for defender i (0-4 cover, 5-6 safeties) when he plays an underneath zone. */
@@ -2762,11 +2766,13 @@ export class FieldScene extends Phaser.Scene {
         return this.clock.timeouts;
       },
       plays: PLAYS,
+      formation: this.formationId,
       selected: this.playIndex,
       current: this.calledPlay,
-      onExecute: (i, play) => {
+      onExecute: (i, play, form) => {
         this.playIndex = i;
         this.calledPlay = play;
+        this.formationId = form;
         this.resetPlay(false); // line up the chosen play (with any hot routes)
       },
       onCancel: () => {
@@ -2952,7 +2958,8 @@ export class FieldScene extends Phaser.Scene {
       const run = this.clock.running ? ' (clock running)' : '';
       const tryText = this.match.tryPending ? '2-PT TRY: ' : '';
       const qb = this.ourLineup ? ` · QB ${this.ourLineup.qb.lastName}` : '';
-      this.label.setText(`${tryText}${PLAYS[this.playIndex].name}${qb} · TAP to snap${run} · ⚙ = feel`);
+      const form = this.formationId === 'normal' ? '' : ` (${FORMATION_NAMES[this.formationId]})`;
+      this.label.setText(`${tryText}${PLAYS[this.playIndex].name}${form}${qb} · TAP to snap${run} · ⚙ = feel`);
       return;
     }
     if (this.state === 'kickAim') {

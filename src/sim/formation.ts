@@ -34,23 +34,52 @@ const BLOCK_Y = [-4, -2, 0, 2, 4];
 const RUSH_Y = [-5.5, -2, 2, 5.5];
 
 /**
+ * Formations (F-a): where our skill players line up. Every play's routes run from these spots.
+ * NORMAL: two receivers top (wide + slot), one wide bottom, the TE on the bottom of the line.
+ * FLIP: the same mirrored top <-> bottom (and their rushers with it, so every matchup by index stays
+ * the same: blocker i still takes rusher i, the TE still helps the edge rusher on his side).
+ */
+export type FormationId = 'normal' | 'flip';
+export const FORMATION_IDS: readonly FormationId[] = ['normal', 'flip'];
+export const FORMATION_NAMES: Record<FormationId, string> = { normal: 'NORMAL', flip: 'FLIP' };
+
+/** The next formation in the FORMATION button's cycle. */
+export function nextFormation(id: FormationId): FormationId {
+  return FORMATION_IDS[(FORMATION_IDS.indexOf(id) + 1) % FORMATION_IDS.length];
+}
+
+/** Which side the defense reads from a formation: where the TE is and where the extra receivers are (-1 top, +1 bottom). */
+export interface FormationSides {
+  teSide: 1 | -1;
+  strongSide: 1 | -1;
+}
+export const NORMAL_SIDES: FormationSides = { teSide: 1, strongSide: -1 };
+
+export function formationSides(id: FormationId = 'normal'): FormationSides {
+  return id === 'flip' ? { teSide: -1, strongSide: 1 } : NORMAL_SIDES;
+}
+
+/**
  * Where everyone lines up for a snap at losX: QB under centre, three receivers (two up top,
  * one at the bottom), a running back behind the QB, five blockers vs four rushers.
  * `towardMiddle` = which way is "inside" (+1 = larger y). `skill` = the three receivers, the
  * running back and the tight end, in the same order as a play's routes.
  */
-export function formation(losX: number) {
+export function formation(losX: number, id: FormationId = 'normal') {
   const mid = FIELD_WIDTH / 2;
-  const rush: Vec[] = RUSH_Y.map((y) => ({ x: losX + 1, y: mid + y }));
+  const flip = id === 'flip';
+  const m = (y: number) => (flip ? mid - y : mid + y); // y offset from the middle -> field y
+  const t = (d: 1 | -1): 1 | -1 => (flip ? (-d as 1 | -1) : d);
+  const rush: Vec[] = RUSH_Y.map((y) => ({ x: losX + 1, y: m(y) }));
   const wrs: { pos: Vec; towardMiddle: 1 | -1 }[] = [
-    { pos: { x: losX - 0.5, y: mid - 13 }, towardMiddle: 1 }, // wide, top
-    { pos: { x: losX - 1, y: mid - 7.5 }, towardMiddle: 1 }, // slot, top (a yard wider since 3h-b: off the tackle)
-    { pos: { x: losX - 0.5, y: mid + 13 }, towardMiddle: -1 }, // wide, bottom
+    { pos: { x: losX - 0.5, y: m(-13) }, towardMiddle: t(1) }, // wide, top
+    { pos: { x: losX - 1, y: m(-7.5) }, towardMiddle: t(1) }, // slot, top (a yard wider since 3h-b: off the tackle)
+    { pos: { x: losX - 0.5, y: m(13) }, towardMiddle: t(-1) }, // wide, bottom
   ];
   // The RB counts as "below the middle", so negative route y (toward his sideline) = the bottom side.
-  const rb: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX + RB_OFFSET.x, y: mid + RB_OFFSET.y }, towardMiddle: -1 };
+  const rb: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX + RB_OFFSET.x, y: m(RB_OFFSET.y) }, towardMiddle: t(-1) };
   // Tight end on the bottom side, on the line: his routes' negative y = toward the bottom sideline, like the RB's.
-  const te: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX - 1, y: mid + TE_Y }, towardMiddle: -1 };
+  const te: { pos: Vec; towardMiddle: 1 | -1 } = { pos: { x: losX - 1, y: m(TE_Y) }, towardMiddle: t(-1) };
   return {
     // A step behind the centre so the two don't overlap (3h-a); his dropback is shorter to match,
     // so he still sets up 5 yards behind the line.
@@ -60,7 +89,8 @@ export function formation(losX: number) {
     te,
     skill: [...wrs, rb, te],
     rush,
-    block: BLOCK_Y.map((y) => ({ x: losX - 1, y: mid + y })),
+    block: BLOCK_Y.map((y) => ({ x: losX - 1, y: m(y) })),
+    sides: formationSides(id),
   };
 }
 

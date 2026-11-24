@@ -11,6 +11,7 @@ import { OPP_GOAL_X } from './drive';
 import type { Vec } from './throw';
 import { ZONE_SHELL, isZoneCall, type ZoneCallId } from './zone';
 import type { Leans } from './scouting';
+import { NORMAL_SIDES, type FormationSides } from './formation';
 
 /** The man calls (3d2). */
 export type ManCallId = 'man' | 'press' | 'off' | 'blitz';
@@ -177,9 +178,9 @@ export function disguiseLooks(id: DisguiseId, rolled: ShellId): { shown: Look; r
 }
 
 /** Where everyone lines up for a look: [CB1, CB3, CB2, LB1, LB2] over skill spots `wrs`, then S1, S2. */
-export function lookAlignment(look: Look, feel: Feel, losX: number, wrs: Vec[]): { cover: Vec[]; safeties: [Vec, Vec] } {
+export function lookAlignment(look: Look, feel: Feel, losX: number, wrs: Vec[], sides: FormationSides = NORMAL_SIDES): { cover: Vec[]; safeties: [Vec, Vec] } {
   return {
-    cover: wrs.map((wr, i) => (i === 3 ? linebackerStart(look.call, feel, losX) : i === 4 ? linebacker2Start(feel, losX) : cornerStart(look.call, feel, wr))),
+    cover: wrs.map((wr, i) => (i === 3 ? linebackerStart(look.call, feel, losX) : i === 4 ? linebacker2Start(feel, losX, sides) : cornerStart(look.call, feel, wr))),
     safeties: [safetyStart(feel, losX, look.shell, 0), safetyStart(feel, losX, look.shell, 1)],
   };
 }
@@ -294,13 +295,13 @@ export function pickShell(s: DefSituation, feel: Feel, roll: number): ShellId {
 }
 
 /** Where the second linebacker lines up (3h-b): a few yards deep, shading the tight end's side. */
-export function linebacker2Start(feel: Feel, losX: number): Vec {
-  return { x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 + feel.defense.lb2OffsetYards };
+export function linebacker2Start(feel: Feel, losX: number, sides: FormationSides = NORMAL_SIDES): Vec {
+  return { x: losX + feel.defense.lbDepthYards, y: FIELD_WIDTH / 2 + sides.teSide * feel.defense.lb2OffsetYards };
 }
 
 /** With our tight end in to block, LB2 drops here (the short middle, a hook zone) and breaks on throws nearby. */
-export function lb2ZoneSpot(feel: Feel, losX: number): Vec {
-  return { x: losX + feel.defCalls.lb2ZoneDepthYards, y: FIELD_WIDTH / 2 - feel.defCalls.lb2ZoneTopYards };
+export function lb2ZoneSpot(feel: Feel, losX: number, sides: FormationSides = NORMAL_SIDES): Vec {
+  return { x: losX + feel.defCalls.lb2ZoneDepthYards, y: FIELD_WIDTH / 2 + sides.strongSide * feel.defCalls.lb2ZoneTopYards };
 }
 
 /** LB2 in his hook zone: he heads straight for the spot (no cushion, no man) and breaks on throws like anyone. */

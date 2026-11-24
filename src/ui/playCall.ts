@@ -14,6 +14,7 @@ import { fieldZone } from '../sim/playcall';
 import { nextRoute, type PlayDef, type RouteDef } from '../sim/routes';
 import { playDiagramSvg, type DiagramDefense } from './playDiagram';
 import type { DefCallId, ShellId } from '../sim/defCalls';
+import { FORMATION_NAMES, nextFormation, type FormationId } from '../sim/formation';
 
 export interface PlayCallOptions {
   match: GameState;
@@ -30,8 +31,10 @@ export interface PlayCallOptions {
   selected: number;
   /** The play lined up right now (may have hot routes); kept if it's the selected play. */
   current: PlayDef;
-  /** The chosen play's index, and the play itself with any hot routes. */
-  onExecute: (playIndex: number, play: PlayDef) => void;
+  /** The chosen play's index, the play itself with any hot routes, and the formation it's run from. */
+  onExecute: (playIndex: number, play: PlayDef, formation: FormationId) => void;
+  /** F-a: the formation lined up now (the FORMATION button cycles it; CANCEL keeps the old one). */
+  formation: FormationId;
   onCancel: () => void;
   /**
    * Kick button: "FIELD GOAL (37 YD)" when in range, "KICK XP" on a try, or null for none.
@@ -125,7 +128,7 @@ export function openPlayCall(o: PlayCallOptions) {
           </div></div>`
         : ''
     }
-    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER, THE RB OR THE TE TO CHANGE HIS ROUTE</div></div>
+    <div class="pc-field pc-panel"><div class="pc-field-svg"></div>${tipLines.length ? `<div class="pc-tip">${tipLines.join('<br>')}</div>` : ''}<div class="pc-hint">TAP A RECEIVER, THE RB OR THE TE TO CHANGE HIS ROUTE</div><button type="button" class="pc-form" title="Line up in another formation (stays until you change it)"></button></div>
     <div class="pc-list pc-panel">
       <div class="pc-list-head">PLAY SELECT</div>
       <div class="pc-cards">
@@ -156,6 +159,11 @@ export function openPlayCall(o: PlayCallOptions) {
   const field = root.querySelector<HTMLDivElement>('.pc-field-svg')!;
   const audibleBtn = root.querySelector<HTMLButtonElement>('.pc-audible')!;
   const timeoutBtn = root.querySelector<HTMLButtonElement>('.pc-timeout')!;
+  // F-a: the formation, cycled by the button on the big diagram.
+  let form: FormationId = o.formation;
+  const formBtn = root.querySelector<HTMLButtonElement>('.pc-form')!;
+  const showForm = () => (formBtn.textContent = `FORMATION: ${FORMATION_NAMES[form]} >`);
+  showForm();
   timeoutBtn.disabled = !o.canTimeout;
 
   /** Draws a play into a box, fitting the box's shape (see BIG / MINI). */
@@ -174,6 +182,7 @@ export function openPlayCall(o: PlayCallOptions) {
       ...(detailed && o.names ? { names: o.names } : {}),
       ...(detailed && o.matchups ? { defense: o.matchups } : {}),
       ...(detailed && o.defenseRead ? { call: o.defenseRead.call, shell: o.defenseRead.shell, ...(o.defenseRead.safety2At && { safety2At: o.defenseRead.safety2At }) } : {}),
+      formation: form,
       ...extra,
     });
   };
@@ -201,6 +210,11 @@ export function openPlayCall(o: PlayCallOptions) {
     drawBig();
   };
 
+  formBtn.addEventListener('click', () => {
+    form = nextFormation(form);
+    showForm();
+    drawAll();
+  });
   root.querySelector('.pc-cards')!.addEventListener('click', (e) => {
     const card = (e.target as HTMLElement).closest<HTMLButtonElement>('.pc-card');
     if (card) select(Number(card.dataset.i));
@@ -216,7 +230,7 @@ export function openPlayCall(o: PlayCallOptions) {
   });
   root.querySelector('.pc-btns')!.addEventListener('click', (e) => {
     const act = (e.target as HTMLElement).closest<HTMLButtonElement>('.pc-btn')?.dataset.act;
-    if (act === 'go') finish(() => o.onExecute(selected, calledPlay()));
+    if (act === 'go') finish(() => o.onExecute(selected, calledPlay(), form));
     if (act === 'kick') finish(o.onKick);
     if (act === 'punt') finish(o.onPunt);
     if (act === 'audible') setAudible(!audible);
@@ -245,7 +259,7 @@ export function openPlayCall(o: PlayCallOptions) {
       if (e.key === 'Escape') showSim(false);
       return;
     }
-    if (e.key === 'Enter') finish(() => o.onExecute(selected, calledPlay()));
+    if (e.key === 'Enter') finish(() => o.onExecute(selected, calledPlay(), form));
     if (e.key === 'Escape') finish(o.onCancel);
   };
   window.addEventListener('keydown', onKey);

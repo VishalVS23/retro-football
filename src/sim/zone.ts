@@ -53,7 +53,18 @@ export const ZONE_DEFENDERS = 7;
  * Cover 2: S1 / S2 each take a deep half; the outside corners squat in the flats; the slot corner
  * takes the top curl, LB1 the middle hook, LB2 the bottom curl / hook.
  */
-export function zoneJobs(call: ZoneCallId, feel: Feel, losX: number): ZoneJob[] {
+export function zoneJobs(call: ZoneCallId, feel: Feel, losX: number, strongSide: 1 | -1 = -1): ZoneJob[] {
+  const jobs = zoneJobsTopStrong(call, feel, losX);
+  if (strongSide === -1) return jobs;
+  // Our strength is at the bottom (FLIP): every landmark mirrors top <-> bottom.
+  const m = (y: number) => FIELD_WIDTH - y;
+  const out = jobs.map((j) => ({ ...j, spot: { x: j.spot.x, y: m(j.spot.y) }, yMin: m(j.yMax), yMax: m(j.yMin) }));
+  // Cover 2's deep halves stay with the safety already on that side (S1 lines up over the top half).
+  if (call === 'cover2') [out[5], out[6]] = [out[6], out[5]];
+  return out;
+}
+
+function zoneJobsTopStrong(call: ZoneCallId, feel: Feel, losX: number): ZoneJob[] {
   const z = feel.zone;
   const mid = FIELD_WIDTH / 2;
   const deep = (yards: number) => Math.min(losX + yards, TOTAL_LENGTH - 1);

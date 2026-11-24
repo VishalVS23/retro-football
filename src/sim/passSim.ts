@@ -4,7 +4,7 @@
  * resolved. Used by the balance tests to measure how open each route gets.
  */
 import type { Feel } from '../config/feel';
-import { formation } from './formation';
+import { formation, type FormationId } from './formation';
 import { RB, TE, coveredByLinebacker, routeBase, receiverInFlight, routePath, runnerAfter, startRunner, stepRunner, type PlayDef } from './routes';
 import { reachedQb, resolveTargetedPass, rollCornerSpeed, startCoverage, stepCoverage, stepRusher, stepSafety, stepZoneSafety, type PassResult, type Rusher } from './defense';
 import { ZONE_SHELL, breaksOn, contestsAsHelp, isZoneCall, zoneBallReaction, zoneCoverScale, zoneJobs, zoneTarget } from './zone';
@@ -52,6 +52,8 @@ export interface PassOptions {
   jump?: { cover: number; spot: Vec };
   /** A-c: S2 brackets this skill spot (man calls only: the look becomes one deep + the bracket). */
   bracket?: number;
+  /** F-a: our formation (default NORMAL). */
+  formation?: FormationId;
   /** Our TE stays in to block (his route is Block): what LB2 does. Default: drops into the short middle. */
   lb2?: 'drop' | 'blitz';
   /**
@@ -75,7 +77,7 @@ export function simulatePass(
   const armFx = withQb ? arm(opts.qb, feel.ratings) : { speed: 1, range: 1 };
   const rng = createRng(seed);
   const d = feel.defense;
-  const f = formation(losX);
+  const f = formation(losX, opts.formation);
   const paths = f.skill.map((s, i) => routePath(s.pos, play.routes[i], s.towardMiddle));
   let runners = paths.map((path, i) => startRunner(path, play.routes[i].stop));
   const R = feel.ratings;
@@ -91,7 +93,7 @@ export function simulatePass(
   const job: Lb2Job = teBlocks ? (opts.lb2 ?? 'drop') : 'cover';
   // Zone call (Z-a): everyone plays an area instead of a man (LB2 still blitzes when the TE blocks and the dice say so).
   const zone = isZoneCall(call);
-  const jobs = zone ? zoneJobs(call, feel, losX) : null;
+  const jobs = zone ? zoneJobs(call, feel, losX, f.sides.strongSide) : null;
   const coverP = f.skill.map((_, i) => {
     const base = i === TE ? lb2Cover : i === RB ? lbCover : cbCover;
     const rated = def ? coverFor(def.cover[i], base, R, zone) : base;
@@ -109,14 +111,14 @@ export function simulatePass(
     const p = zoneParams(coverP[jumper.cover]);
     coverP[jumper.cover] = { ...p, ballReactionTime: p.ballReactionTime * feel.adjust.jumpReactionRatio };
   }
-  const zoneSpot = lb2ZoneSpot(feel, losX);
+  const zoneSpot = lb2ZoneSpot(feel, losX, f.sides);
   // Safety look (3h-c): two deep (S1 top half, S2 bottom half) or one deep + robber. Cover 3: one deep (S1 in the middle third), S2 rotates down.
   const bracket = !isZoneCall(call) && opts.bracket !== undefined ? opts.bracket : null;
   const shell = isZoneCall(call) ? ZONE_SHELL[call] : (opts.shell ?? 'twoDeep');
   // Where they line up: the look they show (a disguise) or the one they play.
-  const align = lookAlignment(opts.shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos));
+  const align = lookAlignment(opts.shown ?? { call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides);
   // A disguise rotates: each defender plays his real job, a step late (`rotatedTarget`).
-  const rotation = opts.shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos)) } : null;
+  const rotation = opts.shown ? { shown: align, real: lookAlignment({ call, shell }, feel, losX, f.skill.map((s) => s.pos), f.sides) } : null;
   const rot = (i: number, tt: number, target: Vec) => rotatedTarget(rotation, i, tt, target, feel);
   // ...and whoever rotates reads the throw a little later.
   coverP.forEach((p, i) => (coverP[i] = { ...p, ballReactionTime: p.ballReactionTime + rotationReadDelay(rotation, i, feel) }));

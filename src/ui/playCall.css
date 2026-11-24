@@ -378,3 +378,22 @@
 .pc-read b {
   color: #7fe7ff;
 }
+
+/* F-a: FORMATION button, bottom-left corner of the big diagram (cycles NORMAL / FLIP ...). */
+.pc-form {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 4px 6px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(7px, 0.95vw, 10px);
+  color: #0d1b2a;
+  background: #7fe7ff;
+  border: 2px solid #0d1b2a;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.pc-field.audible .pc-form {
+  display: none;
+}

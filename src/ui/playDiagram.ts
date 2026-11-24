@@ -5,7 +5,7 @@
  */
 import { feel } from '../config/feel';
 import { END_ZONE_DEPTH, FIELD_WIDTH, TOTAL_LENGTH, yardLineNumber } from '../sim/field';
-import { formation, SLOT } from '../sim/formation';
+import { formation, SLOT, type FormationId } from '../sim/formation';
 import { OPP_GOAL_X } from '../sim/drive';
 import { POST_HALF_WIDTH } from '../sim/kicking';
 import { RB, TE, routePath, type PlayDef } from '../sim/routes';
@@ -37,6 +37,8 @@ export interface DiagramView {
   shell?: ShellId;
   /** A-c: S2 bracketing a receiver stands here instead of where the look puts him. */
   safety2At?: { x: number; y: number };
+  /** F-a: our formation (default NORMAL). */
+  formation?: FormationId;
 }
 
 /**
@@ -170,7 +172,7 @@ function player(p: Vec, color: string, label: string | null, spot: LabelSpot = '
 }
 
 export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, v: DiagramView): string {
-  const f = formation(losX);
+  const f = formation(losX, v.formation);
   const x1 = v.x0 + v.w;
   let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(v.x0)} ${n(v.y0)} ${n(v.w)} ${n(v.h)}" preserveAspectRatio="xMidYMid meet">`;
 
@@ -226,7 +228,7 @@ export function playDiagramSvg(play: PlayDef, losX: number, firstDownX: number, 
     const call = v.call ?? 'man';
     f.wrs.forEach((wr, i) => (s += player(cornerStart(call, feel, wr.pos), C.defense, dl(dn?.cover[i], 'CB'), dn ? 'above' : 'below')));
     s += player(linebackerStart(call, feel, losX), C.defense, dl(dn?.cover[RB], 'LB'));
-    s += player(linebacker2Start(feel, losX), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
+    s += player(linebacker2Start(feel, losX, f.sides), C.defense, dl(dn?.cover[TE], 'LB')); // LB2 over the TE (3h-b)
     // Safeties (3h-c) where this snap's look puts them (two deep in the huddle: the look shows at the line).
     const shell = v.shell ?? 'twoDeep';
     s += player(safetyStart(feel, losX, shell, 0), C.defense, dl(dn?.safety, 'S'));

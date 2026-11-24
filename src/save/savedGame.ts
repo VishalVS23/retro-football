@@ -10,6 +10,7 @@ import type { ClockState } from '../sim/clock';
 import type { GameState } from '../sim/drive';
 import type { GameStats, QbLine, SideStats } from '../sim/gameStats';
 import { sanitizeScouting, type Scouting } from '../sim/scouting';
+import { FORMATION_IDS, type FormationId } from '../sim/formation';
 
 export interface SavedGame {
   match: GameState;
@@ -21,6 +22,8 @@ export interface SavedGame {
   opponentId?: number;
   /** Their coach's scouting memory of this game (A-a). Missing in older saves = he starts fresh. */
   scouting?: Scouting;
+  /** F-a: the formation lined up. Missing in older saves = NORMAL. */
+  formation?: FormationId;
 }
 
 /** Nothing has happened yet (no snaps, no points, full first quarter): not worth a CONTINUE. */
@@ -110,5 +113,6 @@ export function sanitizeSavedGame(raw: unknown, playCount = Infinity): SavedGame
   const game: SavedGame = { match: raw.match, clock: raw.clock, stats: raw.stats, playIndex };
   if (isInt(raw.opponentId, 0)) game.opponentId = raw.opponentId;
   if (raw.scouting !== undefined) game.scouting = sanitizeScouting(raw.scouting);
+  if (typeof raw.formation === 'string' && (FORMATION_IDS as readonly string[]).includes(raw.formation)) game.formation = raw.formation as FormationId;
   return snapshotGame(game);
 }
