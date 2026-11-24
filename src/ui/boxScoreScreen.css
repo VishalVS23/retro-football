@@ -192,7 +192,8 @@
   color: #0d1b2a;
   border-radius: 2px;
 }
-.bx-rtg.r-great { background: #ffd166; }
-.bx-rtg.r-good { background: #9be38a; }
-.bx-rtg.r-ok { background: #f0a948; }
-.bx-rtg.r-poor { background: #ff6b6b; }
+.bx-rtg.r-great { background: #23964a; color: #fff; }
+.bx-rtg.r-good { background: #8fdc6e; }
+.bx-rtg.r-ok { background: #ffd166; }
+.bx-rtg.r-poor { background: #f08a3c; }
+.bx-rtg.r-bad { background: #c8323c; color: #fff; }

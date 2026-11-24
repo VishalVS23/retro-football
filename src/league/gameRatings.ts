@@ -162,7 +162,7 @@ export function unitAverages(t: TeamBox, u: StatUnit): { off: number | null; def
   return { off: avg((x) => ['QB', 'RB', 'WR', 'TE', 'OL'].includes(x)), def: avg((x) => ['DL', 'LB', 'CB', 'S'].includes(x)) };
 }
 
-/** Colour band of a rating (one decimal, e.g. 7.4): 8+ great, 7s good, 6s ok, under 6 poor. */
-export function ratingBand(r: number): 'r-great' | 'r-good' | 'r-ok' | 'r-poor' {
-  return r >= 8 ? 'r-great' : r >= 7 ? 'r-good' : r >= 6 ? 'r-ok' : 'r-poor';
+/** Colour band of a rating (one decimal, e.g. 7.4): dark green 8+, light green 7s, yellow 6s, orange 5s, dark red under 5. */
+export function ratingBand(r: number): 'r-great' | 'r-good' | 'r-ok' | 'r-poor' | 'r-bad' {
+  return r >= 8 ? 'r-great' : r >= 7 ? 'r-good' : r >= 6 ? 'r-ok' : r >= 5 ? 'r-poor' : 'r-bad';
 }

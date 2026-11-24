@@ -477,7 +477,8 @@
   color: #0d1b2a;
   border-radius: 2px;
 }
-.ts-rtg.r-great { background: #ffd166; }
-.ts-rtg.r-good { background: #9be38a; }
-.ts-rtg.r-ok { background: #f0a948; }
-.ts-rtg.r-poor { background: #ff6b6b; }
+.ts-rtg.r-great { background: #23964a; color: #fff; }
+.ts-rtg.r-good { background: #8fdc6e; }
+.ts-rtg.r-ok { background: #ffd166; }
+.ts-rtg.r-poor { background: #f08a3c; }
+.ts-rtg.r-bad { background: #c8323c; color: #fff; }

@@ -2,6 +2,7 @@
  * End-of-game screen (Stage 2 step 7): WIN / LOSS / TIE, the final score, points by quarter, team
  * stats side by side, our QB's line and longest play, and PLAY AGAIN (or Enter).
  */
+import { ratingBand } from '../league/gameRatings';
 import '@fontsource/press-start-2p/latin-400.css';
 import './endGame.css';
 import { totalYards, type GameStats, type SideStats } from '../sim/gameStats';
@@ -88,7 +89,7 @@ export function openEndGame(o: EndGameOptions) {
         <div class="eg-qb"><span>YOUR QB</span>${qbLine}</div>
         ${
           o.potg
-            ? `<div class="eg-qb eg-potg"><span>PLAYER OF THE GAME</span><b class="eg-rtg">${o.potg.rating}</b> ${o.potg.abbr} ${o.potg.pos} ${o.potg.name}<br>${o.potg.line}</div>`
+            ? `<div class="eg-qb eg-potg"><span>PLAYER OF THE GAME</span><b class="eg-rtg ${ratingBand(Number(o.potg.rating))}">${o.potg.rating}</b> ${o.potg.abbr} ${o.potg.pos} ${o.potg.name}<br>${o.potg.line}</div>`
             : `<div class="eg-qb"><span>LONGEST PLAY</span>${s.longest} YDS</div>`
         }
       </div>

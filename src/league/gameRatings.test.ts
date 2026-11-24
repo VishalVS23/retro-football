@@ -54,6 +54,7 @@ describe('game ratings (4d)', () => {
     expect(clean).toBeGreaterThan(leaky + 0.8);
     expect(ratingBand(8.1)).toBe('r-great');
     expect(ratingBand(5.9)).toBe('r-poor');
+    expect(ratingBand(4.9)).toBe('r-bad');
   });
 
   it('player of the game is the best rating; unit averages; rating leaders need half the games', () => {

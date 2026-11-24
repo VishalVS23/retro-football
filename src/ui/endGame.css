@@ -158,3 +158,8 @@
   background: #ffd166;
   border-radius: 2px;
 }
+.eg-rtg.r-great { background: #23964a; color: #fff; }
+.eg-rtg.r-good { background: #8fdc6e; }
+.eg-rtg.r-ok { background: #ffd166; }
+.eg-rtg.r-poor { background: #f08a3c; }
+.eg-rtg.r-bad { background: #c8323c; color: #fff; }
