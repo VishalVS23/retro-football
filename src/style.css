@@ -91,6 +91,12 @@ body {
   background: #14202bf2;
   border-left: 1px solid #f4efe133;
   font-size: 13px;
+  /* The whole panel scrolls (the Game / Difficulty / Save sections sit above the sliders and filled a
+     phone screen on their own, leaving no room for the sliders' own scroll area). */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   transform: translateX(105%);
   transition: transform 0.2s ease-out;
 }
@@ -122,10 +128,11 @@ body {
   font-size: 13px;
 }
 .fp-body {
-  flex: 1;
-  overflow-y: auto;
+  flex: none; /* grows with its sliders; the panel around it scrolls */
   touch-action: pan-y; /* let the list scroll even though the game blocks scrolling */
-  -webkit-overflow-scrolling: touch;
+}
+#feel-panel > * {
+  flex-shrink: 0; /* sections keep their height instead of being squeezed */
 }
 .fp-body h3 {
   margin: 12px 0 4px;

@@ -28,21 +28,13 @@ describe('difficulty', () => {
   it('never changes the original values (the league sims and SIM keep using them)', () => {
     const before = JSON.stringify(feel);
     withDifficulty(feel, 'hard');
-    withDifficulty(feel, 'rookie');
     expect(JSON.stringify(feel)).toBe(before);
-  });
-
-  it('Rookie goes the other way', () => {
-    const r = withDifficulty(feel, 'rookie');
-    expect(r.catching.catchRadiusYards).toBeGreaterThan(feel.catching.catchRadiusYards);
-    expect(r.pocket.shedTime).toBeGreaterThan(feel.pocket.shedTime);
-    expect(r.oppDrive.strength).toBeLessThan(feel.oppDrive.strength);
-    expect(adjustSpeedFor(0.2, 'rookie', feel)).toBe(0);
   });
 
   it('old or damaged values = Normal', () => {
     expect(sanitizeDifficulty(undefined)).toBe('normal');
     expect(sanitizeDifficulty('HARD')).toBe('normal');
+    expect(sanitizeDifficulty('rookie')).toBe('normal');
     expect(sanitizeDifficulty('hard')).toBe('hard');
   });
 });

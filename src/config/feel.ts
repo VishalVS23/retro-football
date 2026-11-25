@@ -879,35 +879,26 @@ export const feel = {
     simHomeEdge: 0.22, // measured: 0 = 50%, 0.2 = 54-55%, 0.5 = 62%, 1 = 75% home wins
   },
   /**
-   * Difficulty (src/sim/difficulty.ts). Normal = every value above as it is. Hard / Rookie scale a few
-   * of them, ONLY in games you play on the field (your snaps and the CPU drives in them); league sims
+   * Difficulty (src/sim/difficulty.ts). Normal = every value above as it is. Hard scales a few of them, ONLY in games you play on the field (your snaps and the CPU drives in them); league sims
    * and the SIM button stay neutral. Scales: 1 = no change.
    */
   difficulty: {
     /** QB read (disguises and their adjustments): an average starting QB's chance (Normal: ratings.qbReadChance). */
-    hardReadChance: 0.3,
-    rookieReadChance: 0.75,
+    hardReadChance: 0.25,
     /** How often their coach disguises (x defCalls.disguiseChance). */
     hardDisguiseScale: 1.5,
-    rookieDisguiseScale: 0.4,
-    /** How fast their coach adjusts to your habits: Hard adds this to his 0..1 adjust speed, Rookie takes it off (clamped). */
+    /** How fast their coach adjusts to your habits: added to his 0..1 adjust speed (clamped). */
     hardAdjustShift: 0.35,
-    rookieAdjustDrop: 0.35,
     /** Defenders' reaction times (to cuts and to the throw) x this: below 1 = quicker. */
-    hardReactionScale: 0.85,
-    rookieReactionScale: 1.25,
+    hardReactionScale: 0.75,
     /** QB miss oval x this. */
-    hardScatterScale: 1.25,
-    rookieScatterScale: 0.7,
+    hardScatterScale: 1.4,
     /** Catch zones (normal and bullet) x this. */
-    hardCatchScale: 0.9,
-    rookieCatchScale: 1.2,
+    hardCatchScale: 0.85,
     /** Pass-block time (pocket.shedTime) x this. */
-    hardPocketScale: 0.94,
-    rookiePocketScale: 1.15,
+    hardPocketScale: 0.92,
     /** CPU drives in your games: oppDrive.strength x this. */
-    hardCpuScale: 1.1,
-    rookieCpuScale: 0.85,
+    hardCpuScale: 1.2,
   },
   juice: {
     hitPauseTime: 0.06,

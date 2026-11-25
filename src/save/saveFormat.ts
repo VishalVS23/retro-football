@@ -39,7 +39,7 @@ export interface SaveData {
    * key (saveStore.ts), written once a week rather than with every autosave.
    */
   stats: StatsStore;
-  /** Difficulty of the games you play (version 6): 'normal' / 'hard' (/ 'rookie'). Can change any time. */
+  /** Difficulty of the games you play (version 6): 'normal' / 'hard'. Can change any time. */
   difficulty: DifficultyId;
 }
 

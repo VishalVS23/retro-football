@@ -1,15 +1,14 @@
 /**
- * Difficulty modes. Normal = the game's values as they are. Hard / Rookie build a changed copy of the
+ * Difficulty modes. Normal = the game's values as they are. Hard builds a changed copy of the
  * feel values (feel.difficulty says by how much) for games you play on the field: your snaps and the CPU
  * drives in them. League sims and the SIM button keep the plain values, so the league stays fair and
  * simming never dodges the difficulty. Pure logic, no Phaser.
  */
 import type { Feel } from '../config/feel';
 
-export type DifficultyId = 'rookie' | 'normal' | 'hard';
-/** The modes you can pick (Rookie joins in its own step). */
+export type DifficultyId = 'normal' | 'hard';
 export const DIFFICULTY_IDS: DifficultyId[] = ['normal', 'hard'];
-export const DIFFICULTY_NAMES: Record<DifficultyId, string> = { rookie: 'Rookie', normal: 'Normal', hard: 'Hard' };
+export const DIFFICULTY_NAMES: Record<DifficultyId, string> = { normal: 'Normal', hard: 'Hard' };
 
 /** Defenders' reaction times scaled by the mode (to their man's cuts, to the throw, to the runner). */
 const REACTIONS: Array<[section: 'defense' | 'zone' | 'tackling', key: string]> = [
@@ -36,7 +35,7 @@ export interface Levers {
   catchScale: number;
   pocketScale: number;
   cpuScale: number;
-  /** The LOOKS LIKE strip spells out what beats the look (Normal / Rookie); Hard shows only the look. */
+  /** The LOOKS LIKE strip spells out what beats the look (Normal); Hard shows only the look. */
   tips: boolean;
 }
 
@@ -53,18 +52,6 @@ export function levers(id: DifficultyId, feel: Feel): Levers {
       pocketScale: d.hardPocketScale,
       cpuScale: d.hardCpuScale,
       tips: false,
-    };
-  if (id === 'rookie')
-    return {
-      readChance: d.rookieReadChance,
-      disguiseScale: d.rookieDisguiseScale,
-      adjustShift: -d.rookieAdjustDrop,
-      reactionScale: d.rookieReactionScale,
-      scatterScale: d.rookieScatterScale,
-      catchScale: d.rookieCatchScale,
-      pocketScale: d.rookiePocketScale,
-      cpuScale: d.rookieCpuScale,
-      tips: true,
     };
   return {
     readChance: feel.ratings.qbReadChance,
@@ -114,5 +101,5 @@ export function adjustSpeedFor(speed: number, id: DifficultyId, feel: Feel): num
 
 /** Anything else (old save, junk) = Normal. */
 export function sanitizeDifficulty(v: unknown): DifficultyId {
-  return v === 'rookie' || v === 'hard' || v === 'normal' ? v : 'normal';
+  return v === 'hard' ? 'hard' : 'normal';
 }
