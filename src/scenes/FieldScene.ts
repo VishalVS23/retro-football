@@ -171,10 +171,11 @@ import {
   type ClockEvent,
   type ClockState,
 } from '../sim/clock';
-import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setSeason, whenSaveReady } from '../save/saveSession';
+import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setNews, setSeason, whenSaveReady } from '../save/saveSession';
+import { emptyNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
 import { adjustSpeedFor, levers, sanitizeDifficulty, withDifficulty, type DifficultyId } from '../sim/difficulty';
 import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
-import { afterWeek, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
+import { afterWeek, championOf, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
 import { addBoxes, applyResults, statUnit, weekJobs } from '../league/seasonRun';
 import { addLine, creditLive, creditSnaps, type LivePlay, type Lines, type PlayerLine, type StatUnit } from '../league/playerStats';
 import { createRng } from '../sim/rng';
@@ -364,6 +365,8 @@ export class FieldScene extends Phaser.Scene {
   private weekBusy = false;
   /** 4b: the season's box scores and past seasons' player totals. */
   private leagueStats: StatsStore = emptyStats();
+  /** 5a: the inbox. */
+  private news: NewsStore = emptyNews();
   private scoreboard!: Phaser.GameObjects.Text;
   /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
   private readText!: Phaser.GameObjects.Text;
@@ -2422,6 +2425,7 @@ export class FieldScene extends Phaser.Scene {
     this.league = league;
     this.saveSeed = save.seed;
     this.leagueStats = save.stats;
+    this.news = save.news;
     // 4b-1 saves filed defenders under the team with the ball: put everyone back in his own team's box (once).
     const regroup = !this.leagueStats.grouped;
     if (regroup) {
@@ -2434,8 +2438,15 @@ export class FieldScene extends Phaser.Scene {
       this.season = save.season;
       if (!this.season) {
         this.season = newSeason(league.teams, 1, seasonSeed(save.seed, 1));
-        void setSeason(this.season, this.leagueStats);
+        this.news = this.seasonPreview(this.news, this.season);
+        void setSeason(this.season, this.leagueStats, this.news);
       } else {
+        // 5a: a season just starting (e.g. a save from before the inbox) gets its preview.
+        if (this.season.week === 1 && !this.season.games.some((g) => g.score)) {
+          const before = this.news;
+          this.news = this.seasonPreview(this.news, this.season);
+          if (this.news !== before) void setNews(this.news);
+        }
         // 4e: a save from before the playoffs, finished with the regular season: start them now.
         const withPlayoffs = withPlayoffGames(this.season, league.teams);
         if (withPlayoffs !== this.season || regroup) {
@@ -2812,7 +2823,9 @@ export class FieldScene extends Phaser.Scene {
         this.season = next;
         // The finished season's box scores become each player's season totals (keeps the save small).
         this.leagueStats = closeSeasonStats(this.leagueStats, s.year);
-        void setSeason(next, this.leagueStats);
+        // 5a: last season's news stays a year; the new season's preview.
+        this.news = this.seasonPreview(pruneNews(this.news, next.year), next, championOf(s)?.champion);
+        void setSeason(next, this.leagueStats, this.news);
         this.openSeason();
       },
       onTeam: () => this.openTeam(),
@@ -2824,7 +2837,41 @@ export class FieldScene extends Phaser.Scene {
       },
       hasBox: (id) => !!this.leagueStats.boxes[id],
       onBox: (id) => this.showBoxScore(id),
+      news: {
+        store: this.news,
+        teamName: (id, full) => {
+          const t = l.teams[id];
+          return !t ? '?' : full ? `${t.city} ${t.nickname}` : t.abbr;
+        },
+        playerName: (id) => {
+          const p = l.players[id];
+          return p ? `${p.firstName} ${p.lastName}` : 'a player';
+        },
+        onRead: (id) => {
+          this.news = markRead(this.news, id);
+          void setNews(this.news);
+          return this.news;
+        },
+        onTeam: (teamId) => this.openTeamOf(teamId),
+      },
     });
+  }
+
+  /** 5a: what the news needs to know about each team: conference, division, stars, rank on paper. */
+  private newsTeams(): NewsTeam[] {
+    const l = this.league!;
+    const stars = teamStars(l);
+    const order = l.teams.map((t) => t.id).sort((a, b) => teamRatings(l, b).overall - teamRatings(l, a).overall || a - b);
+    return l.teams.map((t) => ({ abbr: t.abbr, conference: t.conference, division: t.division, stars: stars[t.id].overall, rank: order.indexOf(t.id) + 1 }));
+  }
+
+  private static readonly CONF_SHORT = CONFERENCES.map((c) => c.split(' ')[0].toUpperCase());
+
+  /** 5a: the season preview (once a season). */
+  private seasonPreview(news: NewsStore, season: Season, lastChampion?: number): NewsStore {
+    const l = this.league;
+    if (!l || l.userTeamId === null) return news;
+    return previewNews(news, season, this.newsTeams(), l.userTeamId, FieldScene.CONF_SHORT, lastChampion);
   }
 
   /** 4b: who's at home in this game (0 = us, 1 = them), or null for an exhibition (neutral field). */
@@ -2970,7 +3017,10 @@ export class FieldScene extends Phaser.Scene {
       const next = afterWeek(applyResults(this.season ?? s, results), l.teams);
       this.season = next;
       this.leagueStats = { ...this.leagueStats, boxes: addBoxes(this.leagueStats.boxes, results) };
-      void setSeason(next, this.leagueStats);
+      // 5a: the week's news (results, players of the week, the playoff race, ...).
+      if (l.userTeamId !== null)
+        this.news = weekNews(this.news, { season: next, teams: this.newsTeams(), boxes: this.leagueStats.boxes, player: (id) => l.players[id], userTeamId: l.userTeamId }, week, FieldScene.CONF_SHORT);
+      void setSeason(next, this.leagueStats, this.news);
       this.openSeason(week);
     } finally {
       this.weekBusy = false;

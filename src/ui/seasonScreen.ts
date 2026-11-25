@@ -19,6 +19,7 @@ import {
   type StandingRow,
 } from '../league/season';
 import { teamLogoHtml } from './teamLogo';
+import { parseNewsText, unreadCount, type NewsItem, type NewsStore } from '../story/news';
 import type { TeamTotals } from '../league/leaders';
 import { ROUND_NAMES, championOf, inPlayoffs, playoffResult, playoffSeeds, resultWords, roundOfWeek, seasonDone, type SeasonSummary } from '../league/playoffs';
 
@@ -55,6 +56,14 @@ export interface SeasonScreenOptions {
   onPlayer?: (playerId: number) => void;
   /** 4e: past seasons (champion, runner-up, the user's season), oldest first. */
   pastSeasons?: SeasonSummary[];
+  /** 5a: the inbox. Names for the text's tokens; marking read returns the updated store (the scene saves it). */
+  news?: {
+    store: NewsStore;
+    teamName: (id: number, full: boolean) => string;
+    playerName: (id: number) => string;
+    onRead: (id: number | 'all') => NewsStore;
+    onTeam: (teamId: number) => void;
+  };
 }
 
 export interface SeasonStatsData {
@@ -62,7 +71,7 @@ export interface SeasonStatsData {
   teams: TeamTotals[];
 }
 
-type View = 'season' | 'standings' | 'schedule' | 'stats' | 'playoffs';
+type View = 'season' | 'inbox' | 'standings' | 'schedule' | 'stats' | 'playoffs';
 type TeamSort = 'pf' | 'pa' | 'yds' | 'alw' | 'to' | 'sck';
 function per(total: number, games: number) {
   return games ? total / games : 0;
@@ -107,6 +116,9 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   let teamSort: TeamSort = 'pf';
   let sortFlip = false;
   let statsData: SeasonStatsData | null = null;
+  // INBOX (5a): the open message (null = the list).
+  let newsItem: number | null = null;
+  let news = o.news?.store ?? null;
   const s = o.season;
   const rows = standingRows(s, o.teams);
   const me = o.userTeamId;
@@ -216,7 +228,12 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
       }
     }
     const results = o.resultsWeek ? weekScores(o.resultsWeek, `${weekName(o.resultsWeek)} RESULTS`) : '';
-    return `<div class="ss-title">SEASON ${s.year}${inPlayoffs(s) ? ' · PLAYOFFS' : ''}</div>${card}${results}`;
+    // 5a: news waiting (the latest message about us, else the latest).
+    const latest = news ? ([...news.items].reverse().find((x) => !x.read && x.mine) ?? [...news.items].reverse().find((x) => !x.read)) : undefined;
+    const nudge = latest
+      ? `<button type="button" class="ss-inboxnote" data-news="${latest.id}"><span class="ss-dot"></span><span>${newsText(latest.title, false).toUpperCase()}</span><span class="ss-box">INBOX (${unread()}) &gt;</span></button>`
+      : '';
+    return `<div class="ss-title">SEASON ${s.year}${inPlayoffs(s) ? ' · PLAYOFFS' : ''}</div>${card}${nudge}${results}`;
   };
 
   const table = (c: number, d: number) => {
@@ -354,6 +371,46 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     return `<div class="ss-title">PLAYOFFS · SEASON ${s.year}</div>${body}${history}`;
   };
 
+  /** News text with its tokens: team / player names (tappable in a message, plain in the list). */
+  const newsText = (line: string, links: boolean) =>
+    parseNewsText(line)
+      .map((part) => {
+        if ('text' in part) return esc(part.text);
+        const name = 'team' in part ? o.news!.teamName(part.team, part.full) : o.news!.playerName(part.player);
+        if (!links) return esc(name);
+        return 'team' in part ? `<button type="button" class="ss-ref" data-team="${part.team}">${esc(name)}</button>` : `<button type="button" class="ss-ref" data-player="${part.player}">${esc(name)}</button>`;
+      })
+      .join('');
+  const newsWeek = (x: NewsItem) => (x.week === 0 ? 'PRE' : roundOfWeek(x.week) ? ['WC', 'DIV', 'CONF', 'FINAL'][roundOfWeek(x.week) - 1] : `WK ${x.week}`);
+  const unread = () => (news ? unreadCount(news) : 0);
+
+  const inboxView = () => {
+    if (!news) return '<div class="ss-note">NO NEWS YET.</div>';
+    const open = newsItem !== null ? news.items.find((x) => x.id === newsItem) : undefined;
+    if (open) {
+      const box = open.gameId !== undefined && o.hasBox?.(open.gameId) ? `<div class="ss-btns"><button type="button" class="ss-btn sim" data-game="${open.gameId}">BOX SCORE &gt;</button></div>` : '';
+      return `<button class="ss-link" type="button" data-act="inbox">&lt; INBOX</button>
+        <div class="ss-article${open.mine ? ' mine' : ''}">
+          <div class="ss-meta">SEASON ${open.year} · ${open.week === 0 ? 'PRESEASON' : weekName(open.week)}</div>
+          <div class="ss-title">${newsText(open.title, false).toUpperCase()}</div>
+          ${open.body.map((b) => `<p>${newsText(b, true)}</p>`).join('')}
+          ${box}
+        </div>`;
+    }
+    const list = [...news.items].reverse();
+    const rowsHtml = list.length
+      ? list
+          .map(
+            (x) => `<button type="button" class="ss-news${x.mine ? ' mine' : ''}${x.read ? '' : ' unread'}" data-news="${x.id}">
+              <span class="ss-dot"></span><span class="ss-nwk">${newsWeek(x)}</span><span class="ss-ntitle">${newsText(x.title, false).toUpperCase()}</span></button>`,
+          )
+          .join('')
+      : '<div class="ss-note">NO NEWS YET. IT ARRIVES AS THE WEEKS ARE PLAYED.</div>';
+    return `<div class="ss-head"><div class="ss-title">INBOX${unread() ? ` · ${unread()} NEW` : ''}</div>
+        ${unread() ? '<div class="ss-chips"><button type="button" class="ss-chip" data-act="allread">MARK ALL READ</button></div>' : ''}</div>
+      <div class="ss-newslist">${rowsHtml}</div>`;
+  };
+
   const el = document.createElement('div');
   el.id = 'season-screen';
   el.innerHTML = `
@@ -361,6 +418,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
       <nav class="ss-rail">
         <div class="ss-me">${logo(me, 44)}<span>${esc(t(me).abbr)} ${rec(me)}</span></div>
         <button type="button" class="ss-nav" data-view="season">SEASON</button>
+        ${o.news ? '<button type="button" class="ss-nav" data-view="inbox">INBOX<span class="ss-badge"></span></button>' : ''}
         <button type="button" class="ss-nav" data-view="standings">STANDINGS</button>
         <button type="button" class="ss-nav" data-view="schedule">SCHEDULE</button>
         <button type="button" class="ss-nav" data-view="playoffs">PLAYOFFS</button>
@@ -372,7 +430,13 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   const main = el.querySelector<HTMLElement>('.ss-main')!;
   const render = () => {
     el.querySelectorAll<HTMLButtonElement>('.ss-nav[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
-    main.innerHTML = view === 'season' ? seasonView() : view === 'standings' ? standingsView() : view === 'stats' ? statsView() : view === 'playoffs' ? playoffsView() : scheduleView();
+    const n = unread();
+    const badge = el.querySelector<HTMLElement>('.ss-badge');
+    if (badge) {
+      badge.textContent = n ? String(n) : '';
+      badge.hidden = !n;
+    }
+    main.innerHTML = view === 'inbox' ? inboxView() : view === 'season' ? seasonView() : view === 'standings' ? standingsView() : view === 'stats' ? statsView() : view === 'playoffs' ? playoffsView() : scheduleView();
     main.querySelectorAll<HTMLButtonElement>('.ss-btn').forEach((b) => (b.disabled = busy));
   };
   const act = (a: string | undefined) => {
@@ -389,8 +453,24 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     if (nav) {
       view = nav.dataset.view as View;
       weekDetail = null;
+      newsItem = null;
       render();
       main.scrollTop = 0;
+      return;
+    }
+    const item = target.closest<HTMLElement>('[data-news]');
+    if (item && o.news && news) {
+      const id = Number(item.dataset.news);
+      newsItem = id;
+      view = 'inbox';
+      if (!news.items.find((x) => x.id === id)?.read) news = o.news.onRead(id);
+      render();
+      main.scrollTop = 0;
+      return;
+    }
+    const teamRef = target.closest<HTMLElement>('[data-team]');
+    if (teamRef) {
+      o.news?.onTeam(Number(teamRef.dataset.team));
       return;
     }
     const mode = target.closest<HTMLElement>('[data-mode]');
@@ -439,6 +519,16 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     const a = target.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (a === 'weeks') {
       weekDetail = null;
+      render();
+      return;
+    }
+    if (a === 'inbox') {
+      newsItem = null;
+      render();
+      return;
+    }
+    if (a === 'allread' && o.news) {
+      news = o.news.onRead('all');
       render();
       return;
     }

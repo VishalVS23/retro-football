@@ -434,3 +434,108 @@
 .ss-card.champ .ss-card-title {
   color: var(--ss-gold);
 }
+
+/* ---------- Inbox (5a) ---------- */
+.ss-nav {
+  position: relative;
+}
+.ss-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 14px;
+  padding: 2px 3px;
+  font-size: 7px;
+  line-height: 1;
+  text-align: center;
+  background: #e63946;
+  color: #fff;
+  border-radius: 7px;
+}
+.ss-newslist {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 640px;
+  margin-top: 6px;
+}
+.ss-news,
+.ss-inboxnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 6px;
+  font-size: 8px;
+  line-height: 1.5;
+  text-align: left;
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+  color: var(--ss-dim) !important;
+}
+.ss-news.unread {
+  color: var(--ss-text) !important;
+}
+.ss-news.mine {
+  border-left-color: var(--ss-gold);
+  border-left-width: 4px;
+}
+.ss-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: transparent;
+}
+.ss-news.unread .ss-dot,
+.ss-inboxnote .ss-dot {
+  background: #e63946;
+}
+.ss-nwk {
+  flex: none;
+  min-width: 40px;
+  color: var(--ss-dim);
+}
+.ss-ntitle {
+  flex: 1;
+  min-width: 0;
+}
+.ss-inboxnote {
+  margin-top: 6px;
+  color: var(--ss-text) !important;
+  border-color: var(--ss-gold);
+}
+.ss-inboxnote > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.ss-article {
+  background: var(--ss-card);
+  border: 2px solid var(--ss-navy);
+  border-radius: 3px;
+  padding: 10px;
+  max-width: 640px;
+}
+.ss-article.mine {
+  border-color: var(--ss-gold);
+}
+.ss-meta {
+  font-size: 7px;
+  color: var(--ss-dim);
+  margin-bottom: 6px;
+}
+.ss-article p {
+  font-size: 8px;
+  line-height: 1.9;
+  margin: 8px 0 0;
+}
+.ss-ref {
+  padding: 0;
+  font-size: inherit;
+  background: none;
+  border: none;
+  color: var(--ss-gold) !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

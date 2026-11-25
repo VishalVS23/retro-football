@@ -10,6 +10,7 @@ import type { Season } from '../league/season';
 import type { StatsStore } from '../league/boxScore';
 import { openOrCreateSave, writeSave } from './saveStore';
 import type { DifficultyId } from '../sim/difficulty';
+import type { NewsStore } from '../story/news';
 
 let current: SaveData | null = null;
 let rng: Rng | null = null;
@@ -19,6 +20,8 @@ let imported = false;
 let leagueDirty = false;
 /** The stats changed since they were last stored. */
 let statsDirty = false;
+/** The news changed since it was last stored. */
+let newsDirty = false;
 let resolveReady: (save: SaveData) => void = () => {};
 const ready = new Promise<SaveData>((resolve) => (resolveReady = resolve));
 
@@ -76,9 +79,11 @@ export async function commitSave(backup = true): Promise<void> {
   // Full saves (backup) always include the league; autosaves only when it changed.
   const league = backup || leagueDirty;
   const stats = backup || statsDirty;
-  if (persisted) await writeSave(current, { backup, league, stats });
+  const news = backup || newsDirty;
+  if (persisted) await writeSave(current, { backup, league, stats, news });
   if (league) leagueDirty = false;
   if (stats) statsDirty = false;
+  if (news) newsDirty = false;
 }
 
 /** Replace the league (e.g. once it's made and the user picked a team) and store it. Never throws. */
@@ -97,9 +102,13 @@ export async function setLeague(league: League): Promise<void> {
  * Replace the season (a week played, a new season) and store it, with a rolling backup. Never throws.
  * `stats` = the stats store too (4b: the week's box scores), saved in the same write.
  */
-export async function setSeason(season: Season | null, stats?: StatsStore): Promise<void> {
+export async function setSeason(season: Season | null, stats?: StatsStore, news?: NewsStore): Promise<void> {
   if (!current || imported) return;
   current.season = season;
+  if (news) {
+    current.news = news;
+    newsDirty = true;
+  }
   if (stats) {
     current.stats = stats;
     statsDirty = true;
@@ -108,6 +117,18 @@ export async function setSeason(season: Season | null, stats?: StatsStore): Prom
     await commitSave(true);
   } catch (err) {
     console.warn('Saving the season failed:', err);
+  }
+}
+
+/** 5a: store the inbox on its own (e.g. a message marked read), no backup. Never throws. */
+export async function setNews(news: NewsStore): Promise<void> {
+  if (!current || imported) return;
+  current.news = news;
+  newsDirty = true;
+  try {
+    await commitSave(false);
+  } catch (err) {
+    console.warn('Saving the inbox failed:', err);
   }
 }
 

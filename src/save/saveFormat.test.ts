@@ -46,6 +46,14 @@ describe('save format', () => {
     expect(migrate({ ...createNewSave(9, fixedDate), difficulty: 'hard' }).difficulty).toBe('hard');
   });
 
+  it('version 7: the inbox; older saves start with an empty one, a damaged one is emptied', () => {
+    const { news: _n, ...v6 } = { ...createNewSave(9, fixedDate), version: 6 };
+    expect(migrate(v6).news).toEqual({ nextId: 1, items: [], flags: [] });
+    expect(migrate({ ...createNewSave(9, fixedDate), news: 42 }).news).toEqual({ nextId: 1, items: [], flags: [] });
+    const news = { nextId: 2, items: [{ id: 1, year: 1, week: 3, kind: 'roundup', title: 'WEEK 3', body: ['{t:1} won.'] }], flags: ['clinch:1:4'] };
+    expect(migrate({ ...createNewSave(9, fixedDate), news }).news).toEqual(news);
+  });
+
   it('survives a round trip through a file', () => {
     const s = createNewSave(7, fixedDate);
     expect(parseSave(serializeSave(s))).toEqual(s);

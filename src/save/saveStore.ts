@@ -16,6 +16,7 @@ const CURRENT = 'current';
 const BACKUPS = 'backups';
 const LEAGUE = 'league';
 const STATS = 'stats';
+const NEWS = 'news';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -35,7 +36,8 @@ export async function loadSave(): Promise<SaveData | null> {
   if (!raw) return null;
   const league = await d.get(STORE, LEAGUE);
   const stats = await d.get(STORE, STATS);
-  return migrate({ ...raw, ...(league !== undefined && { league }), ...(stats !== undefined && { stats }) });
+  const news = await d.get(STORE, NEWS);
+  return migrate({ ...raw, ...(league !== undefined && { league }), ...(stats !== undefined && { stats }), ...(news !== undefined && { news }) });
 }
 
 export interface WriteOptions {
@@ -45,11 +47,13 @@ export interface WriteOptions {
   league?: boolean;
   /** Also write the stats (default true). Autosaves skip them unless they changed. */
   stats?: boolean;
+  /** Also write the news (default true). Autosaves skip it unless it changed. */
+  news?: boolean;
 }
 
 /** Writes a save, moving the previous one into the rolling backups. */
 export async function writeSave(save: SaveData, opts: WriteOptions = {}): Promise<void> {
-  const { backup = true, league = true, stats = true } = opts;
+  const { backup = true, league = true, stats = true, news = true } = opts;
   const d = await db();
   const tx = d.transaction(STORE, 'readwrite');
   if (backup) {
@@ -57,15 +61,17 @@ export async function writeSave(save: SaveData, opts: WriteOptions = {}): Promis
     if (prev) {
       const prevLeague = await tx.store.get(LEAGUE);
       const prevStats = await tx.store.get(STATS);
-      const previous = { ...prev, ...(prevLeague !== undefined && { league: prevLeague }), ...(prevStats !== undefined && { stats: prevStats }) };
+      const prevNews = await tx.store.get(NEWS);
+      const previous = { ...prev, ...(prevLeague !== undefined && { league: prevLeague }), ...(prevStats !== undefined && { stats: prevStats }), ...(prevNews !== undefined && { news: prevNews }) };
       const backups = ((await tx.store.get(BACKUPS)) as SaveData[] | undefined) ?? [];
       await tx.store.put(rotateBackups(backups, previous), BACKUPS);
     }
   }
   // The save without its league; the league goes under its own key.
-  await tx.store.put({ ...save, league: null, stats: null, updatedAt: new Date().toISOString() }, CURRENT);
+  await tx.store.put({ ...save, league: null, stats: null, news: null, updatedAt: new Date().toISOString() }, CURRENT);
   if (league) await tx.store.put(save.league, LEAGUE);
   if (stats) await tx.store.put(save.stats, STATS);
+  if (news) await tx.store.put(save.news, NEWS);
   await tx.done;
 }
 
