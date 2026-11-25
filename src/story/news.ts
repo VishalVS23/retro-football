@@ -14,6 +14,7 @@ import { statSummary } from '../league/leaders';
 import { ratingText } from '../league/gameRatings';
 import type { BoxScore } from '../league/boxScore';
 import { readGame, writeRecap } from './recap';
+import { emptyRecords, sanitizeRecords, weekMilestones, type RecordBook } from './milestones';
 
 export type NewsKind = 'roundup' | 'potw' | 'race' | 'playoffs' | 'champion' | 'preview' | 'recap' | 'milestone';
 
@@ -40,6 +41,8 @@ export interface NewsStore {
   items: NewsItem[];
   /** Things already announced (e.g. "clinch:2:14"), so each is said once. */
   flags: string[];
+  /** 5c: league records, single game and single season (kept across seasons). */
+  records?: RecordBook;
 }
 
 export interface NewsTeam {
@@ -353,6 +356,11 @@ export function weekNews(store: NewsStore, ctx: NewsContext, week: number, confe
     const potw = playersOfWeek(ctx, week, conferenceNames);
     if (potw) items.push(potw);
   }
+  // 5c: big games, season milestones, league records.
+  const ms = weekMilestones(ctx.season, week, ctx.boxes, store.records ?? emptyRecords(), store.flags, ctx.userTeamId, (id) => ctx.player(id)?.position);
+  if (ms.body.length) items.push({ year: ctx.season.year, week, kind: 'milestone', title: ms.record ? 'NEW LEAGUE RECORD!' : 'BIG GAMES & MILESTONES', body: ms.body, ...(ms.mine && { mine: true }) });
+  flags.push(...ms.flags);
+  store = { ...store, records: ms.records };
   const rc = race(store, ctx, week);
   items.push(...rc.items);
   flags.push(...rc.flags);
@@ -440,7 +448,7 @@ export function sanitizeNews(v: unknown): NewsStore {
   const maxId = items.reduce((m, x) => Math.max(m, x.id), 0);
   const nextId = Number.isInteger(o.nextId) && (o.nextId as number) > maxId ? (o.nextId as number) : maxId + 1;
   const flags = Array.isArray(o.flags) ? o.flags.filter((f): f is string => typeof f === 'string') : [];
-  return { nextId, items, flags };
+  return o.records !== undefined ? { nextId, items, flags, records: sanitizeRecords(o.records) } : { nextId, items, flags };
 }
 
 /** Splits text into plain parts and tokens, for the inbox to render. */
