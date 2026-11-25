@@ -12,6 +12,7 @@ import type { Player } from '../players/player';
 import type { AttributeKey } from '../players/attributes';
 import type { Snap } from '../sim/oppDrive';
 import type { Rng } from '../sim/rng';
+import type { ScoreInfo } from '../story/scoring';
 import type { DefenseLineup, KickingUnit, OffenseLineup } from './lineup';
 
 /** Short keys (box scores are stored for every game of the season). */
@@ -136,7 +137,8 @@ function catchTackler(def: DefenseLineup, to: number, yards: number, rng: Rng): 
  * Credits one simulated drive's snaps: `u` = the team with the ball (its lines in `off`), `d` = the
  * defense (its lines in `def`: tackles, sacks, picks go to the defending team's box). Mutates both.
  */
-export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: StatUnit, d: StatUnit, rng: Rng) {
+export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: StatUnit, d: StatUnit, rng: Rng, onScore?: (info: ScoreInfo) => void) {
+  const pid = (p: Player | null | undefined) => (p && p.id >= 0 ? p.id : undefined);
   const qb = u.off.qb;
   const c = CREDIT;
   for (const s of snaps) {
@@ -146,8 +148,10 @@ export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: S
         add(off, carrier, 'ra');
         add(off, carrier, 'ry', s.yards);
         best(off, carrier, 'rl', s.yards);
-        if (s.td) add(off, carrier, 'rtd');
-        else {
+        if (s.td) {
+          add(off, carrier, 'rtd');
+          onScore?.({ kind: 'runTd', yards: s.yards, by: pid(carrier) });
+        } else {
           const tk = runTackler(d.def, s.yards, rng);
           add(def, tk, 'tk');
           if (s.fumble) {
@@ -170,6 +174,7 @@ export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: S
         if (s.td) {
           add(off, qb, 'ptd');
           add(off, rec, 'rctd');
+          onScore?.({ kind: 'passTd', yards: s.yards, by: pid(rec), qb: pid(qb) });
         } else {
           const tk = catchTackler(d.def, to, s.yards, rng);
           add(def, tk, 'tk');
@@ -213,6 +218,7 @@ export function creditSnaps(off: Lines, def: Lines, snaps: readonly Snap[], u: S
         if (s.good) {
           add(off, u.kick.k, 'fgm');
           best(off, u.kick.k, 'fgl', s.yards);
+          onScore?.({ kind: 'fg', yards: s.yards, by: pid(u.kick.k) });
         }
         break;
       case 'try':

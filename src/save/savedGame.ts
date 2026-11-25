@@ -12,6 +12,7 @@ import type { GameStats, QbLine, SideStats } from '../sim/gameStats';
 import { sanitizeScouting, type Scouting } from '../sim/scouting';
 import { FORMATION_IDS, type FormationId } from '../sim/formation';
 import { sanitizeLines, type Lines } from '../league/playerStats';
+import { sanitizeScoring, type ScoringPlay } from '../story/scoring';
 
 export interface SavedGame {
   match: GameState;
@@ -29,6 +30,8 @@ export interface SavedGame {
   seasonGameId?: number;
   /** 4b-2: each player's line so far (ours, theirs). Missing in older saves = start from nothing. */
   lines?: { us: Lines; them: Lines };
+  /** 5b: the scoring plays so far (side 0 = us). Missing in older saves = none. */
+  scoring?: ScoringPlay[];
 }
 
 /** Nothing has happened yet (no snaps, no points, full first quarter): not worth a CONTINUE. */
@@ -124,6 +127,8 @@ export function sanitizeSavedGame(raw: unknown, playCount = Infinity): SavedGame
     const them = sanitizeLines(raw.lines.them);
     if (us && them) game.lines = { us, them };
   }
+  const scoring = sanitizeScoring(raw.scoring);
+  if (scoring) game.scoring = scoring;
   if (typeof raw.formation === 'string' && (FORMATION_IDS as readonly string[]).includes(raw.formation)) game.formation = raw.formation as FormationId;
   return snapshotGame(game);
 }

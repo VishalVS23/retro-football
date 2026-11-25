@@ -172,6 +172,7 @@ import {
   type ClockState,
 } from '../sim/clock';
 import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setNews, setSeason, whenSaveReady } from '../save/saveSession';
+import { addScore, flipScoring, logScoring, type ScoreInfo, type ScoringPlay } from '../story/scoring';
 import { emptyNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
 import { adjustSpeedFor, levers, sanitizeDifficulty, withDifficulty, type DifficultyId } from '../sim/difficulty';
 import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
@@ -367,6 +368,9 @@ export class FieldScene extends Phaser.Scene {
   private leagueStats: StatsStore = emptyStats();
   /** 5a: the inbox. */
   private news: NewsStore = emptyNews();
+  /** 5b: this game's scoring plays (side 0 = us), and how the last live play scored (if it did). */
+  private scoring: ScoringPlay[] = [];
+  private lastScore: ScoreInfo | null = null;
   private scoreboard!: Phaser.GameObjects.Text;
   /** The defense's look at the line (LOOKS LIKE: ...), under the scoreboard until the snap. */
   private readText!: Phaser.GameObjects.Text;
@@ -1228,6 +1232,16 @@ export class FieldScene extends Phaser.Scene {
   /** New game state after a play or a kick, then the clock (`stops` = this play stops it). */
   private finishPlay(state: GameState, event: DriveEvent, stops: boolean) {
     this.stats = addPoints(recordEvent(this.stats, event), this.statPeriod(), state.us - this.match.us, state.them - this.match.them);
+    // 5b: the scoring log. A try (1 or 2 points right after our touchdown) folds into it.
+    const dUs = state.us - this.match.us;
+    const dThem = state.them - this.match.them;
+    const score: [number, number] = [state.us, state.them];
+    const known = this.lastScore && (dUs >= 6 ? this.lastScore.kind !== 'fg' : dUs === 3 && this.lastScore.kind === 'fg') ? this.lastScore : undefined;
+    this.logPoints(0, dUs, score, this.statPeriod(), event === 'safety' && dUs === 2 ? { kind: 'safety' } : (known ?? (dUs >= 6 ? { kind: 'td' } : undefined)));
+    const theirKind: ScoreInfo | undefined =
+      event === 'pickSix' ? { kind: 'pickSix' } : event === 'fumbleTD' ? { kind: 'fumbleTd' } : event === 'puntReturnTD' ? { kind: 'returnTd' } : event === 'safety' ? { kind: 'safety' } : dThem === 2 ? { kind: 'twoPt' } : undefined;
+    this.logPoints(1, dThem, score, this.statPeriod(), theirKind);
+    this.lastScore = null;
     if (this.clock.ot && possessionOver(event, state)) this.otOursDone = true;
     this.match = state;
     if (state.tryPending) {
@@ -2154,7 +2168,8 @@ export class FieldScene extends Phaser.Scene {
       stats = addPoints(stats, e.period, e.side === 0 ? e.points : 0, e.side === 1 ? e.points : 0);
     }
     const units = this.statUnits();
-    if (units) creditLog([this.lines.us, this.lines.them], result.log, units, this.creditRng());
+    const infos = units ? creditLog([this.lines.us, this.lines.them], result.log, units, this.creditRng()) : [];
+    this.scoring = logScoring(result.log, infos, [this.match.us, this.match.them], this.scoring); // 5b
     this.stats = stats;
     this.match = { ...this.match, us: result.score[0], them: result.score[1], tryPending: false, oppStartX: null };
     this.nextClock = null;
@@ -2263,8 +2278,9 @@ export class FieldScene extends Phaser.Scene {
     this.setClock(r.clock, r.event);
     this.pendingBreak = r.event;
     const after = applyOppDrive(this.match, drive);
-    this.creditCpuDrive(drive);
+    const info = this.creditCpuDrive(drive);
     this.stats = addPoints(recordTheirDrive(this.stats, drive), r.clock.quarter, after.us - this.match.us, after.them - this.match.them);
+    this.logPoints(1, after.them - this.match.them, [after.us, after.them], r.clock.quarter, info);
     this.match = after;
     this.updateScoreboard();
     this.updateLabel();
@@ -2349,6 +2365,7 @@ export class FieldScene extends Phaser.Scene {
       const good = rng.chance(feel.oppDrive.twoPointChance);
       const pts = good ? 2 : 0;
       this.stats = addPoints(this.stats, this.statPeriod(), 0, pts);
+      this.logPoints(1, pts, [this.match.us, this.match.them + pts], this.statPeriod(), { kind: 'twoPt' });
       this.match = { ...this.match, them: this.match.them + pts };
       this.bannerThen(`${this.theirAbbr()} 2-PT: ${good ? 'GOOD' : 'NO GOOD'}`, () => this.overtimeNext());
       return;
@@ -2357,8 +2374,9 @@ export class FieldScene extends Phaser.Scene {
     const m = this.match;
     const sit = { quarter: 5, timeLeft: 1e6, quarterLength: feel.clock.quarterLength, us: m.us, them: m.them, overtime: true };
     const drive = simulateOppDrive(OWN_GOAL_LINE_X + 25, sit, feel.oppDrive, rng, this.cpuDriveMods());
-    this.creditCpuDrive(drive);
+    const info = this.creditCpuDrive(drive);
     this.stats = addPoints(recordTheirDrive(this.stats, drive), this.statPeriod(), 0, drive.points);
+    this.logPoints(1, drive.points, [m.us, m.them + drive.points], this.statPeriod(), info);
     this.match = { ...m, them: m.them + drive.points };
     this.updateScoreboard();
     this.updateLabel();
@@ -2488,6 +2506,8 @@ export class FieldScene extends Phaser.Scene {
     this.clock = newClock(feel.clock);
     this.stats = newGameStats();
     this.lines = { us: {}, them: {} };
+    this.scoring = [];
+    this.lastScore = null;
     this.scouting = newScouting();
     this.otOursDone = false;
     this.nextStep = null;
@@ -2923,7 +2943,7 @@ export class FieldScene extends Phaser.Scene {
     const copy = (l: Lines): Lines => JSON.parse(JSON.stringify(l)) as Lines;
     const us: TeamBox = { teamId: me, stats: { ...this.stats.us }, byPeriod: [...this.stats.byQuarter.us], lines: copy(this.lines.us) };
     const them: TeamBox = { teamId: opp, stats: { ...this.stats.them }, byPeriod: [...this.stats.byQuarter.them], lines: copy(this.lines.them) };
-    const box: BoxScore = { gameId, teams: weAreHome ? [us, them] : [them, us] };
+    const box: BoxScore = { gameId, teams: weAreHome ? [us, them] : [them, us], scoring: weAreHome ? [...this.scoring] : flipScoring(this.scoring) };
     // 4d: every starter's rating for the game.
     const units = this.statUnits();
     return units ? withRatings(box, weAreHome ? units : [units[1], units[0]]) : box;
@@ -2976,6 +2996,16 @@ export class FieldScene extends Phaser.Scene {
   private credit(p: LivePlay, onTry = this.match.tryPending) {
     if (onTry && p.k !== 'xp') return;
     creditLive(this.lines.us, this.lines.them, p);
+    // 5b: who scored, for the scoring log (finishPlay adds it once the points are on the board).
+    const id = (x: Player | null | undefined) => (x && x.id >= 0 ? x.id : undefined);
+    if (p.k === 'catch' && p.td) this.lastScore = { kind: 'passTd', yards: p.yards, by: id(p.to), qb: id(p.qb) };
+    else if (p.k === 'run' && p.td) this.lastScore = { kind: 'runTd', yards: p.yards, by: id(p.carrier) };
+    else if (p.k === 'fg' && p.good) this.lastScore = { kind: 'fg', yards: p.yards, by: id(p.kicker) };
+  }
+
+  /** 5b: points on the board in a game we play: into the scoring log (side 0 = us). */
+  private logPoints(side: 0 | 1, points: number, score: [number, number], period: number, info?: ScoreInfo) {
+    if (points > 0) this.scoring = addScore(this.scoring, side, period, points, score, info);
   }
 
   /** Their defender at index i of [corners / LBs 0-4, S1, S2, rushers 0-3] (the chase and pass-contest order). */
@@ -2999,9 +3029,11 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** A simulated CPU drive in our game: their offense and our defense get the credit. */
-  private creditCpuDrive(drive: { snaps: Parameters<typeof creditSnaps>[2] }) {
+  private creditCpuDrive(drive: { snaps: Parameters<typeof creditSnaps>[2] }): ScoreInfo | undefined {
     const u = this.statUnits();
-    if (u) creditSnaps(this.lines.them, this.lines.us, drive.snaps, u[1], u[0], this.creditRng());
+    const got: { info?: ScoreInfo } = {};
+    if (u) creditSnaps(this.lines.them, this.lines.us, drive.snaps, u[1], u[0], this.creditRng(), (x) => (got.info = x));
+    return got.info;
   }
 
   /** 4a: sims every other game of this week in the background, moves on a week, and shows the scores. */
@@ -3037,6 +3069,8 @@ export class FieldScene extends Phaser.Scene {
     this.clock = g.clock;
     this.stats = g.stats;
     this.lines = g.lines ?? { us: {}, them: {} };
+    this.scoring = g.scoring ?? [];
+    this.lastScore = null;
     this.scouting = sanitizeScouting(g.scouting);
     this.playIndex = g.playIndex;
     this.formationId = g.formation ?? 'normal';
@@ -3055,7 +3089,7 @@ export class FieldScene extends Phaser.Scene {
   private autosaveGame() {
     if (!this.autosave || this.nextClock || this.pendingBreak || this.finishBreak || this.nextStep) return;
     if (this.match.oppStartX !== null || this.state === 'gameOver') return;
-    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId, lines: this.lines };
+    const game: SavedGame = { match: this.match, clock: this.clock, stats: this.stats, playIndex: this.playIndex, scouting: this.scouting, formation: this.formationId, lines: this.lines, scoring: this.scoring };
     if (this.opponentId !== null) game.opponentId = this.opponentId;
     if (this.seasonGameId !== null) game.seasonGameId = this.seasonGameId;
     void saveGameInProgress(isFreshGame(game, feel.clock.quarterLength) ? null : game);

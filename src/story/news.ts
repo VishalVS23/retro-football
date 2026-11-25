@@ -13,6 +13,7 @@ import { ROUND_NAMES, championOf, roundOfWeek } from '../league/playoffs';
 import { statSummary } from '../league/leaders';
 import { ratingText } from '../league/gameRatings';
 import type { BoxScore } from '../league/boxScore';
+import { readGame, writeRecap } from './recap';
 
 export type NewsKind = 'roundup' | 'potw' | 'race' | 'playoffs' | 'champion' | 'preview' | 'recap' | 'milestone';
 
@@ -310,6 +311,35 @@ function champion(store: NewsStore, ctx: NewsContext, week: number) {
 }
 
 /**
+ * 5b: game recaps. Short ones for the most notable games around the league (the Championship in full,
+ * comebacks, upsets, overtime; at most 2), then the user's game in full, last (the newest message,
+ * so it's the headline on the week card).
+ */
+function recaps(ctx: NewsContext, week: number, rng: Rng): Omit<NewsItem, 'id'>[] {
+  const me = ctx.userTeamId;
+  const games = gamesInWeek(ctx.season, week).filter((g) => g.score && ctx.boxes[g.id]);
+  const rc = (g: SeasonGame) => ({ game: g, box: ctx.boxes[g.id], teams: ctx.teams, player: ctx.player, userTeamId: me });
+  const year = ctx.season.year;
+  const mine = games.find((g) => g.home === me || g.away === me);
+  const scored = games
+    .filter((g) => g !== mine)
+    .map((g) => {
+      const r = result(g);
+      const st = readGame(ctx.boxes[g.id], [g.score![0], g.score![1]], g.ot ?? 0);
+      const gap = r.tie ? 0 : ctx.teams[r.loser].stars - ctx.teams[r.winner].stars;
+      const final = roundOfWeek(g.week) === 4;
+      const score = final ? 100 : (st.deficit >= 14 ? 20 + st.deficit : 0) + (gap >= 2 ? 10 + gap : 0) + (g.ot ? 8 : 0);
+      return { g, score, final };
+    })
+    .filter((x) => x.score > 0)
+    .sort((x, y) => y.score - x.score || x.g.id - y.g.id)
+    .slice(0, 2);
+  const out = scored.map((x) => ({ ...writeRecap(rc(x.g), rng, x.final), year }));
+  if (mine) out.push({ ...writeRecap(rc(mine), rng, true), year });
+  return out;
+}
+
+/**
  * Everything the week just played produced: results, players of the week, the playoff race, the
  * playoff field (after week 18), the champion. `conferenceNames` short (e.g. KEYSTONE).
  */
@@ -336,6 +366,7 @@ export function weekNews(store: NewsStore, ctx: NewsContext, week: number, confe
     items.push(ch.item);
     flags.push(ch.flag);
   }
+  items.push(...recaps(ctx, week, rng));
   const out = add(store, items);
   return flags.length ? { ...out, flags: [...out.flags, ...flags] } : out;
 }

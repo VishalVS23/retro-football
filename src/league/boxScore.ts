@@ -8,6 +8,7 @@ import type { Rng } from '../sim/rng';
 import { rateGame } from './gameRatings';
 import type { SeasonSummary } from './playoffs';
 import { addLine, creditSnaps, regroupLines, sanitizeLines, type Lines, type StatUnit } from './playerStats';
+import { logScoring, sanitizeScoring, type ScoreInfo, type ScoringPlay } from '../story/scoring';
 
 export interface TeamBox {
   teamId: number;
@@ -23,6 +24,8 @@ export interface BoxScore {
   gameId: number;
   /** [home, away]. */
   teams: [TeamBox, TeamBox];
+  /** 5b: the scoring plays in order (sides as `teams`). Missing in games before 5b. */
+  scoring?: ScoringPlay[];
 }
 
 /** Box scores of the season so far, by game id. */
@@ -48,8 +51,8 @@ export function boxFromSim(gameId: number, result: SimGameResult, teamIds: [numb
     me.byPeriod[i] += e.points;
     if (e.drive) me.stats = addDrive(me.stats, e.drive);
   }
-  creditLog([teams[0].lines, teams[1].lines], result.log, units, rng);
-  return withRatings({ gameId, teams }, units);
+  const infos = creditLog([teams[0].lines, teams[1].lines], result.log, units, rng);
+  return withRatings({ gameId, teams, scoring: logScoring(result.log, infos) }, units);
 }
 
 /** The box score with every starter's game rating added (4d; `units` in the box's team order). */
@@ -62,14 +65,19 @@ export function withRatings(box: BoxScore, units: [StatUnit, StatUnit]): BoxScor
  * Player credit for a sim log (whole games, and the simmed parts of a game the user plays: CPU
  * drives, SIM): side 0's lines first. Mutates `lines`.
  */
-export function creditLog(lines: [Lines, Lines], log: SimGameResult['log'], units: [StatUnit, StatUnit], rng: Rng) {
+export function creditLog(lines: [Lines, Lines], log: SimGameResult['log'], units: [StatUnit, StatUnit], rng: Rng): (ScoreInfo | undefined)[] {
+  // 5b: how each entry's points came (the drive's touchdown or field goal), for the scoring log.
+  const infos: (ScoreInfo | undefined)[] = [];
   for (const e of log) {
     const other = (1 - e.side) as 0 | 1;
-    if (e.drive) creditSnaps(lines[e.side], lines[other], e.drive.snaps, units[e.side], units[other], rng);
+    const got: { info?: ScoreInfo } = {};
+    if (e.drive) creditSnaps(lines[e.side], lines[other], e.drive.snaps, units[e.side], units[other], rng, (x) => (got.info = x));
     else if (e.try?.kind === 'extraPoint')
       // A try on its own (after a touchdown scored before the sim took over).
       creditSnaps(lines[e.side], lines[other], [{ k: 'try', kind: 'extraPoint', good: e.try.good }], units[e.side], units[other], rng);
+    infos.push(got.info);
   }
+  return infos;
 }
 
 /**
@@ -152,6 +160,8 @@ export function sanitizeBoxScores(raw: unknown): BoxScores | null {
       teams.push(team);
     }
     out[box.gameId] = { gameId: box.gameId, teams: [teams[0], teams[1]] };
+    const scoring = sanitizeScoring((box as { scoring?: unknown }).scoring);
+    if (scoring) out[box.gameId].scoring = scoring;
   }
   return out;
 }
