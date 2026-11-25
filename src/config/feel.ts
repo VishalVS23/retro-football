@@ -894,7 +894,7 @@ export const feel = {
     /** QB miss oval x this. */
     hardScatterScale: 1.4,
     /** Catch zones (normal and bullet) x this. */
-    hardCatchScale: 0.85,
+    hardCatchScale: 0.5,
     /** Pass-block time (pocket.shedTime) x this. */
     hardPocketScale: 0.92,
     /** CPU drives in your games: oppDrive.strength x this. */
