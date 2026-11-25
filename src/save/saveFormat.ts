@@ -13,7 +13,7 @@ import { emptyStats, sanitizeStats, type StatsStore } from '../league/boxScore';
 import { sanitizeDifficulty, type DifficultyId } from '../sim/difficulty';
 import { emptyNews, sanitizeNews, type NewsStore } from '../story/news';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 export const MAX_BACKUPS = 3;
 
 export interface SaveData {
@@ -82,6 +82,9 @@ const MIGRATIONS: Record<number, (s: AnySave) => AnySave> = {
   5: (s) => ({ ...s, version: 6, difficulty: 'normal' }),
   // 6 -> 7: the inbox. Older saves start with an empty one.
   6: (s) => ({ ...s, version: 7, news: emptyNews() }),
+  // 7 -> 8: contracts and the salary cap (on each player in the league). Older leagues get their
+  // contracts the next time the game loads (`ensureContracts`), so nothing to change here.
+  7: (s) => ({ ...s, version: 8 }),
 };
 
 export class SaveError extends Error {}

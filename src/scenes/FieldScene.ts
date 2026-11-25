@@ -174,7 +174,7 @@ import {
 import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setNews, setSeason, whenSaveReady } from '../save/saveSession';
 import { addScore, flipScoring, logScoring, type ScoreInfo, type ScoringPlay } from '../story/scoring';
 import { LABEL, REC_KEYS, emptyRecords, type RecordEntry } from '../story/milestones';
-import { emptyNews, loreNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
+import { contractNews, emptyNews, loreNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
 import { adjustSpeedFor, levers, sanitizeDifficulty, withDifficulty, type DifficultyId } from '../sim/difficulty';
 import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
 import { afterWeek, championOf, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
@@ -192,6 +192,8 @@ import { hexToNumber, kitColors } from '../league/colors';
 import { CONFERENCES, DIVISIONS } from '../league/teams';
 import { closeChooseTeam, openChooseTeam } from '../ui/chooseTeam';
 import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
+import { canRelease, capFor, capHit, ensureContracts, fillRosters, money, releasePlayer, startContractYear } from '../finance/contracts';
+import { capView, contractView } from '../finance/capView';
 import { practiceRows, rosterRows } from '../league/rosterView';
 import { LEADER_CATS, gameLog, leaders, pastSeasons, playerTotals, ratingLeaders, statSummary, teamTotals } from '../league/leaders';
 import type { PlayerStatsInfo } from '../ui/teamScreen';
@@ -2473,6 +2475,8 @@ export class FieldScene extends Phaser.Scene {
           void setSeason(this.season, this.leagueStats);
         }
       }
+      // 6a: every player has a contract (a new league, or a save from before contracts).
+      if (ensureContracts(league, save.seed, this.season.year)) void setLeague(league);
       // 5c: the league's story (the old league folded; its records live on), once per save.
       const told = loreNews(this.news, this.season.year);
       if (told !== this.news) {
@@ -2675,17 +2679,22 @@ export class FieldScene extends Phaser.Scene {
   }
 
   /** TEAM: the roster screen over the play calling screen (which stays as it was underneath). */
-  private openTeam() {
+  private openTeam(fromSeason = false) {
     const l = this.league;
     if (!l || l.userTeamId === null) return;
-    this.openTeamOf(l.userTeamId);
+    this.openTeamOf(l.userTeamId, undefined, fromSeason);
   }
 
-  /** A team's TEAM screen; with `playerId`, straight on his STATS tab (4c: tapped in the league leaders). */
-  private openTeamOf(teamId: number, playerId?: number) {
+  /**
+   * A team's TEAM screen; with `playerId`, straight on his STATS tab (4c: tapped in the league leaders).
+   * `fromSeason`: opened from the season screen (not during a game), so the user may release his own players (6a).
+   */
+  private openTeamOf(teamId: number, playerId?: number, fromSeason = false, startView?: 'cap') {
     const l = this.league;
     if (!l) return;
     const t = l.teams[teamId];
+    const year = this.season?.year ?? 1;
+    const mine = fromSeason && teamId === l.userTeamId;
     openTeamScreen({
       team: { abbr: t.abbr, city: t.city, nickname: t.nickname, color: t.colors[0] },
       roster: rosterRows(l, t.id),
@@ -2693,6 +2702,38 @@ export class FieldScene extends Phaser.Scene {
       onClose: () => {},
       statsFor: (id) => this.playerStats(id, t.id),
       ...(playerId !== undefined && { startPlayerId: playerId, startTab: 'stats' as const }),
+      ...(startView && { startView }),
+      finance: {
+        cap: () => capView(l, t.id, year),
+        contract: (id) => contractView(l, t.id, id, year, mine),
+        onRelease: (id) => {
+          if (!mine || !canRelease(l, t.id, id).ok) return;
+          releasePlayer(l, t.id, id, year);
+          void setLeague(l);
+          // The lineups come from the rosters: work them out again before the next game.
+          this.applyTeams();
+          this.openTeamOf(teamId, undefined, fromSeason, 'cap');
+        },
+      },
+    });
+  }
+
+  /** 6a: START NEXT SEASON: contracts that ran out re-sign or leave, rosters are filled; news for the user. */
+  private newContractYear(year: number) {
+    const l = this.league!;
+    const me = l.userTeamId!;
+    const done = startContractYear(l, this.saveSeed, year);
+    const signed = fillRosters(l, this.saveSeed, year, me);
+    const hit = (id: number) => {
+      const c = l.players[id].contract;
+      return c ? `${money(capHit(c, year))}, ${c.years} YR${c.years === 1 ? '' : 'S'}` : '';
+    };
+    const tag = (id: number) => ({ id, text: `${l.players[id].position}, ${hit(id) || 'free agent'}` });
+    this.news = contractNews(this.news, year, {
+      resigned: done[me].resigned.map(tag),
+      left: done[me].left.map((id) => ({ id, text: l.players[id].position })),
+      signed: signed.filter((s) => s.teamId === me).map((s) => tag(s.playerId)),
+      cap: money(capFor(year)),
     });
   }
 
@@ -2851,17 +2892,22 @@ export class FieldScene extends Phaser.Scene {
         this.season = next;
         // The finished season's box scores become each player's season totals (keeps the save small).
         this.leagueStats = closeSeasonStats(this.leagueStats, s.year);
-        // 5a: last season's news stays a year; the new season's preview.
-        this.news = this.seasonPreview(pruneNews(this.news, next.year), next, championOf(s)?.champion);
+        // 5a: last season's news stays a year.
+        this.news = pruneNews(this.news, next.year);
+        // 6a: contracts that ran out (re-signed or gone), then teams fill their rosters.
+        this.newContractYear(next.year);
+        // The new season's preview (after the roster changes).
+        this.news = this.seasonPreview(this.news, next, championOf(s)?.champion);
+        void setLeague(l);
         void setSeason(next, this.leagueStats, this.news);
         this.openSeason();
       },
-      onTeam: () => this.openTeam(),
+      onTeam: () => this.openTeam(true),
       pastSeasons: this.leagueStats.seasons ?? [],
       stats: () => this.seasonStats(),
       onPlayer: (id) => {
         const team = l.teams.find((t) => t.roster.includes(id) || t.practice.includes(id));
-        if (team) this.openTeamOf(team.id, id);
+        if (team) this.openTeamOf(team.id, id, true);
       },
       hasBox: (id) => !!this.leagueStats.boxes[id],
       onBox: (id) => this.showBoxScore(id),
@@ -2880,7 +2926,7 @@ export class FieldScene extends Phaser.Scene {
           void setNews(this.news);
           return this.news;
         },
-        onTeam: (teamId) => this.openTeamOf(teamId),
+        onTeam: (teamId) => this.openTeamOf(teamId, undefined, true),
       },
     });
   }

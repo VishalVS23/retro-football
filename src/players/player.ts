@@ -9,6 +9,7 @@ import { ATTR_MAX, ATTR_MIN, POSITION_WEIGHTS, type AttributeKey, type Attribute
 import { FAMILIARITY_RATIO, type Familiarity, type Position } from './positions';
 import { personality, type Personality } from './personality';
 import type { TraitId } from './traits';
+import type { Contract } from '../finance/contracts';
 
 export interface Player {
   id: number;
@@ -25,6 +26,8 @@ export interface Player {
   /** Other positions he can play; anything missing is 'awkward'. His own is always 'natural'. */
   familiarity: Partial<Record<Position, Familiarity>>;
   traits: TraitId[];
+  /** 6a: his contract (none = a free agent, or a stand-in). */
+  contract?: Contract;
 }
 
 export const clampAttr = (v: number) => Math.min(ATTR_MAX, Math.max(ATTR_MIN, Math.round(v)));

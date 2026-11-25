@@ -16,7 +16,7 @@ import type { BoxScore } from '../league/boxScore';
 import { readGame, writeRecap } from './recap';
 import { emptyRecords, sanitizeRecords, weekMilestones, type RecordBook } from './milestones';
 
-export type NewsKind = 'roundup' | 'potw' | 'race' | 'playoffs' | 'champion' | 'preview' | 'recap' | 'milestone';
+export type NewsKind = 'roundup' | 'potw' | 'race' | 'playoffs' | 'champion' | 'preview' | 'recap' | 'milestone' | 'contracts';
 
 export interface NewsItem {
   id: number;
@@ -428,6 +428,26 @@ export function loreNews(store: NewsStore, year: number): NewsStore {
   return { ...out, flags: [...out.flags, 'lore'] };
 }
 
+/**
+ * 6a: the user's contract news at the start of a season: who re-signed (and for how much), who
+ * left because the cap had no room for him, who was signed to fill the roster. Money is text
+ * already formatted by the caller.
+ */
+export function contractNews(
+  store: NewsStore,
+  year: number,
+  o: { resigned: { id: number; text: string }[]; left: { id: number; text: string }[]; signed: { id: number; text: string }[]; cap: string },
+): NewsStore {
+  if (!o.resigned.length && !o.left.length && !o.signed.length) return store;
+  const list = (xs: { id: number; text: string }[]) => xs.map((x) => `{p:${x.id}} (${x.text})`).join(', ');
+  const body = [`The cap for season ${year} is ${o.cap}. Contracts that ran out were dealt with automatically (negotiations come later).`];
+  if (o.resigned.length) body.push(`RE-SIGNED: ${list(o.resigned)}.`);
+  if (o.left.length) body.push(`LEFT IN FREE AGENCY (no cap room to keep them): ${list(o.left)}.`);
+  if (o.signed.length) body.push(`SIGNED TO FILL THE ROSTER: ${list(o.signed)}.`);
+  body.push('See every contract on your TEAM screen under CAP.');
+  return add(store, [{ year, week: 0, kind: 'contracts', title: `CONTRACTS: ${o.resigned.length} RE-SIGNED, ${o.left.length} LEFT`, body, mine: true }]);
+}
+
 /** Keep this season and last (older news goes, so the save doesn't grow forever). */
 export function pruneNews(store: NewsStore, year: number): NewsStore {
   return {
@@ -448,7 +468,7 @@ export function markRead(store: NewsStore, id: number | 'all'): NewsStore {
   return { ...store, items: store.items.map((x) => (id === 'all' || x.id === id ? (x.read ? x : { ...x, read: true }) : x)) };
 }
 
-const KINDS: NewsKind[] = ['roundup', 'potw', 'race', 'playoffs', 'champion', 'preview', 'recap', 'milestone'];
+const KINDS: NewsKind[] = ['roundup', 'potw', 'race', 'playoffs', 'champion', 'preview', 'recap', 'milestone', 'contracts'];
 
 /** A damaged or missing store (old save) = an empty one; bad items are dropped. */
 export function sanitizeNews(v: unknown): NewsStore {

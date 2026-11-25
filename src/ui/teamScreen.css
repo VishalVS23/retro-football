@@ -482,3 +482,60 @@
 .ts-rtg.r-ok { background: #ffd166; }
 .ts-rtg.r-poor { background: #f08a3c; }
 .ts-rtg.r-bad { background: #c8323c; color: #fff; }
+
+/* ---------- 6a: CAP view and CONTRACT tab ---------- */
+.ts-capboxes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  max-width: 640px;
+  margin-bottom: 8px;
+}
+.ts-capbox {
+  background: var(--ts-card);
+  border: 2px solid var(--ts-navy);
+  border-radius: 3px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ts-capbox span {
+  font-size: 7px;
+  color: var(--ts-dim);
+}
+.ts-capbox b {
+  font-weight: normal;
+  font-size: 10px;
+}
+.ts-capbox.good b {
+  color: #6be675;
+}
+.ts-capbox.bad b,
+.ts-text.warn {
+  color: #ff7a7a;
+}
+.ts-captable .name {
+  white-space: normal;
+}
+.ts-caprow {
+  cursor: pointer;
+}
+.ts-caprow:hover td {
+  background: #16315e;
+}
+.ts-release {
+  margin-top: 8px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 8px;
+  background: #d64545;
+  color: var(--ts-navy);
+  border: 2px solid var(--ts-navy);
+  border-radius: 3px;
+  box-shadow: 0 3px 0 var(--ts-navy);
+  cursor: pointer;
+}
+.ts-release.confirm {
+  background: var(--ts-gold);
+}

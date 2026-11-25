@@ -12,6 +12,7 @@ import { positionRating, type Player } from '../players/player';
 import { PEAK_AGE, POSITIONS, PRACTICE_MAX, ROSTER_TARGET, STARTERS, type Position } from '../players/positions';
 import { ATTRIBUTE_KEYS, HIDDEN, type Attributes, type Hidden } from '../players/attributes';
 import { TEAM_DEFS, type TeamDef } from './teams';
+import { isContract, type DeadMoney } from '../finance/contracts';
 
 export interface Team extends TeamDef {
   id: number;
@@ -21,6 +22,8 @@ export interface Team extends TeamDef {
   roster: number[];
   /** Practice squad (player ids). */
   practice: number[];
+  /** 6a: money left on the cap by released players. */
+  dead?: DeadMoney[];
 }
 
 export interface League {
@@ -29,6 +32,8 @@ export interface League {
   players: Player[];
   /** The team the user coaches (null = not picked yet). */
   userTeamId: number | null;
+  /** 6a: released players with no team (6c: free agency). */
+  freeAgents?: number[];
 }
 
 /** League generation tuning (not on-field feel, so it lives here rather than in feel.ts). */
@@ -236,6 +241,12 @@ export function sanitizeLeague(raw: unknown): League | null {
   for (let i = 0; i < n; i++) {
     const p = l.players[i];
     if (typeof p !== 'object' || p === null || p.id !== i || typeof p.attributes !== 'object' || typeof p.hidden !== 'object') return null;
+    // 6a: a damaged contract is dropped (a new one is made on load).
+    if (p.contract !== undefined && !isContract(p.contract)) delete p.contract;
+  }
+  if (l.freeAgents !== undefined && !(Array.isArray(l.freeAgents) && l.freeAgents.every(okId))) l.freeAgents = [];
+  for (const t of l.teams) {
+    if (t.dead !== undefined && !(Array.isArray(t.dead) && t.dead.every((d) => d && typeof d.year === 'number' && typeof d.amount === 'number' && Number.isFinite(d.amount)))) t.dead = [];
   }
   const user = l.userTeamId;
   if (!(user === null || (typeof user === 'number' && Number.isInteger(user) && user >= 0 && user < l.teams.length))) return null;

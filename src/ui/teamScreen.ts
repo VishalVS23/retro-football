@@ -17,6 +17,8 @@ import { teamLogoHtml } from './teamLogo';
 import { PROFILE_COLUMNS } from '../league/leaders';
 import { ratingBand } from '../league/gameRatings';
 import type { PlayerLine } from '../league/playerStats';
+import type { CapView, ContractView } from '../finance/capView';
+import { money } from '../finance/contracts';
 
 export interface TeamScreenOptions {
   team: { abbr: string; city: string; nickname: string; color: string };
@@ -28,7 +30,16 @@ export interface TeamScreenOptions {
   /** 4c: open on this player's profile (BACK then closes the screen). */
   startPlayerId?: number;
   /** Start on this tab of that profile. */
-  startTab?: 'overview' | 'ratings' | 'stats';
+  startTab?: 'overview' | 'ratings' | 'stats' | 'contract';
+  /** 6a: open on the CAP view. */
+  startView?: 'cap';
+  /** 6a: contracts and the cap (missing = no CAP view / CONTRACT tab). */
+  finance?: {
+    cap: () => CapView;
+    contract: (playerId: number) => ContractView | null;
+    /** Releases him (the screen is then opened again by the caller). */
+    onRelease: (playerId: number) => void;
+  };
 }
 
 export interface PlayerStatsInfo {
@@ -42,9 +53,9 @@ export interface PlayerStatsInfo {
   past: { year: number; line: PlayerLine }[];
 }
 
-type View = 'roster' | 'practice';
+type View = 'roster' | 'practice' | 'cap';
 type Filter = 'all' | 'offense' | 'defense' | 'special';
-type Tab = 'overview' | 'ratings' | 'stats';
+type Tab = 'overview' | 'ratings' | 'stats' | 'contract';
 
 let close: (() => void) | null = null;
 
@@ -120,7 +131,64 @@ function statsHtml(p: Player, info: PlayerStatsInfo): string {
     ${past}`;
 }
 
-function profileHtml(r: RosterRow, tab: Tab, backLabel: string, stats?: PlayerStatsInfo): string {
+/** 6a: the CAP view: this season's cap, payroll, dead money and space, then every contract. */
+function capHtml(v: CapView): string {
+  const s = v.sheet;
+  const box = (label: string, value: string, cls = '') => `<div class="ts-capbox ${cls}"><span>${label}</span><b>${value}</b></div>`;
+  const floor =
+    s.payroll < s.floor
+      ? `<div class="ts-text warn">UNDER THE MINIMUM SPEND (${money(s.floor)}) BY ${money(s.floor - s.payroll)}.</div>`
+      : `<div class="ts-text">MINIMUM SPEND ${money(s.floor)}. NEXT SEASON: ${money(s.nextCommitted)} ALREADY COMMITTED (CAP ${money(s.nextCap)}).</div>`;
+  const rows = v.rows
+    .map(
+      (r) =>
+        `<tr data-id="${r.id}" class="ts-caprow"><td class="l name">${esc(r.name)}</td><td class="l"><span class="ts-pos pos-${r.pos}">${r.practice ? 'PS' : r.pos}</span></td><td>${r.age}</td><td>${money(r.capHit)}</td><td>${r.yearsLeft}</td><td>${r.dead ? money(r.dead) : '-'}</td></tr>`,
+    )
+    .join('');
+  const dead = v.dead.length
+    ? `<div class="ts-section"><div class="ts-h">DEAD MONEY THIS SEASON</div><table class="ts-stable">${v.dead
+        .map((d) => `<tr class="dim"><td class="l">${esc(d.name)}</td><td>${money(d.amount)}</td></tr>`)
+        .join('')}</table></div>`
+    : '';
+  return `
+    <div class="ts-capboxes">
+      ${box('CAP', money(s.cap))}${box('PAYROLL', money(s.payroll))}${box('DEAD MONEY', money(s.dead))}${box('SPACE', money(s.space), s.space < 0 ? 'bad' : 'good')}
+    </div>
+    ${floor}
+    <div class="ts-section"><div class="ts-h">CONTRACTS (TAP ONE)</div>
+      <table class="ts-stable ts-captable"><tr><th class="l">NAME</th><th class="l">POS</th><th>AGE</th><th>CAP HIT</th><th>YRS</th><th>DEAD IF CUT</th></tr>${rows}</table>
+    </div>
+    ${dead}`;
+}
+
+/** 6a: the CONTRACT tab: each season left, what releasing him would do, and the RELEASE button. */
+function contractHtml(c: ContractView | null, confirm: boolean): string {
+  if (!c) return '<div class="ts-section"><div class="ts-text">NO CONTRACT: A FREE AGENT.</div></div>';
+  const rows = c.rows
+    .map((r) => `<tr><td class="l">SEASON ${r.year}</td><td>${money(r.salary)}</td><td>${money(r.bonus)}</td><td>${money(r.capHit)}</td><td>${r.guaranteed ? money(r.guaranteed) : '-'}</td></tr>`)
+    .join('');
+  const saved = c.saved >= 0 ? `SAVES ${money(c.saved)}` : `COSTS ${money(-c.saved)} MORE`;
+  let release = '';
+  if (c.release) {
+    release = c.release.ok
+      ? `<button type="button" class="ts-release${confirm ? ' confirm' : ''}" data-act="release">${confirm ? 'TAP AGAIN TO RELEASE' : 'RELEASE'}</button>`
+      : `<div class="ts-text">CAN NOT RELEASE: ${esc(c.release.reason)}.</div>`;
+  }
+  return `
+    <div class="ts-section">
+      <div class="ts-h">CONTRACT</div>
+      <div class="ts-text">${c.years}-SEASON DEAL SIGNED IN SEASON ${c.signed}. ${c.yearsLeft} SEASON${c.yearsLeft === 1 ? '' : 'S'} LEFT (THROUGH SEASON ${c.through}).</div>
+      <div class="ts-text">STILL TO COME ${money(c.remaining)}, OF IT GUARANTEED ${money(c.guaranteedLeft)}. MARKET VALUE ABOUT ${money(c.market)} A SEASON.</div>
+      <table class="ts-stable"><tr><th class="l">SEASON</th><th>SALARY</th><th>BONUS</th><th>CAP HIT</th><th>GUAR.</th></tr>${rows}</table>
+    </div>
+    <div class="ts-section">
+      <div class="ts-h">IF RELEASED NOW</div>
+      <div class="ts-text">DEAD MONEY ${money(c.dead)} ON THIS SEASON&#39;S CAP. THIS SEASON IT ${saved}.</div>
+      ${release}
+    </div>`;
+}
+
+function profileHtml(r: RosterRow, tab: Tab, backLabel: string, stats?: PlayerStatsInfo, contract?: { view: ContractView | null; confirm: boolean }): string {
   const p = r.player;
   const ca = currentAbility(p);
   const persona = playerPersonality(p);
@@ -175,17 +243,21 @@ function profileHtml(r: RosterRow, tab: Tab, backLabel: string, stats?: PlayerSt
         <button type="button" role="tab" data-tab="overview" class="${tab === 'overview' ? 'on' : ''}">OVERVIEW</button>
         <button type="button" role="tab" data-tab="ratings" class="${tab === 'ratings' ? 'on' : ''}">RATINGS</button>
         ${stats ? `<button type="button" role="tab" data-tab="stats" class="${tab === 'stats' ? 'on' : ''}">STATS</button>` : ''}
+        ${contract ? `<button type="button" role="tab" data-tab="contract" class="${tab === 'contract' ? 'on' : ''}">CONTRACT</button>` : ''}
       </div>
-      <div class="ts-tabbody">${tab === 'stats' && stats ? statsHtml(p, stats) : tab === 'ratings' ? ratings : overview}</div>
+      <div class="ts-tabbody">${tab === 'contract' && contract ? contractHtml(contract.view, contract.confirm) : tab === 'stats' && stats ? statsHtml(p, stats) : tab === 'ratings' ? ratings : overview}</div>
     </div>`;
 }
 
 export function openTeamScreen(o: TeamScreenOptions) {
   closeTeamScreen();
-  let view: View = 'roster';
+  let view: View = o.startView && o.finance ? o.startView : 'roster';
   let filter: Filter = 'all';
   let tab: Tab = o.startTab ?? 'overview';
   let player: RosterRow | null = null;
+  /** 6a: RELEASE was tapped once (the next tap releases). */
+  let confirm = false;
+  const findRow = (id: number) => o.roster.find((r) => r.player.id === id) ?? o.practice.find((r) => r.player.id === id) ?? null;
   if (o.startPlayerId !== undefined) {
     player = o.roster.find((r) => r.player.id === o.startPlayerId) ?? null;
     if (!player) {
@@ -202,19 +274,27 @@ export function openTeamScreen(o: TeamScreenOptions) {
         <div class="ts-team">${teamLogoHtml(o.team.abbr, o.team.color, 44)}<span>${esc(o.team.abbr)}</span></div>
         <button type="button" class="ts-nav" data-view="roster">ROSTER</button>
         <button type="button" class="ts-nav" data-view="practice">PRACTICE</button>
+        ${o.finance ? '<button type="button" class="ts-nav" data-view="cap">CAP</button>' : ''}
         <button type="button" class="ts-back" data-act="close">&lt; BACK</button>
       </nav>
       <main class="ts-main"></main>
     </div>`;
   const main = el.querySelector<HTMLElement>('.ts-main')!;
 
-  const rows = () => (view === 'roster' ? o.roster : o.practice);
+  const rows = () => (view === 'practice' ? o.practice : o.roster);
   const render = () => {
     el.querySelectorAll<HTMLButtonElement>('.ts-nav').forEach((b) => b.classList.toggle('on', b.dataset.view === view && !player));
     if (player) {
-      const backLabel = o.startPlayerId !== undefined ? 'BACK' : view === 'roster' ? 'ROSTER' : 'PRACTICE SQUAD';
-      main.innerHTML = profileHtml(player, tab, backLabel, o.statsFor?.(player.player.id));
-      main.scrollTop = 0;
+      const backLabel = o.startPlayerId !== undefined ? 'BACK' : view === 'roster' ? 'ROSTER' : view === 'cap' ? 'CAP' : 'PRACTICE SQUAD';
+      const contract = o.finance ? { view: o.finance.contract(player.player.id), confirm } : undefined;
+      const top = main.scrollTop;
+      main.innerHTML = profileHtml(player, tab, backLabel, o.statsFor?.(player.player.id), contract);
+      main.scrollTop = confirm ? top : 0;
+      return;
+    }
+    if (view === 'cap' && o.finance) {
+      const cap = o.finance.cap();
+      main.innerHTML = `<div class="ts-head"><div class="ts-title">SALARY CAP · ${esc(o.team.abbr)} · SEASON ${cap.sheet.year}</div></div>${capHtml(cap)}`;
       return;
     }
     const list = rows().filter((r) => view !== 'roster' || filter === 'all' || unitOf(r.position) === filter);
@@ -231,6 +311,7 @@ export function openTeamScreen(o: TeamScreenOptions) {
       <div class="ts-cards">${list.map(cardHtml).join('')}</div>`;
   };
   const back = () => {
+    confirm = false;
     if (player && o.startPlayerId === undefined) {
       player = null;
       render();
@@ -259,6 +340,15 @@ export function openTeamScreen(o: TeamScreenOptions) {
     const tb = t.closest<HTMLElement>('[data-tab]');
     if (tb) {
       tab = tb.dataset.tab as Tab;
+      confirm = false;
+      render();
+      return;
+    }
+    const capRow = t.closest<HTMLElement>('.ts-caprow');
+    if (capRow) {
+      player = findRow(Number(capRow.dataset.id));
+      tab = 'contract';
+      confirm = false;
       render();
       return;
     }
@@ -270,6 +360,17 @@ export function openTeamScreen(o: TeamScreenOptions) {
       return;
     }
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
+    if (act === 'release' && player && o.finance) {
+      if (!confirm) {
+        confirm = true;
+        render();
+        return;
+      }
+      const id = player.player.id;
+      closeTeamScreen();
+      o.finance.onRelease(id);
+      return;
+    }
     if (act === 'list') back();
     if (act === 'close') {
       player = null;
