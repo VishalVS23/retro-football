@@ -173,7 +173,8 @@ import {
 } from '../sim/clock';
 import { getRngOrFallback, saveGameInProgress, setDifficulty, setLeague, setNews, setSeason, whenSaveReady } from '../save/saveSession';
 import { addScore, flipScoring, logScoring, type ScoreInfo, type ScoringPlay } from '../story/scoring';
-import { emptyNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
+import { LABEL, REC_KEYS, emptyRecords, type RecordEntry } from '../story/milestones';
+import { emptyNews, loreNews, markRead, previewNews, pruneNews, weekNews, type NewsStore, type NewsTeam } from '../story/news';
 import { adjustSpeedFor, levers, sanitizeDifficulty, withDifficulty, type DifficultyId } from '../sim/difficulty';
 import { finalPlaces, newSeason, recordResult, recordText, seasonSeed, standingRows, teamGame, type Season } from '../league/season';
 import { afterWeek, championOf, seasonDone, summarize, withPlayoffGames } from '../league/playoffs';
@@ -194,7 +195,7 @@ import { closeTeamScreen, openTeamScreen } from '../ui/teamScreen';
 import { practiceRows, rosterRows } from '../league/rosterView';
 import { LEADER_CATS, gameLog, leaders, pastSeasons, playerTotals, ratingLeaders, statSummary, teamTotals } from '../league/leaders';
 import type { PlayerStatsInfo } from '../ui/teamScreen';
-import type { SeasonStatsData } from '../ui/seasonScreen';
+import type { RecordCell, SeasonStatsData } from '../ui/seasonScreen';
 import { defenseLineup, kickingUnit, offenseLineup, type DefenseLineup, type KickingUnit, type OffenseLineup } from '../league/lineup';
 import { isPressureKick, kickerRules, pressureSweep, punterRules } from '../sim/kickRatings';
 import type { Player } from '../players/player';
@@ -2472,6 +2473,12 @@ export class FieldScene extends Phaser.Scene {
           void setSeason(this.season, this.leagueStats);
         }
       }
+      // 5c: the league's story (the old league folded; its records live on), once per save.
+      const told = loreNews(this.news, this.season.year);
+      if (told !== this.news) {
+        this.news = told;
+        void setNews(this.news);
+      }
       this.newOpponent();
       // The play calling screen opened before the league existed: redraw it so TEAM works.
       if (this.state === 'calling') this.openCall();
@@ -2724,6 +2731,7 @@ export class FieldScene extends Phaser.Scene {
           }),
       })),
       teams: teamTotals(this.leagueStats.boxes, l.teams.length),
+      records: this.recordRows(),
     };
     // 4d: best average game rating, among players rated in at least half their team's games.
     const rated = ratingLeaders(this.leagueStats.boxes, teamTotals(this.leagueStats.boxes, l.teams.length));
@@ -2875,6 +2883,27 @@ export class FieldScene extends Phaser.Scene {
         onTeam: (teamId) => this.openTeamOf(teamId),
       },
     });
+  }
+
+  /** 5c: the record book for STATS > RECORDS (the old league's marks until someone beats them). */
+  private recordRows(): SeasonStatsData['records'] {
+    const l = this.league!;
+    const book = this.news.records ?? emptyRecords();
+    const cell = (e: RecordEntry | undefined, decimals = false): RecordCell => {
+      if (!e) return { value: '-', who: '', when: '' };
+      const value = decimals ? String(e.v) : e.v.toLocaleString('en-US');
+      if (e.name) return { value, who: e.name.toUpperCase(), when: `OLD LEAGUE ${e.era}` };
+      const p = l.players[e.id];
+      const team = l.teams[e.team];
+      return {
+        value,
+        who: `${p ? `${p.firstName[0]}. ${p.lastName}` : 'UNKNOWN'} (${team?.abbr ?? '?'})`.toUpperCase(),
+        when: e.week ? `SEASON ${e.year} · ${weekName(e.week)}` : `SEASON ${e.year}`,
+        ...(p && { playerId: e.id }),
+        ...(e.team === l.userTeamId && { mine: true }),
+      };
+    };
+    return REC_KEYS.map((k) => ({ label: LABEL[k].toUpperCase(), game: cell(book.game[k]), season: { ...cell(book.season[k]), when: book.season[k]?.name ? `OLD LEAGUE ${book.season[k]!.era}` : `SEASON ${book.season[k]?.year ?? ''}` } }));
   }
 
   /** 5a: what the news needs to know about each team: conference, division, stars, rank on paper. */

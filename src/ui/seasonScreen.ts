@@ -66,7 +66,16 @@ export interface SeasonScreenOptions {
   };
 }
 
+/** 5c: one line of the record book: a stat's single-game and single-season records. */
+export interface RecordCell {
+  value: string;
+  who: string;
+  when: string;
+  playerId?: number;
+  mine?: boolean;
+}
 export interface SeasonStatsData {
+  records?: { label: string; game: RecordCell; season: RecordCell }[];
   leaders: { label: string; decimals?: boolean; rows: { id: number; name: string; pos: string; teamId: number; value: number }[] }[];
   teams: TeamTotals[];
 }
@@ -111,7 +120,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
   let weekDetail: number | null = null;
   let busy = false;
   // STATS view (4c).
-  let statsMode: 'players' | 'teams' = 'players';
+  let statsMode: 'players' | 'teams' | 'records' = 'players';
   let cat = 0;
   let teamSort: TeamSort = 'pf';
   let sortFlip = false;
@@ -293,8 +302,18 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     const head = `
       <div class="ss-head">
         <div class="ss-title">STATS · SEASON ${s.year}</div>
-        <div class="ss-chips">${chip('data-mode', 'players', 'PLAYERS', statsMode === 'players')}${chip('data-mode', 'teams', 'TEAMS', statsMode === 'teams')}</div>
+        <div class="ss-chips">${chip('data-mode', 'players', 'PLAYERS', statsMode === 'players')}${chip('data-mode', 'teams', 'TEAMS', statsMode === 'teams')}${d.records ? chip('data-mode', 'records', 'RECORDS', statsMode === 'records') : ''}</div>
       </div>`;
+    if (statsMode === 'records' && d.records) {
+      const cell = (c: RecordCell) =>
+        `<td class="ss-rec${c.mine ? ' mine' : ''}"><b>${esc(c.value)}</b><br>${c.playerId !== undefined ? `<button type="button" class="ss-ref" data-player="${c.playerId}">${esc(c.who)}</button>` : esc(c.who)}<br><span class="ss-recwhen">${esc(c.when)}</span></td>`;
+      return `${head}
+        <table class="ss-table ss-records">
+          <tr><th class="l">RECORD</th><th>SINGLE GAME</th><th>SINGLE SEASON</th></tr>
+          ${d.records.map((r) => `<tr><td class="l">${esc(r.label)}</td>${cell(r.game)}${cell(r.season)}</tr>`).join('')}
+        </table>
+        <div class="ss-note">THE OLD LEAGUE'S MARKS CARRIED OVER WHEN THE LEAGUE WAS REFORMED. BREAK ONE AND IT'S YOURS.</div>`;
+    }
     if (statsMode === 'players') {
       const c = d.leaders[cat];
       const list = c?.rows.length
@@ -475,7 +494,7 @@ export function openSeasonScreen(o: SeasonScreenOptions) {
     }
     const mode = target.closest<HTMLElement>('[data-mode]');
     if (mode) {
-      statsMode = mode.dataset.mode as 'players' | 'teams';
+      statsMode = mode.dataset.mode as 'players' | 'teams' | 'records';
       render();
       return;
     }

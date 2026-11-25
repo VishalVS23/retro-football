@@ -435,6 +435,25 @@
   color: var(--ss-gold);
 }
 
+/* ---------- Records (5c) ---------- */
+.ss-records td {
+  vertical-align: top;
+  line-height: 1.6;
+}
+.ss-rec {
+  text-align: left !important;
+}
+.ss-rec b {
+  color: var(--ss-gold);
+}
+.ss-rec.mine {
+  background: #1a3a6e;
+}
+.ss-recwhen {
+  color: var(--ss-dim);
+  font-size: 7px;
+}
+
 /* ---------- Inbox (5a) ---------- */
 .ss-nav {
   position: relative;

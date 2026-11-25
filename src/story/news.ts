@@ -405,6 +405,29 @@ export function previewNews(store: NewsStore, season: Season, teams: readonly Ne
   return { ...out, flags: [...out.flags, key] };
 }
 
+/**
+ * The lore (user's idea, 2026-11-24): the old league folded and came back as this one, with new teams,
+ * names and logos; its record book carried over. One message, once per save (any season).
+ */
+export function loreNews(store: NewsStore, year: number): NewsStore {
+  if (flagged(store, 'lore')) return store;
+  const out = add(store, [
+    {
+      year,
+      week: 0,
+      kind: 'preview',
+      title: 'A NEW ERA: THE LEAGUE IS REBORN',
+      body: [
+        'The old league played its final season and folded. Its 32 cities came back as a new league: new teams, new names, new colours, new logos.',
+        "One thing carried over: the record book. Every old-league mark is still there to chase, from Cal Whitcomb's 462 passing yards in a game to Hollis Varga's 4,612 in a season.",
+        "See them all in STATS > RECORDS. Break one and it's yours.",
+      ],
+      mine: true,
+    },
+  ]);
+  return { ...out, flags: [...out.flags, 'lore'] };
+}
+
 /** Keep this season and last (older news goes, so the save doesn't grow forever). */
 export function pruneNews(store: NewsStore, year: number): NewsStore {
   return {

@@ -8,8 +8,8 @@ import { afterWeek, seasonDone } from '../league/playoffs';
 import { playerTotals } from '../league/leaders';
 import { teamStars } from '../league/teamStars';
 import type { BoxScore } from '../league/boxScore';
-import { emptyNews, parseNewsText, pruneNews, sanitizeNews, weekNews, type NewsStore, type NewsTeam } from './news';
-import { REC_KEYS, sanitizeRecords } from './milestones';
+import { emptyNews, loreNews, parseNewsText, pruneNews, sanitizeNews, weekNews, type NewsStore, type NewsTeam } from './news';
+import { LEGACY, REC_KEYS, sanitizeRecords } from './milestones';
 
 const rules = { rules: feel.oppDrive, clock: feel.clock };
 const league = generateLeague(4040);
@@ -45,35 +45,43 @@ describe('records and milestones (5c)', () => {
     expect(big.length).toBeLessThan(140);
   });
 
-  it('the record book holds the real best marks of both seasons', () => {
+  it('the record book starts from the old league and holds whichever is higher', () => {
     const rec = news.records!;
+    let broken = 0;
     for (const k of REC_KEYS) {
-      // Best single game (only big games can set a game record).
       const bestGame = Math.max(...allBoxes.flatMap((b) => Object.values(b).flatMap((x) => x.teams.flatMap((t) => Object.values(t.lines).map((l) => l[k] ?? 0)))));
-      if (rec.game[k]) expect(rec.game[k]!.v).toBe(bestGame);
-      // Best season.
+      expect(rec.game[k]!.v).toBe(Math.max(LEGACY.game[k]!.v, bestGame));
       const bestSeason = Math.max(...allBoxes.map((b) => Math.max(...Object.values(playerTotals(b)).map((l) => l[k] ?? 0))));
-      expect(rec.season[k]!.v).toBe(bestSeason);
+      expect(rec.season[k]!.v).toBe(Math.max(LEGACY.season[k]!.v, bestSeason));
+      if (rec.game[k]!.year > 0) broken++;
+      if (rec.season[k]!.year > 0) broken++;
     }
-    expect(Object.keys(rec.game).length).toBeGreaterThan(4);
+    // Sims rarely reach the old marks: they're there for great players to chase.
+    expect(broken).toBeLessThanOrEqual(3);
+    const announced = ms.flatMap((x) => x.body).filter((b) => b.startsWith('LEAGUE RECORD'));
+    expect(announced.length).toBeGreaterThanOrEqual(broken > 0 ? 1 : 0);
+    expect(announced.length).toBeLessThanOrEqual(broken * 2);
+    announced.forEach((b) => expect(b).toMatch(/old record/));
   });
 
-  it('records are only announced from season 2; season records once a season per stat', () => {
+  it("milestones are said once; the old league's story is told once per save", () => {
     const lines = ms.flatMap((x) => x.body.map((b) => ({ year: x.year, b })));
-    const seasonRec = lines.filter((x) => x.b.includes('this season, the most ever'));
-    seasonRec.forEach((x) => expect(x.year).toBe(2));
-    // Game records too: season 1 only builds the book.
-    lines.filter((x) => x.b.startsWith('LEAGUE RECORD')).forEach((x) => expect(x.year).toBe(2));
     const milestones = lines.filter((x) => x.b.startsWith('MILESTONE'));
     expect(new Set(milestones.map((x) => `${x.year}${x.b}`)).size).toBe(milestones.length);
     expect(milestones.length).toBeGreaterThan(3);
-    expect(news.flags.filter((f) => f.startsWith('srec:')).every((f) => f.startsWith('srec:2:'))).toBe(true);
+    const lore = loreNews(emptyNews(), 1);
+    expect(lore.items[0].body[0]).toMatch(/old league/);
+    expect(loreNews(lore, 1)).toBe(lore); // once per save
+    expect(pruneNews(lore, 5).flags).toContain('lore'); // never pruned away, so never said twice
   });
 
   it('tokens valid; records survive a save round trip; junk = empty', () => {
     for (const x of ms) for (const line of [x.title, ...x.body]) for (const part of parseNewsText(line)) if ('player' in part) expect(league.players[part.player]).toBeDefined();
     expect(sanitizeNews(JSON.parse(JSON.stringify(news)))).toEqual(news);
-    expect(sanitizeRecords('x')).toEqual({ game: {}, season: {} });
-    expect(sanitizeRecords({ game: { py: { v: 'a' } }, season: {} })).toEqual({ game: {}, season: {} });
+    expect(sanitizeRecords('x')).toEqual(LEGACY);
+    expect(sanitizeRecords({ game: { py: { v: 'a' } }, season: {} })).toEqual(LEGACY);
+    // A saved mark below the old league's (a save from before the old book) gives way to it; above it stays.
+    expect(sanitizeRecords({ game: { py: { v: 300, id: 4, team: 1, year: 1, week: 2 } }, season: {} }).game.py).toEqual(LEGACY.game.py);
+    expect(sanitizeRecords({ game: { py: { v: 500, id: 4, team: 1, year: 1, week: 2 } }, season: {} }).game.py!.v).toBe(500);
   });
 });
